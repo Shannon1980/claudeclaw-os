@@ -2,6 +2,11 @@
 
 All notable changes to ClaudeClaw will be documented here.
 
+## [unreleased] - 2026-05-04
+
+### Security
+- Rotated `DASHBOARD_TOKEN` to a new cryptographically random 24-byte hex secret. No code changes; update your local `.env` if you have not already.
+
 ## [unreleased] - 2026-05-01
 
 ### Fixed — agent file-send awareness
