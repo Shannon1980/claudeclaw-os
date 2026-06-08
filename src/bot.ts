@@ -1197,9 +1197,19 @@ export function createBot(): Bot {
     const base = DASHBOARD_URL || `http://localhost:${DASHBOARD_PORT}`;
     const url = `${base}/?token=${DASHBOARD_TOKEN}&chatId=${chatIdStr}`;
 
-    const { InlineKeyboard } = await import('grammy');
-    const keyboard = new InlineKeyboard().url('Open Dashboard', url);
-    await ctx.reply('Dashboard', { reply_markup: keyboard });
+    // Telegram rejects localhost / non-routable URLs in inline keyboard buttons.
+    // Detect local/private addresses and send plain text instead.
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    const isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.');
+
+    if (isLocal) {
+      await ctx.reply(`Dashboard URL (open on this machine):\n${url}`);
+    } else {
+      const { InlineKeyboard } = await import('grammy');
+      const keyboard = new InlineKeyboard().url('Open Dashboard', url);
+      await ctx.reply('Dashboard', { reply_markup: keyboard });
+    }
   });
 
   // /stop — interrupt the current agent query

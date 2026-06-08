@@ -373,22 +373,30 @@ async function main(): Promise<void> {
     logger.warn({ err }, 'Could not clear webhook (non-fatal)');
   }
 
-  await bot.start({
-    onStart: (botInfo) => {
-      setTelegramConnected(true);
-      setBotInfo(botInfo.username ?? '', botInfo.first_name ?? 'ClaudeClaw');
-      logger.info({ username: botInfo.username }, 'ClaudeClaw is running');
-      if (AGENT_ID === 'main') {
-        console.log(`\n  ClaudeClaw online: @${botInfo.username}`);
-        if (!ALLOWED_CHAT_ID) {
-          console.log(`  Send /chatid to get your chat ID for ALLOWED_CHAT_ID`);
+  try {
+    await bot.start({
+      onStart: (botInfo) => {
+        setTelegramConnected(true);
+        setBotInfo(botInfo.username ?? '', botInfo.first_name ?? 'ClaudeClaw');
+        logger.info({ username: botInfo.username }, 'ClaudeClaw is running');
+        if (AGENT_ID === 'main') {
+          console.log(`\n  ClaudeClaw online: @${botInfo.username}`);
+          if (!ALLOWED_CHAT_ID) {
+            console.log(`  Send /chatid to get your chat ID for ALLOWED_CHAT_ID`);
+          }
+          console.log();
+        } else {
+          console.log(`\n  ClaudeClaw agent [${AGENT_ID}] online: @${botInfo.username}\n`);
         }
-        console.log();
-      } else {
-        console.log(`\n  ClaudeClaw agent [${AGENT_ID}] online: @${botInfo.username}\n`);
-      }
-    },
-  });
+      },
+    });
+  } catch (err) {
+    setTelegramConnected(false);
+    logger.error(
+      { err },
+      'Telegram polling failed to start. Dashboard and local services remain available.',
+    );
+  }
 }
 
 main().catch((err: unknown) => {
