@@ -3,8 +3,10 @@ import path from 'path';
 
 import { loadAgentConfig, listAgentIds, resolveAgentDir, resolveAgentClaudeMd, refreshWarRoomRoster } from './agent-config.js';
 import { createBot } from './bot.js';
+import { createSlackBot, type SlackBot } from './slack-bot.js';
+import { splitMessage } from './format.js';
 import { checkPendingMigrations } from './migrations.js';
-import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT } from './config.js';
+import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
 import { startDashboard } from './dashboard.js';
 import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
 import { initSecurity, setAuditCallback } from './security.js';
@@ -16,7 +18,7 @@ import { runWarroomAvatarMigration } from './avatars.js';
 import { initOAuthHealthCheck } from './oauth-health.js';
 import { initOrchestrator } from './orchestrator.js';
 import { initScheduler } from './scheduler.js';
-import { setTelegramConnected, setBotInfo } from './state.js';
+import { setTelegramConnected, setSlackConnected, setBotInfo } from './state.js';
 import { getVenvPython, killProcess } from './platform.js';
 
 // Parse --agent flag
@@ -112,7 +114,16 @@ async function main(): Promise<void> {
     showBanner();
   }
 
-  if (!activeBotToken) {
+  // Slack front-end applies to the main process only; sub-agents (--agent)
+  // always use their own Telegram bot token.
+  const useSlack = TRANSPORT === 'slack' && AGENT_ID === 'main';
+
+  if (useSlack) {
+    if (!SLACK_BOT_TOKEN || !SLACK_APP_TOKEN) {
+      logger.error('Slack transport selected but SLACK_BOT_TOKEN / SLACK_APP_TOKEN are not set. Run npm run setup, or set TRANSPORT=telegram.');
+      process.exit(1);
+    }
+  } else if (!activeBotToken) {
     if (AGENT_ID === 'main') {
       logger.error('Bot token is not set. Run npm run setup to configure it.');
     } else {
@@ -161,15 +172,15 @@ async function main(): Promise<void> {
     runWarroomAvatarMigration();
 
     // Memory consolidation: find patterns across recent memories every 30 minutes
-    if (ALLOWED_CHAT_ID && GOOGLE_API_KEY) {
+    if (PRIMARY_CHAT_ID && GOOGLE_API_KEY) {
       // Delay first consolidation 2 minutes after startup to let things settle
       setTimeout(() => {
-        void runConsolidation(ALLOWED_CHAT_ID).catch((err) =>
+        void runConsolidation(PRIMARY_CHAT_ID).catch((err) =>
           logger.error({ err }, 'Initial consolidation failed'),
         );
       }, 2 * 60 * 1000);
       setInterval(() => {
-        void runConsolidation(ALLOWED_CHAT_ID).catch((err) =>
+        void runConsolidation(PRIMARY_CHAT_ID).catch((err) =>
           logger.error({ err }, 'Periodic consolidation failed'),
         );
       }, 30 * 60 * 1000);
@@ -181,11 +192,37 @@ async function main(): Promise<void> {
 
   cleanupOldUploads();
 
-  const bot = createBot();
+  const bot = useSlack ? undefined : createBot();
+  const slack: SlackBot | undefined = useSlack ? createSlackBot() : undefined;
+
+  // Unified proactive notifier — routes scheduler / OAuth-health / War Room
+  // messages to whichever transport is active.
+  const notifyUser = async (text: string): Promise<void> => {
+    if (slack) { await slack.postToUser(text); return; }
+    if (bot) {
+      for (const chunk of splitMessage(text)) {
+        await bot.api.sendMessage(ALLOWED_CHAT_ID, chunk, { parse_mode: 'HTML' }).catch((err) =>
+          logger.error({ err }, 'Failed to send proactive message'),
+        );
+      }
+    }
+  };
+
+  // Dashboard relays its replies to whichever transport is active.
+  const dashboardRelay = slack
+    ? (text: string) => slack.postToUser(text)
+    : bot
+      ? async (text: string) => {
+          const { formatForTelegram, splitMessage: splitTg } = await import('./bot.js');
+          for (const part of splitTg(formatForTelegram(text))) {
+            await bot.api.sendMessage(parseInt(ALLOWED_CHAT_ID), part, { parse_mode: 'HTML' });
+          }
+        }
+      : undefined;
 
   // Dashboard only runs in the main bot process
   if (AGENT_ID === 'main') {
-    startDashboard(bot.api);
+    startDashboard(dashboardRelay);
 
     // War Room voice server (auto-start if enabled, with auto-respawn)
     if (WARROOM_ENABLED) {
@@ -207,9 +244,7 @@ async function main(): Promise<void> {
             + 'pip install -r warroom/requirements.txt\n\n'
             + 'Then restart the bot.';
           logger.error(msg);
-          if (ALLOWED_CHAT_ID) {
-            bot.api.sendMessage(ALLOWED_CHAT_ID, `War Room could not start.\n\n${msg}`).catch(() => {});
-          }
+          void notifyUser(`War Room could not start.\n\n${msg}`).catch(() => {});
         } else {
         // Dedicated log file for the warroom subprocess
         const warroomLogPath = '/tmp/warroom-debug.log';
@@ -276,9 +311,7 @@ async function main(): Promise<void> {
               respawnAttempts += 1;
               if (respawnAttempts > MAX_CRASH_RESPAWNS) {
                 logger.error(`War Room crashed ${MAX_CRASH_RESPAWNS} times. Giving up. Check /tmp/warroom-debug.log for errors.`);
-                if (ALLOWED_CHAT_ID) {
-                  bot.api.sendMessage(ALLOWED_CHAT_ID, `War Room crashed ${MAX_CRASH_RESPAWNS} times and has been disabled.\n\nCheck /tmp/warroom-debug.log, fix the issue, and restart the bot.`).catch(() => {});
-                }
+                void notifyUser(`War Room crashed ${MAX_CRASH_RESPAWNS} times and has been disabled.\n\nCheck /tmp/warroom-debug.log, fix the issue, and restart the bot.`).catch(() => {});
                 return;
               }
               delayMs = Math.min(30000, 500 * 2 ** Math.min(respawnAttempts, 6));
@@ -307,88 +340,92 @@ async function main(): Promise<void> {
           ? 'Python venv not found. Run:\n\npython3 -m venv warroom/.venv\nsource warroom/.venv/bin/activate\npip install -r warroom/requirements.txt'
           : 'warroom/server.py not found. Make sure the warroom/ directory exists.';
         logger.warn('War Room enabled but cannot start: %s', hint);
-        if (ALLOWED_CHAT_ID) {
-          bot.api.sendMessage(ALLOWED_CHAT_ID, `War Room is enabled but could not start.\n\n${hint}`).catch(() => {});
-        }
+        void notifyUser(`War Room is enabled but could not start.\n\n${hint}`).catch(() => {});
       }
     }
   }
 
-  if (ALLOWED_CHAT_ID) {
-    initScheduler(
-      async (text) => {
-        // Split long messages to respect Telegram's 4096 char limit.
-        // The scheduler's splitMessage handles chunking, but the sender
-        // callback is also called directly for status messages which may exceed the limit.
-        const { splitMessage } = await import('./bot.js');
-        for (const chunk of splitMessage(text)) {
-          await bot.api.sendMessage(ALLOWED_CHAT_ID, chunk, { parse_mode: 'HTML' }).catch((err) =>
-            logger.error({ err }, 'Scheduler failed to send message'),
-          );
-        }
-      },
-      AGENT_ID,
-    );
+  const hasDestination = useSlack ? !!ALLOWED_SLACK_USER_ID : !!ALLOWED_CHAT_ID;
+  if (hasDestination) {
+    // The notifier handles chunking and transport-specific formatting.
+    initScheduler(async (text) => { await notifyUser(text); }, AGENT_ID);
 
-    // Proactive OAuth health monitoring — alerts via Telegram before the
-    // Claude CLI token expires. OPT-IN as of 2026-04-10: users were getting
-    // spammed with "Expiring soon" alerts on fresh installs (reported by
-    // Benjamin Elkrieff in Discord), and people who don't monitor their
-    // phone can't re-auth in time anyway. Enable only if you actually want
-    // the alerts by setting OAUTH_HEALTH_ENABLED=true in .env.
+    // Proactive OAuth health monitoring — alerts before the Claude CLI token
+    // expires. OPT-IN: users were getting spammed with "Expiring soon" alerts
+    // on fresh installs, and people who don't monitor their phone can't re-auth
+    // in time anyway. Enable via OAUTH_HEALTH_ENABLED=true in .env.
     const oauthHealthEnv = (await import('./env.js')).readEnvFile(['OAUTH_HEALTH_ENABLED']);
     if ((oauthHealthEnv.OAUTH_HEALTH_ENABLED || '').trim().toLowerCase() === 'true') {
-      initOAuthHealthCheck(async (text) => {
-        const { splitMessage } = await import('./bot.js');
-        for (const chunk of splitMessage(text)) {
-          await bot.api.sendMessage(ALLOWED_CHAT_ID, chunk, { parse_mode: 'HTML' }).catch((err) =>
-            logger.error({ err }, 'OAuth health alert failed'),
-          );
-        }
-      });
+      initOAuthHealthCheck(async (text) => { await notifyUser(text); });
     } else {
       logger.info('OAuth health check disabled (set OAUTH_HEALTH_ENABLED=true in .env to enable)');
     }
   } else {
-    logger.warn('ALLOWED_CHAT_ID not set — scheduler disabled (no destination for results)');
+    logger.warn('No message destination set (ALLOWED_CHAT_ID / ALLOWED_SLACK_USER_ID) — scheduler disabled');
   }
 
   const shutdown = async () => {
     logger.info('Shutting down...');
-    setTelegramConnected(false);
+    if (slack) setSlackConnected(false); else setTelegramConnected(false);
     releaseLock();
-    await bot.stop();
+    if (slack) await slack.stop();
+    else if (bot) await bot.stop();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
 
-  logger.info({ agentId: AGENT_ID }, 'Starting ClaudeClaw...');
+  logger.info({ agentId: AGENT_ID, transport: slack ? 'slack' : 'telegram' }, 'Starting ClaudeClaw...');
 
-  // Clear any existing webhook so polling works cleanly (e.g., if token was
-  // previously used with a webhook-based bot or another ClaudeClaw instance).
-  try {
-    await bot.api.deleteWebhook({ drop_pending_updates: false });
-  } catch (err) {
-    logger.warn({ err }, 'Could not clear webhook (non-fatal)');
-  }
-
-  await bot.start({
-    onStart: (botInfo) => {
-      setTelegramConnected(true);
-      setBotInfo(botInfo.username ?? '', botInfo.first_name ?? 'ClaudeClaw');
-      logger.info({ username: botInfo.username }, 'ClaudeClaw is running');
-      if (AGENT_ID === 'main') {
-        console.log(`\n  ClaudeClaw online: @${botInfo.username}`);
-        if (!ALLOWED_CHAT_ID) {
-          console.log(`  Send /chatid to get your chat ID for ALLOWED_CHAT_ID`);
-        }
-        console.log();
-      } else {
-        console.log(`\n  ClaudeClaw agent [${AGENT_ID}] online: @${botInfo.username}\n`);
+  if (slack) {
+    try {
+      const { botUserId, botName } = await slack.start();
+      setSlackConnected(true);
+      setBotInfo(botName, botName);
+      logger.info({ botUserId, botName }, 'ClaudeClaw (Slack) is running');
+      console.log(`\n  ClaudeClaw online on Slack${botName ? `: @${botName}` : ''}`);
+      if (!ALLOWED_SLACK_USER_ID) {
+        console.log(`  DM the bot /whoami to get your Slack user ID for ALLOWED_SLACK_USER_ID`);
       }
-    },
-  });
+      console.log();
+    } catch (err) {
+      setSlackConnected(false);
+      logger.error({ err }, 'Slack Socket Mode failed to start. Dashboard and local services remain available.');
+    }
+  } else if (bot) {
+    // Clear any existing webhook so polling works cleanly (e.g., if token was
+    // previously used with a webhook-based bot or another ClaudeClaw instance).
+    try {
+      await bot.api.deleteWebhook({ drop_pending_updates: false });
+    } catch (err) {
+      logger.warn({ err }, 'Could not clear webhook (non-fatal)');
+    }
+
+    try {
+      await bot.start({
+        onStart: (botInfo) => {
+          setTelegramConnected(true);
+          setBotInfo(botInfo.username ?? '', botInfo.first_name ?? 'ClaudeClaw');
+          logger.info({ username: botInfo.username }, 'ClaudeClaw is running');
+          if (AGENT_ID === 'main') {
+            console.log(`\n  ClaudeClaw online: @${botInfo.username}`);
+            if (!ALLOWED_CHAT_ID) {
+              console.log(`  Send /chatid to get your chat ID for ALLOWED_CHAT_ID`);
+            }
+            console.log();
+          } else {
+            console.log(`\n  ClaudeClaw agent [${AGENT_ID}] online: @${botInfo.username}\n`);
+          }
+        },
+      });
+    } catch (err) {
+      setTelegramConnected(false);
+      logger.error(
+        { err },
+        'Telegram polling failed to start. Dashboard and local services remain available.',
+      );
+    }
+  }
 }
 
 main().catch((err: unknown) => {

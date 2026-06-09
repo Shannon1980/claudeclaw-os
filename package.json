@@ -28,6 +28,7 @@
     "@google/genai": "^1.44.0",
     "@hono/node-server": "^1.19.9",
     "@monaco-editor/react": "^4.7.0",
+    "@slack/bolt": "^4.7.3",
     "@slack/web-api": "^7.14.1",
     "@types/three": "^0.184.0",
     "better-sqlite3": "^11.8.1",

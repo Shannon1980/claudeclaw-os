@@ -168,7 +168,7 @@ const CLIENT_MSG_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
  * without standing up a real server. Production callers should use
  * `startDashboard` instead, which builds the app then serves it.
  */
-export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
+export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>): Hono {
   const app = new Hono();
 
   // CORS headers for cross-origin access (Cloudflare tunnel, mobile browsers)
@@ -2920,7 +2920,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
 
   // Send message from dashboard
   app.post('/api/chat/send', async (c) => {
-    if (!botApi) return c.json({ error: 'Bot API not available' }, 503);
+    if (!relayToUser) return c.json({ error: 'Chat relay not available' }, 503);
     const body = await c.req.json<{ message?: string }>();
     const message = body?.message?.trim();
     if (!message) return c.json({ error: 'message required' }, 400);
@@ -2933,7 +2933,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     }
 
     // Fire-and-forget: response comes via SSE
-    void processMessageFromDashboard(botApi, message);
+    void processMessageFromDashboard(relayToUser, message);
     return c.json({ ok: true });
   });
 
@@ -2971,13 +2971,13 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
  * Start the dashboard: build the Hono app, bind it to DASHBOARD_PORT, and
  * wire up the WebSocket proxy for the voice War Room.
  */
-export function startDashboard(botApi?: Api<RawApi>): void {
+export function startDashboard(relayToUser?: (text: string) => Promise<void>): void {
   if (!DASHBOARD_TOKEN) {
     logger.info('DASHBOARD_TOKEN not set, dashboard disabled');
     return;
   }
 
-  const app = buildDashboardApp(botApi);
+  const app = buildDashboardApp(relayToUser);
 
   // Default to loopback. Anyone on the same LAN is otherwise one
   // dashboard-token leak away from full mutation access. Operators who

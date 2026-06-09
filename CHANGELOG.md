@@ -2,6 +2,22 @@
 
 All notable changes to ClaudeClaw will be documented here.
 
+## [unreleased] - 2026-06-09
+
+### Added — Slack front-end transport
+- Run ClaudeClaw on **Slack** instead of Telegram: DM the bot or `@mention` it in channels and it drives the real `claude` CLI with full parity — text, voice notes, photos/docs/video, voice replies, streaming, and all slash commands. Set `TRANSPORT=slack` (auto-detected when both Slack tokens are present) to gate Telegram off entirely.
+- Distinct from the existing `xoxp` Slack *integration* (read/reply on your behalf). The transport is the bot you talk to: `@slack/bolt` Socket Mode with `SLACK_BOT_TOKEN` (xoxb) + `SLACK_APP_TOKEN` (xapp).
+- Fail-closed access control via `ALLOWED_SLACK_USER_ID`; DM `/whoami` to discover yours. Until set, the bot only answers `/whoami`.
+- Full slash-command set ported (`/newchat`, `/respin`, `/voice`, `/model`, `/memory`, `/forget`, `/pin`, `/unpin`, `/dashboard`, `/stop`, `/agents`, `/delegate`, `/lock`, `/status`, `/help`, `/whoami`). **Note:** Slack drops undeclared slash commands client-side, so each must be listed in the app manifest (see README).
+
+### Changed — transport-agnostic core
+- Extracted the message pipeline into `message-core.ts` (`processUserMessage` + `TransportCallbacks`) and `format.ts` (`splitMessage`, `extractFileMarkers`, `formatForSlack`). Telegram's `handleMessage` is now a thin adapter over the shared core — behavior-preserving, gated by the existing tests.
+- Sessions/memory namespaced `slack:<id>` via a new `PRIMARY_CHAT_ID`; scheduler, OAuth-health, War Room pings, and the dashboard chat relay all route to the active transport. Dashboard relay refactored to a generic `relayToUser` callback (no grammY dependency in Slack mode).
+- Setup wizard now asks Telegram vs Slack and writes `TRANSPORT` + Slack tokens; `CLAUDE.md.example` made transport-neutral.
+
+### Tests
+- New `format.test.ts`, `slack-bot.test.ts`, and `message-core.test.ts` (mock-callback based). Caught and fixed two `formatForSlack` bugs (inline-code double-escape; headings clobbered by the italic pass). Full suite at 488 passing.
+
 ## [unreleased] - 2026-05-04
 
 ### Security

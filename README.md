@@ -825,9 +825,78 @@ Everything writes to `dashboard_settings` via `PATCH /api/dashboard/settings` �
 
 ---
 
-## Slack (optional)
+## Slack as your front-end (transport)
 
-Requires a Slack User OAuth Token. This connects to your workspace so ClaudeClaw can read and send messages on your behalf.
+By default ClaudeClaw's front-end is Telegram. You can instead run it **on Slack** — DM a Slack bot (or @mention it in channels) and it runs the real `claude` CLI and replies in Slack, with full parity: text, voice notes, photos/docs/video, voice replies, streaming, and all the slash commands.
+
+> This is different from the **Slack integration** section below. The *transport* is the bot you talk to (`xoxb`/`xapp` tokens, Socket Mode). The *integration* lets ClaudeClaw read/reply to your existing Slack on your behalf (`xoxp` user token). They're independent — you can use either, both, or neither.
+
+### Step 1: Create the Slack app
+
+At [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From manifest**, paste:
+
+```yaml
+display_information:
+  name: ClaudeClaw
+features:
+  bot_user: { display_name: ClaudeClaw, always_online: true }
+  slash_commands:
+    - { command: /whoami,    description: Show your Slack user ID }
+    - { command: /newchat,   description: Start a new Claude session }
+    - { command: /respin,    description: Reload recent context }
+    - { command: /voice,     description: Toggle voice replies }
+    - { command: /model,     description: "Switch model (opus/sonnet/haiku)" }
+    - { command: /memory,    description: View recent memories }
+    - { command: /forget,    description: Clear session }
+    - { command: /pin,       description: Pin a memory }
+    - { command: /unpin,     description: Unpin a memory }
+    - { command: /dashboard, description: Web dashboard link }
+    - { command: /stop,      description: Stop current processing }
+    - { command: /agents,    description: List available agents }
+    - { command: /delegate,  description: Delegate a task to an agent }
+    - { command: /lock,      description: Lock the session }
+    - { command: /status,    description: Security status }
+    - { command: /help,      description: List commands }
+oauth_config:
+  scopes:
+    bot: [app_mentions:read, chat:write, im:history, im:read, im:write,
+          channels:history, groups:history, files:read, files:write, commands, users:read]
+settings:
+  event_subscriptions:
+    bot_events: [app_mention, message.im]
+  socket_mode_enabled: true
+```
+
+> Slack rejects **undeclared** slash commands client-side, so every command you want must be listed under `slash_commands` (it never reaches the bot otherwise).
+
+### Step 2: Get the two tokens
+
+- **Basic Information → App-Level Tokens → Generate** with scope `connections:write` → this is `SLACK_APP_TOKEN` (`xapp-…`).
+- **Install to Workspace**, then **OAuth & Permissions → Bot User OAuth Token** → this is `SLACK_BOT_TOKEN` (`xoxb-…`).
+
+### Step 3: Configure and run
+
+Add to `.env` (or run `npm run setup` and choose Slack):
+
+```bash
+TRANSPORT=slack
+SLACK_BOT_TOKEN=xoxb-…
+SLACK_APP_TOKEN=xapp-…
+```
+
+Start the bot (`npm run dev` or `npm start`). When `TRANSPORT=slack`, Telegram does not start; the scheduler, alerts, and the dashboard chat box all route to Slack.
+
+### Step 4: Lock it to you
+
+DM the bot **`/whoami`**, copy the `U…` id, add `ALLOWED_SLACK_USER_ID=U…` to `.env`, and restart. The bot is **fail-closed** — until this is set it only answers `/whoami`.
+
+Then DM it, or invite it to a channel and `@ClaudeClaw …`. Send voice notes, photos, and files just like on Telegram.
+
+---
+
+## Slack integration (read/reply on your behalf)
+
+Requires a Slack User OAuth Token (`xoxp`). This connects to your workspace so ClaudeClaw can read and send messages on your behalf — accessed from within Telegram (`/slack`) or via the standalone CLI/skill. Independent of the Slack *transport* above.
 
 ### Step 1: Create a Slack app
 
