@@ -20,9 +20,9 @@ To check what other agents have done:
 sqlite3 store/claudeclaw.db "SELECT agent_id, action, summary, datetime(created_at, 'unixepoch') FROM hive_mind ORDER BY created_at DESC LIMIT 20;"
 ```
 
-## Sending Files via Telegram
+## Sending Files Back
 
-When the user asks you to create a file and send it back (PDF, spreadsheet, image, screenshot, etc.), include a file marker in your response. The bot wrapper parses these markers and sends the files as Telegram attachments — you do NOT call any tool, just include the literal marker text in your reply.
+When the user asks you to create a file and send it back (PDF, spreadsheet, image, screenshot, etc.), include a file marker in your response. The bot wrapper parses these markers and sends the files as chat attachments (Slack or Telegram, whichever transport is active) — you do NOT call any tool, just include the literal marker text in your reply.
 
 **Syntax:**
 - `[SEND_FILE:/absolute/path/to/file.pdf]` — sends as a document attachment
@@ -34,7 +34,7 @@ When the user asks you to create a file and send it back (PDF, spreadsheet, imag
 - Create the file first, then include the marker
 - Place the marker on its own line
 - Multiple markers in one response are fine — each becomes a separate attachment
-- Max file size: 50 MB (Telegram limit)
+- Max file size: 50 MB on Telegram (Slack allows larger uploads)
 - The marker text gets stripped from the visible message
 
 **Example:**
@@ -50,13 +50,13 @@ For images you generated (Nano Banana, Gemini API, etc.), prefer `[SEND_PHOTO:..
 
 The marker is the ONLY supported way to send files back to the user. Specifically, **do not**:
 
-- `curl https://api.telegram.org/bot<token>/sendDocument` — your subprocess does not have a valid token in its env, and any token you find by reading `.env` belongs to a DIFFERENT bot (the main bot or another sub-agent), not yours. You will get a 401 and waste a turn diagnosing it.
+- `curl` against the Slack or Telegram API (`files.upload`, `sendDocument`, etc.) — your subprocess does not have a valid token in its env, and any token you find by reading `.env` belongs to a DIFFERENT bot (the main bot or another sub-agent), not yours. You will get a 401 and waste a turn diagnosing it.
 - Use the `plugin:telegram:telegram` MCP skill (`reply`, `download_attachment`, etc.) to send outgoing files. That skill is wired to a Claude-in-Chrome / @claude.ai session, not your agent's own bot, and its stored token may be stale or unrelated. Use that skill ONLY for incoming attachments the user sent you.
 - Read the user-uploaded file with the `Read` tool and paste base64 / hex into chat. The marker handles binary properly.
 
 If a marker doesn't appear to send and the user asks why, say so plainly — DO NOT fall back to one of the above paths.
 
-## Setting Your Profile Picture (the bot's avatar on Telegram)
+## Setting Your Profile Picture (Telegram transport only)
 
 If the user asks you to "set this as your profile picture" or "make this your avatar," **you cannot do this via any API or skill.** The Telegram Bot API has no `setMyProfilePhoto` method. The avatar Telegram users see for your bot can ONLY be changed by:
 

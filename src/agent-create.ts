@@ -18,9 +18,9 @@ import { IS_WINDOWS, IS_MACOS, IS_LINUX, killProcess, isProcessAlive, claudeCode
 // (extractFileMarkers) supports these for every agent — agents just
 // need to know the syntax exists.
 const FILE_SEND_SECTION = `
-## Sending Files via Telegram
+## Sending Files Back
 
-When the user asks you to create a file and send it back (PDF, spreadsheet, image, screenshot, etc.), include a file marker in your response. The bot wrapper parses these markers and sends the files as Telegram attachments — you do NOT call any tool, just include the literal marker text in your reply.
+When the user asks you to create a file and send it back (PDF, spreadsheet, image, screenshot, etc.), include a file marker in your response. The bot wrapper parses these markers and sends the files as chat attachments (Slack or Telegram, whichever transport is active) — you do NOT call any tool, just include the literal marker text in your reply.
 
 **Syntax:**
 - \`[SEND_FILE:/absolute/path/to/file.pdf]\` — sends as a document attachment
@@ -32,7 +32,7 @@ When the user asks you to create a file and send it back (PDF, spreadsheet, imag
 - Create the file first, then include the marker
 - Place the marker on its own line
 - Multiple markers in one response are fine
-- Max file size: 50 MB (Telegram limit)
+- Max file size: 50 MB on Telegram (Slack allows larger uploads)
 - The marker text gets stripped from the visible message
 
 **Example:**
@@ -47,13 +47,13 @@ For images you generated, prefer \`[SEND_PHOTO:...]\` so they preview inline.
 
 The marker is the ONLY supported way to send files back to the user. Specifically, **do not**:
 
-- \`curl https://api.telegram.org/bot<token>/sendDocument\` — your subprocess does not have a valid token in its env, and any token you find by reading \`.env\` belongs to a DIFFERENT bot (the main bot or another sub-agent), not yours. You will get a 401 and waste a turn diagnosing it.
+- \`curl\` against the Slack or Telegram API (\`files.upload\`, \`sendDocument\`, etc.) — your subprocess does not have a valid token in its env, and any token you find by reading \`.env\` belongs to a DIFFERENT bot (the main bot or another sub-agent), not yours. You will get a 401 and waste a turn diagnosing it.
 - Use the \`plugin:telegram:telegram\` MCP skill (\`reply\`, \`download_attachment\`, etc.) to send outgoing files. That skill is wired to a Claude-in-Chrome / @claude.ai session, not your agent's own bot, and its stored token may be stale or unrelated. Use that skill ONLY for incoming attachments the user sent you.
 - Read the user-uploaded file with the \`Read\` tool and paste base64 / hex into chat. The marker handles binary properly.
 
 If a marker doesn't appear to send and the user asks why, say so plainly — DO NOT fall back to one of the above paths. The marker is reliable; if it failed, the bot wrapper logged it and the maintainer can debug from logs.
 
-## Setting Your Profile Picture (the bot's avatar on Telegram)
+## Setting Your Profile Picture (Telegram transport only)
 
 If the user asks you to "set this as your profile picture" or "make this your avatar," **you cannot do this via any API or skill.** The Telegram Bot API has no \`setMyProfilePhoto\` method. The avatar Telegram users see for your bot can ONLY be changed by:
 
@@ -115,15 +115,24 @@ export interface CreateAgentOpts {
   description: string;
   model?: string;
   template?: string;
-  botToken: string;
+  /** Telegram bot token. OPTIONAL: without one the agent is delegation-only
+   *  (reachable via @agentId: / /delegate through the main bot) and no
+   *  standalone service is installed. */
+  botToken?: string;
+  /** Custom CLAUDE.md content. When set, used instead of the template copy. */
+  claudeMd?: string;
+  /** Custom agent.yaml content (raw YAML). When set, parsed/validated and
+   *  used as the base config; name/description/model/token-env fields are
+   *  normalized so the result always loads. */
+  agentYaml?: string;
 }
 
 export interface CreateAgentResult {
   agentId: string;
   agentDir: string;
-  envKey: string;
+  envKey: string | null;
   plistPath: string | null;
-  botInfo: BotInfo;
+  botInfo: BotInfo | null;
 }
 
 // ── Auto-color palette for new agents ────────────────────────────────
@@ -226,7 +235,8 @@ export function listTemplates(): AgentTemplate[] {
 // ── Create ───────────────────────────────────────────────────────────
 
 export async function createAgent(opts: CreateAgentOpts): Promise<CreateAgentResult> {
-  const { id, name, description, model, template, botToken } = opts;
+  const { id, name, description, model, template, claudeMd, agentYaml } = opts;
+  const botToken = opts.botToken?.trim() || '';
 
   // Validate ID
   const idCheck = validateAgentId(id);
@@ -236,20 +246,39 @@ export async function createAgent(opts: CreateAgentOpts): Promise<CreateAgentRes
   const existing = listAgentIds();
   if (existing.length >= 20) throw new Error('Maximum of 20 agents reached. Delete unused agents first.');
 
-  // Validate token
-  const tokenCheck = await validateBotToken(botToken);
-  if (!tokenCheck.ok || !tokenCheck.botInfo) throw new Error(tokenCheck.error || 'Token validation failed');
-
-  // Check token isn't already in use by another agent
-  for (const existingId of existing) {
+  // Validate custom agent.yaml early — before touching the filesystem.
+  let customYaml: Record<string, unknown> | undefined;
+  if (agentYaml && agentYaml.trim()) {
+    let parsed: unknown;
     try {
-      const existingConfig = loadAgentConfig(existingId);
-      if (existingConfig.botToken === botToken) {
-        throw new Error(`This bot token is already used by agent "${existingId}"`);
-      }
+      parsed = yaml.load(agentYaml);
     } catch (err) {
-      if (err instanceof Error && err.message.includes('already used')) throw err;
-      // Skip agents with broken configs
+      throw new Error('agent.yaml parse error: ' + (err instanceof Error ? err.message : String(err)));
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('agent.yaml must be a YAML mapping (key: value pairs)');
+    }
+    customYaml = parsed as Record<string, unknown>;
+  }
+
+  // Token is optional. When provided, validate it and reject duplicates.
+  let botInfo: BotInfo | null = null;
+  if (botToken) {
+    const tokenCheck = await validateBotToken(botToken);
+    if (!tokenCheck.ok || !tokenCheck.botInfo) throw new Error(tokenCheck.error || 'Token validation failed');
+    botInfo = tokenCheck.botInfo;
+
+    // Check token isn't already in use by another agent
+    for (const existingId of existing) {
+      try {
+        const existingConfig = loadAgentConfig(existingId);
+        if (existingConfig.botToken && existingConfig.botToken === botToken) {
+          throw new Error(`This bot token is already used by agent "${existingId}"`);
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('already used')) throw err;
+        // Skip agents with broken configs
+      }
     }
   }
 
@@ -268,53 +297,78 @@ export async function createAgent(opts: CreateAgentOpts): Promise<CreateAgentRes
   const templateId = template || '_template';
   const templateDir = path.join(PROJECT_ROOT, 'agents', templateId);
 
-  // Copy CLAUDE.md from template
-  const claudeMdSources = [
-    path.join(templateDir, 'CLAUDE.md'),
-    path.join(templateDir, 'CLAUDE.md.example'),
-    path.join(PROJECT_ROOT, 'agents', '_template', 'CLAUDE.md'),
-  ];
-  for (const src of claudeMdSources) {
-    if (fs.existsSync(src)) {
-      let content = fs.readFileSync(src, 'utf-8');
-      // Replace template agent ID references with the new agent ID
-      content = content.replace(/\[AGENT_ID\]/g, id);
-      // Guarantee the file-send section regardless of which template was
-      // picked. The _template version has it, but Comms/Content/Ops/etc.
-      // (which users can pick as templates) might not — those files are
-      // gated by the pre-commit hook so we can't modify them in-repo.
-      // Appending here ensures every newly-created agent knows about the
-      // [SEND_FILE:...] / [SEND_PHOTO:...] markers without exception.
-      if (!/\[SEND_FILE:/.test(content) && !/\[SEND_PHOTO:/.test(content)) {
-        content = content.replace(/\s*$/, '') + '\n' + FILE_SEND_SECTION + '\n';
+  // Write CLAUDE.md — user-provided content wins; otherwise copy from template.
+  if (claudeMd && claudeMd.trim()) {
+    let content = claudeMd.replace(/\[AGENT_ID\]/g, id);
+    if (!/\[SEND_FILE:/.test(content) && !/\[SEND_PHOTO:/.test(content)) {
+      content = content.replace(/\s*$/, '') + '\n' + FILE_SEND_SECTION + '\n';
+    }
+    fs.writeFileSync(path.join(agentDir, 'CLAUDE.md'), content, 'utf-8');
+  } else {
+    const claudeMdSources = [
+      path.join(templateDir, 'CLAUDE.md'),
+      path.join(templateDir, 'CLAUDE.md.example'),
+      path.join(PROJECT_ROOT, 'agents', '_template', 'CLAUDE.md'),
+    ];
+    for (const src of claudeMdSources) {
+      if (fs.existsSync(src)) {
+        let content = fs.readFileSync(src, 'utf-8');
+        // Replace template agent ID references with the new agent ID
+        content = content.replace(/\[AGENT_ID\]/g, id);
+        // Guarantee the file-send section regardless of which template was
+        // picked. The _template version has it, but Comms/Content/Ops/etc.
+        // (which users can pick as templates) might not — those files are
+        // gated by the pre-commit hook so we can't modify them in-repo.
+        // Appending here ensures every newly-created agent knows about the
+        // [SEND_FILE:...] / [SEND_PHOTO:...] markers without exception.
+        if (!/\[SEND_FILE:/.test(content) && !/\[SEND_PHOTO:/.test(content)) {
+          content = content.replace(/\s*$/, '') + '\n' + FILE_SEND_SECTION + '\n';
+        }
+        fs.writeFileSync(path.join(agentDir, 'CLAUDE.md'), content, 'utf-8');
+        break;
       }
-      fs.writeFileSync(path.join(agentDir, 'CLAUDE.md'), content, 'utf-8');
-      break;
     }
   }
 
-  // Create agent.yaml
-  const envKey = `${id.toUpperCase().replace(/-/g, '_')}_BOT_TOKEN`;
-  const agentYaml: Record<string, unknown> = {
-    name,
-    description,
-    telegram_bot_token_env: envKey,
-    model: model || 'claude-sonnet-4-6',
-  };
+  // Create agent.yaml. A custom yaml (if provided) is the base; the wizard's
+  // name/description/model fill any gaps so loadAgentConfig always succeeds.
+  // The token env reference is only written when a token was provided —
+  // tokenless (delegation-only) agents simply omit it.
+  const generatedEnvKey = `${id.toUpperCase().replace(/-/g, '_')}_BOT_TOKEN`;
+  const yamlOut: Record<string, unknown> = { ...(customYaml ?? {}) };
+  if (!yamlOut['name']) yamlOut['name'] = name;
+  if (!yamlOut['description']) yamlOut['description'] = description;
+  if (!yamlOut['model']) yamlOut['model'] = model || 'claude-sonnet-4-6';
+
+  let envKey: string | null = null;
+  if (botToken) {
+    // Respect a custom env-key name if the user's yaml declares one.
+    const customEnvKey = typeof yamlOut['telegram_bot_token_env'] === 'string'
+      ? (yamlOut['telegram_bot_token_env'] as string).trim()
+      : '';
+    envKey = /^[A-Z][A-Z0-9_]*$/.test(customEnvKey) ? customEnvKey : generatedEnvKey;
+    yamlOut['telegram_bot_token_env'] = envKey;
+  }
+
   fs.writeFileSync(
     path.join(agentDir, 'agent.yaml'),
-    yaml.dump(agentYaml, { lineWidth: -1 }),
+    yaml.dump(yamlOut, { lineWidth: -1 }),
     'utf-8',
   );
 
-  // Write bot token to .env
-  const envPath = path.join(PROJECT_ROOT, '.env');
-  writeBotTokenToEnv(envPath, envKey, botToken, id);
+  // Token-dependent steps: .env entry + service config. Delegation-only
+  // agents skip both (nothing to run standalone, nothing to store).
+  let plistPath: string | null = null;
+  if (botToken && envKey) {
+    const envPath = path.join(PROJECT_ROOT, '.env');
+    writeBotTokenToEnv(envPath, envKey, botToken, id);
+    plistPath = generateServiceConfig(id);
+  }
 
-  // Generate launchd plist (or systemd unit)
-  const plistPath = generateServiceConfig(id);
-
-  logger.info({ agentId: id, agentDir, envKey, bot: tokenCheck.botInfo.username }, 'Agent created');
+  logger.info(
+    { agentId: id, agentDir, envKey, bot: botInfo?.username ?? '(delegation-only)' },
+    'Agent created',
+  );
 
   // Propagate the new agent into all delegation surfaces without a bot
   // restart:
@@ -332,7 +386,7 @@ export async function createAgent(opts: CreateAgentOpts): Promise<CreateAgentRes
     agentDir,
     envKey,
     plistPath,
-    botInfo: tokenCheck.botInfo,
+    botInfo,
   };
 }
 

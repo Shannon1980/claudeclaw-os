@@ -1,7 +1,9 @@
 #!/bin/bash
-# Send a Telegram message mid-task.
+# Send a chat message mid-task (Slack or Telegram, whichever transport is active).
 # Usage: notify.sh "message text"
-# Reads TELEGRAM_BOT_TOKEN and ALLOWED_CHAT_ID from .env in the project root.
+# Reads transport config from .env in the project root:
+#   Slack:    SLACK_BOT_TOKEN + ALLOWED_SLACK_USER_ID
+#   Telegram: TELEGRAM_BOT_TOKEN + ALLOWED_CHAT_ID
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/../.env"
@@ -11,15 +13,31 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-TOKEN=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
-CHAT_ID=$(grep -E '^ALLOWED_CHAT_ID=' "$ENV_FILE" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+env_get() {
+  grep -E "^$1=" "$ENV_FILE" | cut -d'=' -f2- | tr -d '"' | tr -d "'"
+}
 
-if [ -z "$TOKEN" ] || [ -z "$CHAT_ID" ]; then
-  echo "notify.sh: TELEGRAM_BOT_TOKEN or ALLOWED_CHAT_ID not set in .env" >&2
+TRANSPORT=$(env_get TRANSPORT | tr '[:upper:]' '[:lower:]')
+SLACK_TOKEN=$(env_get SLACK_BOT_TOKEN)
+SLACK_USER=$(env_get ALLOWED_SLACK_USER_ID)
+TG_TOKEN=$(env_get TELEGRAM_BOT_TOKEN)
+TG_CHAT=$(env_get ALLOWED_CHAT_ID)
+
+# Mirror src/config.ts: explicit TRANSPORT wins, else Slack when its tokens exist.
+if [ "$TRANSPORT" != "telegram" ] && [ -n "$SLACK_TOKEN" ] && [ -n "$SLACK_USER" ]; then
+  curl -s -X POST "https://slack.com/api/chat.postMessage" \
+    -H "Authorization: Bearer ${SLACK_TOKEN}" \
+    -H "Content-Type: application/json; charset=utf-8" \
+    -d "$(printf '{"channel":"%s","text":%s}' "$SLACK_USER" "$(printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" > /dev/null
+  exit 0
+fi
+
+if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then
+  echo "notify.sh: no transport configured (need SLACK_BOT_TOKEN+ALLOWED_SLACK_USER_ID or TELEGRAM_BOT_TOKEN+ALLOWED_CHAT_ID in .env)" >&2
   exit 1
 fi
 
-curl -s -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
-  -d chat_id="${CHAT_ID}" \
+curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+  -d chat_id="${TG_CHAT}" \
   -d text="${1}" \
   -d parse_mode="HTML" > /dev/null

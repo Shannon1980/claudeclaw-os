@@ -2194,13 +2194,13 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     if (!parsed || typeof parsed !== 'object') {
       return c.json({ error: 'agent.yaml must be a YAML object' }, 400);
     }
-    // Canonical schema (src/agent-config.ts loadAgentConfig): name and
-    // telegram_bot_token_env are required; description and model are
-    // strongly recommended. id is derived from the directory name, NOT
-    // a yaml field. Reject the save if either required field is missing
-    // so we never poison the file and crash the agent on next start.
-    if (!parsed.name || !parsed.telegram_bot_token_env) {
-      return c.json({ error: 'agent.yaml requires name and telegram_bot_token_env fields' }, 400);
+    // Canonical schema (src/agent-config.ts loadAgentConfig): only name is
+    // required. telegram_bot_token_env is optional — delegation-only agents
+    // have no Telegram token. id is derived from the directory name, NOT
+    // a yaml field. Reject the save if name is missing so we never poison
+    // the file and break the agent on next load.
+    if (!parsed.name) {
+      return c.json({ error: 'agent.yaml requires a name field' }, 400);
     }
 
     // If the client posted back the redacted token, splice in the real
@@ -2489,7 +2489,9 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return c.json(result);
   });
 
-  // Create a new agent
+  // Create a new agent. botToken is OPTIONAL: without it the agent is
+  // delegation-only (no standalone Telegram process). claudeMd / agentYaml
+  // let the user supply their own files instead of template copies.
   app.post('/api/agents/create', async (c) => {
     const body = await c.req.json<{
       id?: string;
@@ -2498,17 +2500,22 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       model?: string;
       template?: string;
       botToken?: string;
+      claudeMd?: string;
+      agentYaml?: string;
     }>();
 
     const id = body?.id?.trim();
     const name = body?.name?.trim();
     const description = body?.description?.trim();
-    const botToken = body?.botToken?.trim();
+    const botToken = body?.botToken?.trim() || undefined;
+    const claudeMd = typeof body?.claudeMd === 'string' ? body.claudeMd : undefined;
+    const agentYaml = typeof body?.agentYaml === 'string' ? body.agentYaml : undefined;
 
     if (!id) return c.json({ error: 'id required' }, 400);
     if (!name) return c.json({ error: 'name required' }, 400);
     if (!description) return c.json({ error: 'description required' }, 400);
-    if (!botToken) return c.json({ error: 'botToken required' }, 400);
+    if (claudeMd && claudeMd.length > 200_000) return c.json({ error: 'CLAUDE.md exceeds 200KB' }, 400);
+    if (agentYaml && agentYaml.length > 64 * 1024) return c.json({ error: 'agent.yaml exceeds 64KB' }, 400);
 
     try {
       const result = await createAgent({
@@ -2518,6 +2525,8 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
         model: body?.model?.trim() || undefined,
         template: body?.template?.trim() || undefined,
         botToken,
+        claudeMd,
+        agentYaml,
       });
       return c.json({ ok: true, ...result }, 201);
     } catch (err) {
@@ -2530,6 +2539,15 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   app.post('/api/agents/:id/activate', (c) => {
     const agentId = c.req.param('id');
     if (agentId === 'main') return c.json({ error: 'Cannot activate main via this endpoint' }, 400);
+    // Delegation-only agents (no Telegram token) have no standalone service.
+    try {
+      const cfg = loadAgentConfig(agentId);
+      if (!cfg.botToken) {
+        return c.json({
+          error: 'This agent has no Telegram bot token, so there is no standalone service to start. It is delegation-only: reach it via @' + agentId + ': or /delegate from the main bot. To run it standalone, add a token to its agent.yaml (telegram_bot_token_env) and .env.',
+        }, 400);
+      }
+    } catch { /* fall through — activateAgent reports config errors */ }
     const result = activateAgent(agentId);
     return c.json(result);
   });

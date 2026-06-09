@@ -98,17 +98,21 @@ export function loadAgentConfig(agentId: string): AgentConfig {
 
   const name = raw['name'] as string;
   const description = (raw['description'] as string) ?? '';
-  const botTokenEnv = raw['telegram_bot_token_env'] as string;
+  const botTokenEnv = (raw['telegram_bot_token_env'] as string) || '';
   const model = raw['model'] as string | undefined;
 
-  if (!name || !botTokenEnv) {
-    throw new Error(`Agent config ${configPath} must have 'name' and 'telegram_bot_token_env'`);
+  if (!name) {
+    throw new Error(`Agent config ${configPath} must have 'name'`);
   }
 
-  const env = readEnvFile([botTokenEnv]);
-  const botToken = process.env[botTokenEnv] || env[botTokenEnv] || '';
-  if (!botToken) {
-    throw new Error(`Bot token not found: set ${botTokenEnv} in .env`);
+  // The Telegram bot token is OPTIONAL: delegation-only agents (reached via
+  // @agentId: / /delegate through the main bot) never poll Telegram and need
+  // no token. A token is only required to run the agent as a standalone
+  // process (--agent), which index.ts enforces at startup.
+  let botToken = '';
+  if (botTokenEnv) {
+    const env = readEnvFile([botTokenEnv]);
+    botToken = process.env[botTokenEnv] || env[botTokenEnv] || '';
   }
 
   let obsidian: AgentConfig['obsidian'];

@@ -139,8 +139,8 @@ async function main(): Promise<void> {
 
     console.log(`Agent created successfully.`);
     console.log(`  Directory: ${result.agentDir}`);
-    console.log(`  Env key:   ${result.envKey}`);
-    console.log(`  Bot:       @${result.botInfo.username}`);
+    if (result.envKey) console.log(`  Env key:   ${result.envKey}`);
+    console.log(`  Bot:       ${result.botInfo ? '@' + result.botInfo.username : '(delegation-only, no Telegram bot)'}`);
     if (result.plistPath) {
       console.log(`  Service:   ${result.plistPath}`);
     }

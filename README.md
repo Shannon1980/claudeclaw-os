@@ -16,23 +16,23 @@
  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
 ```
 
-> Your Claude Code CLI, delivered to your phone via Telegram.
+> Your Claude Code CLI, delivered to your phone via Slack (or Telegram).
 
-ClaudeClaw is not a chatbot wrapper. It spawns the actual `claude` CLI on your Mac, Linux, or Windows machine and pipes the result back to your Telegram chat. Everything that works in your terminal (your skills, your tools, your context) works from your phone.
+ClaudeClaw is not a chatbot wrapper. It spawns the actual `claude` CLI on your Mac, Linux, or Windows machine and pipes the result back to your Slack DM (or Telegram chat). Everything that works in your terminal (your skills, your tools, your context) works from your phone.
 
 ![ClaudeClaw at a glance](assets/claudeclaw-overview.png)
 
-Eight surfaces, one bot, one machine. Telegram for chat, the dashboard for everything else, war room for live multi-agent conversation (text or voice), Mission Control for queued work, Scheduled for recurring runs, Hive Mind to see what every agent has been doing. Everything is local: SQLite database, Node bot, optional dashboard. No cloud, no telemetry, no per-message API calls beyond the model itself.
+Eight surfaces, one bot, one machine. Slack (or Telegram) for chat, the dashboard for everything else, war room for live multi-agent conversation (text or voice), Mission Control for queued work, Scheduled for recurring runs, Hive Mind to see what every agent has been doing. Everything is local: SQLite database, Node bot, optional dashboard. No cloud, no telemetry, no per-message API calls beyond the model itself.
 
 ---
 
 ## What You Get
 
-ClaudeClaw has two tiers of features. The **core** features work out of the box with just a Telegram bot token. The **experimental** features are opt-in and require additional setup.
+ClaudeClaw has two tiers of features. The **core** features work out of the box with just a Slack app (or a Telegram bot token). The **experimental** features are opt-in and require additional setup.
 
 ### Core Features (zero to hero in 5 minutes)
 
-Everything below works with just `TELEGRAM_BOT_TOKEN` and `ALLOWED_CHAT_ID`. No extra API keys.
+Everything below works with just `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` + `ALLOWED_SLACK_USER_ID` (or, on Telegram, `TELEGRAM_BOT_TOKEN` + `ALLOWED_CHAT_ID`). No extra API keys.
 
 | Feature | What it does |
 |---------|-------------|
@@ -66,7 +66,7 @@ These are powerful but require extra API keys or services. Each one has its own 
 | **War Room (text)** | none extra | Multi-agent text group chat with agent rail, `/standup`, `/discuss`, ad-hoc rosters, sticky-addressee follow-ups |
 | **Standup roster picker** | none extra | Drag-reorder, toggle, cap, and rotate `/standup` speakers from the dashboard |
 | **Live Meetings (Daily.co)** | `DAILY_API_KEY` | Send an agent into a Daily.co video room with a Pika avatar that speaks in real time |
-| **WhatsApp bridge** | Puppeteer + QR scan | Highly experimental. Read/send WhatsApp from Telegram |
+| **WhatsApp bridge** | Puppeteer + QR scan | Highly experimental. Read/send WhatsApp from your bot chat |
 
 ---
 
@@ -86,7 +86,7 @@ Follow these steps in order. The whole thing takes about 5 minutes.
 | **Git** | Check: `git --version`. If you've never used git, also run the two commands below |
 | **Claude Code CLI** | Install: `npm i -g @anthropic-ai/claude-code` |
 | **Claude account** | Log in: `claude login` (free, Pro, or Max plan) |
-| **Telegram account** | Any existing account works |
+| **Slack workspace** | Any workspace where you can create an app (or a Telegram account as the alternative) |
 
 **First time using git?** Run these two commands first (use your own name and email):
 ```bash
@@ -105,16 +105,25 @@ That's it for hard requirements. Everything else (voice, video, WhatsApp) is opt
 
 ---
 
-### Step 2: Create a Telegram bot
+### Step 2: Create your Slack app (or Telegram bot)
 
-You need a bot token from Telegram. This is what ClaudeClaw uses to send and receive messages.
+ClaudeClaw's primary front-end is Slack. You DM a Slack bot in your workspace and it runs the real `claude` CLI on your machine.
+
+**Slack (recommended):**
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App → From manifest**
+2. Paste the app manifest from the [Slack as your front-end](#slack-as-your-front-end-transport) section below
+3. Enable **Socket Mode** and generate an App-Level Token (`xapp-…`, scope `connections:write`)
+4. **Install to Workspace**, then copy the Bot User OAuth Token (`xoxb-…`) from OAuth & Permissions
+
+Keep both tokens handy for the setup wizard.
+
+**Telegram (alternative):**
 
 1. Open Telegram and search for **@BotFather**
 2. Send `/newbot`
 3. Follow the prompts, give it a name and a username (e.g. `MyAssistantBot`)
 4. Copy the token BotFather gives you, it looks like `1234567890:AAFxxxxxxx`
-
-Keep this token handy for the next step.
 
 ---
 
@@ -138,7 +147,7 @@ The wizard walks you through everything interactively:
 
 - Checks your environment (Node, Claude CLI, builds if needed)
 - Asks which features you want (voice, video, War Room, WhatsApp)
-- Sets up your Telegram bot token and auto-detects your chat ID
+- Sets up your chat front-end — Slack (primary) or Telegram — and locks the bot to you
 - **Configures security**: PIN lock, emergency kill phrase, idle auto-lock
 - Creates your `CLAUDE.md` personality file from a template
 - Collects API keys **only for the features you selected**
@@ -154,11 +163,11 @@ The wizard walks you through everything interactively:
 
 ---
 
-### Step 5: Chat ID (automatic)
+### Step 5: Lock the bot to you
 
-The setup wizard detects your chat ID automatically. When it asks you to message your bot on Telegram, just send any message and press Y. It picks up your chat ID via the Telegram API.
+**Slack:** after the bot starts, DM it `/whoami`, copy the `U…` id, add `ALLOWED_SLACK_USER_ID=U…` to `.env`, and restart. The bot is fail-closed — until this is set it only answers `/whoami`.
 
-If you skipped this step during setup, the bot will auto-detect your chat ID the first time you message it and save it to `.env` for you.
+**Telegram:** the setup wizard detects your chat ID automatically. When it asks you to message your bot, just send any message and press Y. If you skipped this during setup, the bot auto-detects your chat ID the first time you message it and saves it to `.env` for you.
 
 ---
 
@@ -291,7 +300,7 @@ Mount a persistent volume at the project root (`/app` on Railway, a Fly volume o
 ### Other gotchas
 
 - **CPU/RAM**: the SDK subprocess is a full `node` + `claude` runtime per query. 512 MB minimum, 1 GB recommended.
-- **Outbound network**: needs to reach `api.anthropic.com`, `api.telegram.org`, and any optional services you enable (Gemini, ElevenLabs, Slack, etc.).
+- **Outbound network**: needs to reach `api.anthropic.com`, `slack.com` (or `api.telegram.org`), and any optional services you enable (Gemini, ElevenLabs, etc.).
 - **launchd / systemd**: skip the background-service step in setup. Your platform manages the process.
 - **Cloudflare Tunnel**: if you want the dashboard public, the cloud platform's own URL will already be public. You don't need the tunnel.
 
@@ -311,9 +320,13 @@ See the feature table at the top of this README. Core features work with zero ex
 
 ## API Keys: What Each Does
 
-> **Most users only need a Telegram bot token.** Everything below the Telegram section is optional and only needed for experimental features.
+> **Most users only need Slack tokens (or a Telegram bot token).** Everything below the front-end tokens is optional and only needed for experimental features.
 
-### Telegram Bot Token (required)
+### Slack tokens (primary front-end)
+
+**Get them:** [api.slack.com/apps](https://api.slack.com/apps) → Create New App → From manifest (see the [Slack as your front-end](#slack-as-your-front-end-transport) section). Free, takes ~3 minutes. You need the Bot User OAuth Token (`xoxb-…`) and an App-Level Token (`xapp-…`).
+
+### Telegram Bot Token (alternative front-end)
 
 **Get it:** [@BotFather](https://t.me/botfather) → `/newbot`. free, instant.
 
@@ -450,7 +463,7 @@ Voice output uses a cascade of TTS providers. If the first one fails, it tries t
 
 If all TTS providers fail, it falls back to text automatically.
 
-### Voice pipeline (Telegram voice notes)
+### Voice pipeline (voice notes)
 
 ```
 Voice note sent
@@ -481,7 +494,7 @@ ClaudeClaw downloads the video to `workspace/uploads/` and tells Claude to analy
 
 ### File sending → Claude sends you files
 
-Ask Claude to create a file (PDF, spreadsheet, image, text) and send it to you. Claude creates the file on your machine, includes a `[SEND_FILE:/path]` marker in its response, and the bot sends it as a Telegram attachment. Works with any file type up to 50MB.
+Ask Claude to create a file (PDF, spreadsheet, image, text) and send it to you. Claude creates the file on your machine, includes a `[SEND_FILE:/path]` marker in its response, and the bot sends it as a chat attachment (Slack or Telegram). Telegram caps uploads at 50MB; Slack allows larger files.
 
 ```
 "Write a haiku about AI and send it to me as a text file"
@@ -508,7 +521,7 @@ Every skill in `~/.claude/skills/` loads on every session. Call them directly (`
 | Command | What it does |
 |---------|-------------|
 | `/help` | List all available commands |
-| `/stop` | Cancel the current agent query mid-execution. works from Telegram and the dashboard |
+| `/stop` | Cancel the current agent query mid-execution. works from chat and the dashboard |
 | `/model` | Switch Claude model for this chat. `/model haiku` for speed, `/model sonnet` for balance, `/model opus` (default) for full power. Resets on restart |
 | `/voice` | Toggle voice replies on/off for all messages. When off, voice notes still get transcribed and executed. replies just come back as text |
 | `/newchat` | Wipe the Claude Code session and start fresh. Use when context gets stale or the conversation window is filling up |
@@ -538,9 +551,9 @@ Every skill in `~/.claude/skills/` loads on every session. Call them directly (`
 | `/start` | First message to the bot, confirms it's running |
 | `/chatid` | Shows your Telegram chat ID for the `ALLOWED_CHAT_ID` setting in `.env` |
 
-All built-in commands are registered in Telegram's command menu, so you get autocomplete when you type `/`.
+All built-in commands work on both transports. On Telegram they're registered in the command menu automatically, so you get autocomplete when you type `/`. On Slack, every command must be declared in the app manifest under `slash_commands` (Slack rejects undeclared commands client-side) — the manifest in the [Slack as your front-end](#slack-as-your-front-end-transport) section includes them all.
 
-### Skill commands auto-register in Telegram
+### Skill commands auto-register in Telegram's menu
 
 Any skill in `~/.claude/skills/` that has `user_invocable: true` in its `SKILL.md` frontmatter automatically shows up in Telegram's `/` command menu. No code changes needed -- just drop a skill folder in and restart the bot.
 
@@ -588,7 +601,7 @@ Type anything that isn't a number or `r <text>` to exit Slack mode and return to
 
 ![Dashboard preview](assets/dashboard-preview.png)
 
-A live web page that shows you everything happening inside your assistant: what tasks are scheduled, what it remembers, how much you're spending, and whether it's healthy. You open it from Telegram with one tap.
+A live web page that shows you everything happening inside your assistant: what tasks are scheduled, what it remembers, how much you're spending, and whether it's healthy. You open it from chat with one tap.
 
 ### How the dashboard works
 
@@ -598,7 +611,7 @@ When you start ClaudeClaw, a small web page starts running alongside the bot. It
 
 Here's what happens when you use it:
 
-1. **You send `/dashboard` in Telegram**: the bot replies with a clickable link
+1. **You send `/dashboard` to your bot**: it replies with a clickable link
 2. **You tap the link**: a web page opens in your browser with four live panels
 3. **The page updates itself every 60 seconds**: no need to refresh manually
 
@@ -630,7 +643,7 @@ Below that, the dashboard is organized into panels:
 | **System Health** | Context window gauge (green/yellow/red), session age, compaction count, connection status for Telegram, WhatsApp, and Slack. |
 | **Tokens & Cost** | Today's spend, all-time cost, 30-day cost timeline chart, cache hit rate chart. |
 
-The dashboard also has a **live chat overlay**: a floating chat button that opens a real-time conversation panel. You can send messages to Claude directly from the dashboard and see responses stream in via SSE (Server-Sent Events). It shows tool progress in real time and has a stop button to abort queries mid-execution. Messages sent from the dashboard are also relayed to your Telegram chat.
+The dashboard also has a **live chat overlay**: a floating chat button that opens a real-time conversation panel. You can send messages to Claude directly from the dashboard and see responses stream in via SSE (Server-Sent Events). It shows tool progress in real time and has a stop button to abort queries mid-execution. Messages sent from the dashboard are also relayed to your chat app (Slack or Telegram).
 
 On your phone it's a single scrollable page. On a computer it splits into two columns automatically.
 
@@ -648,7 +661,7 @@ It prints a long random string like `a3f8c2d1e5b794...`. this is your dashboard 
 
 #### Step 2: Add the password to your settings
 
-Open the `.env` file in your ClaudeClaw folder. (This is the same file where your Telegram token and other keys live. Open it with any text editor. TextEdit on Mac, Notepad on Windows, or whatever your terminal editor is.)
+Open the `.env` file in your ClaudeClaw folder. (This is the same file where your bot tokens and other keys live. Open it with any text editor. TextEdit on Mac, Notepad on Windows, or whatever your terminal editor is.)
 
 Add this line:
 
@@ -676,7 +689,7 @@ You should see a log line that says `Dashboard server running`. If you don't, do
 
 #### Step 4: Open the dashboard
 
-The easiest way: **send `/dashboard` to your bot in Telegram.** It replies with a clickable link. Tap it. Done.
+The easiest way: **send `/dashboard` to your bot.** It replies with a clickable link. Tap it. Done.
 
 Or open your browser and go to:
 ```
@@ -713,7 +726,7 @@ It prints a URL like `https://something-random.trycloudflare.com`. Copy that URL
 DASHBOARD_URL=https://something-random.trycloudflare.com
 ```
 
-Restart the bot (`npm run build && npm start`). Now when you send `/dashboard` in Telegram, the link works from your phone.
+Restart the bot (`npm run build && npm start`). Now when you send `/dashboard`, the link works from your phone.
 
 **Downside:** The URL changes every time you restart the tunnel. You'll need to update `.env` each time.
 
@@ -827,7 +840,7 @@ Everything writes to `dashboard_settings` via `PATCH /api/dashboard/settings` �
 
 ## Slack as your front-end (transport)
 
-By default ClaudeClaw's front-end is Telegram. You can instead run it **on Slack** — DM a Slack bot (or @mention it in channels) and it runs the real `claude` CLI and replies in Slack, with full parity: text, voice notes, photos/docs/video, voice replies, streaming, and all the slash commands.
+Slack is ClaudeClaw's **primary** front-end. You DM a Slack bot (or @mention it in channels) and it runs the real `claude` CLI and replies in Slack, with full parity: text, voice notes, photos/docs/video, voice replies, streaming, and all the slash commands. (Telegram remains fully supported as the alternative — set `TRANSPORT=telegram`.)
 
 > This is different from the **Slack integration** section below. The *transport* is the bot you talk to (`xoxb`/`xapp` tokens, Socket Mode). The *integration* lets ClaudeClaw read/reply to your existing Slack on your behalf (`xoxp` user token). They're independent — you can use either, both, or neither.
 
@@ -896,7 +909,7 @@ Then DM it, or invite it to a channel and `@ClaudeClaw …`. Send voice notes, p
 
 ## Slack integration (read/reply on your behalf)
 
-Requires a Slack User OAuth Token (`xoxp`). This connects to your workspace so ClaudeClaw can read and send messages on your behalf — accessed from within Telegram (`/slack`) or via the standalone CLI/skill. Independent of the Slack *transport* above.
+Requires a Slack User OAuth Token (`xoxp`). This connects to your workspace so ClaudeClaw can read and send messages on your behalf — accessed from within your bot chat (`/slack`) or via the standalone CLI/skill. Independent of the Slack *transport* above.
 
 ### Step 1: Create a Slack app
 
@@ -957,7 +970,7 @@ This is the critical step. You need to add permissions so the app can read and s
 
 ### Step 5: Verify it works
 
-Send `/slack` in your Telegram chat. You should see a numbered list of your recent Slack conversations with unread counts.
+Send `/slack` to your bot. You should see a numbered list of your recent Slack conversations with unread counts.
 
 If you get "Slack not connected", double-check:
 - The token starts with `xoxp-` (not `xoxb-` which is a bot token)
@@ -1093,7 +1106,7 @@ npx tsx scripts/wa-daemon.ts
 
 A QR code prints. Open WhatsApp → Settings → Linked Devices → scan within 30 seconds. Session saves to `store/waweb/`. you only scan once.
 
-### Use it from Telegram
+### Use it from chat
 
 ```
 /wa              list 5 most recent chats (unread first)
@@ -1196,7 +1209,7 @@ Requires `GOOGLE_API_KEY` in your `.env` (Gemini Flash, costs ~$0.03/day).
 
 ### Pinning memories
 
-High-importance memories (0.8+) trigger a Telegram notification when saved, giving you a chance to pin them. Pinned memories never decay.
+High-importance memories (0.8+) trigger a chat notification when saved, giving you a chance to pin them. Pinned memories never decay.
 
 ### Changing how memory works
 
@@ -1309,7 +1322,7 @@ node dist/schedule-cli.js delete <id>
 
 ## Mission Control
 
-Mission Control lets you create one-shot tasks and assign them to any agent from the dashboard or via Telegram.
+Mission Control lets you create one-shot tasks and assign them to any agent from the dashboard or via chat.
 
 ![Mission Control task lifecycle](assets/mission-control-flow.png)
 
@@ -1318,7 +1331,7 @@ Mission Control lets you create one-shot tasks and assign them to any agent from
 1. **Create a task** from the dashboard (click **+ New Task** in the inbox column) or tell your main agent: "have research look into X"
 2. The task appears in the **Inbox** column on the dashboard, unassigned, with a priority pill
 3. **Assign it** by dragging it to an agent column, clicking **Auto-assign** for a single task, or **Auto-assign all** to bulk-route every unassigned task in one shot
-4. The target agent picks it up within 60 seconds, executes it, and sends the result to your Telegram chat
+4. The target agent picks it up within 60 seconds, executes it, and sends the result to your chat
 5. Completed tasks linger in the agent's column for 30 minutes (so you can re-read the result inline), then move to the **History** drawer where they're paginated and searchable
 
 ### Layout controls
@@ -1341,7 +1354,7 @@ Click any inbox card to open the **task details modal**: full prompt, priority, 
 
 When you click **Auto-assign**, Gemini Flash reads the task prompt and matches it against your agent descriptions (from their `agent.yaml` files). A task about "draft a reply to John's email" routes to the comms agent. A task about "research competitors" routes to the research agent. Costs about $0.0001 per classification. **Auto-assign all** runs the same classifier in bulk for every unassigned task in the inbox.
 
-### From Telegram
+### From chat
 
 Your main agent can create mission tasks for other agents. Just say things like:
 - "have research look into the top competitors in AI coding"
@@ -1422,7 +1435,7 @@ The sections that matter most:
 
 **Skills table**: Maps skill names to trigger phrases. This teaches Claude to invoke them automatically when you describe a task.
 
-**Message format**: How responses should look in Telegram: tight and scannable, summary-first for long outputs, how to handle task lists.
+**Message format**: How responses should look in chat: tight and scannable, summary-first for long outputs, how to handle task lists.
 
 ---
 
@@ -1473,7 +1486,7 @@ Install these skills into ~/.claude/skills/:
 - google-calendar (scheduling, availability checks)
 - agent-browser (web research, form filling, scraping)
 
-Then test: send "check my email" to your bot on Telegram.
+Then test: send "check my email" to your bot.
 ```
 
 The skill catalog is at [github.com/anthropics/claude-code/tree/main/skills](https://github.com/anthropics/claude-code/tree/main/skills). Community skills work too. Anything in `~/.claude/skills/` auto-loads for every agent.
@@ -1557,8 +1570,12 @@ Browse more: [github.com/anthropics/claude-code](https://github.com/anthropics/c
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Yes | From [@BotFather](https://t.me/botfather) |
-| `ALLOWED_CHAT_ID` | Yes | Your chat ID. send `/chatid` to get it |
+| `TRANSPORT` | No | `slack` or `telegram`. Auto-detects Slack when both Slack tokens are set |
+| `SLACK_BOT_TOKEN` | Yes (Slack) | Bot User OAuth Token (`xoxb-…`) from your Slack app |
+| `SLACK_APP_TOKEN` | Yes (Slack) | App-Level Token (`xapp-…`, scope `connections:write`) for Socket Mode |
+| `ALLOWED_SLACK_USER_ID` | Yes (Slack) | Your Slack user ID. DM the bot `/whoami` to get it |
+| `TELEGRAM_BOT_TOKEN` | Yes (Telegram) | From [@BotFather](https://t.me/botfather) |
+| `ALLOWED_CHAT_ID` | Yes (Telegram) | Your chat ID. send `/chatid` to get it |
 | `ANTHROPIC_API_KEY` | No | Pay-per-token instead of Max subscription |
 | `GROQ_API_KEY` | No | Voice input. [console.groq.com](https://console.groq.com) |
 | `ELEVENLABS_API_KEY` | No | Voice output. [elevenlabs.io](https://elevenlabs.io) |
@@ -1619,7 +1636,7 @@ These protections are active in every ClaudeClaw installation, no configuration 
 
 | Layer | What it does |
 |-------|-------------|
-| **Chat ID restriction** | `ALLOWED_CHAT_ID` locks the bot to a single Telegram account. Messages from any other user are silently dropped. |
+| **User restriction** | `ALLOWED_SLACK_USER_ID` (Slack) or `ALLOWED_CHAT_ID` (Telegram) locks the bot to a single account. Messages from any other user are silently dropped. On Slack the bot is fail-closed: until the lock is set it only answers `/whoami`. |
 | **Private chat only** | The bot rejects all group chats. Only private (1-on-1) conversations are accepted. |
 | **Audit logging** | Every action (messages, commands, delegations, lock/unlock, blocked attempts) is recorded to the `audit_log` table in SQLite with timestamps, agent ID, and chat ID. |
 | **DB file permissions** | The `store/` directory is set to `0700` and all database files to `0600` on startup (owner-only access). |
@@ -1651,7 +1668,8 @@ The setup wizard can generate one for you, or you can choose your own.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ALLOWED_CHAT_ID` | **Yes** | Your Telegram chat ID. Bot ignores all other users. |
+| `ALLOWED_SLACK_USER_ID` | **Yes** (Slack) | Your Slack user ID. Bot ignores all other users. |
+| `ALLOWED_CHAT_ID` | **Yes** (Telegram) | Your Telegram chat ID. Bot ignores all other users. |
 | `DB_ENCRYPTION_KEY` | **Yes** | AES-256 key for message field encryption. Auto-generated on first run. |
 | `SECURITY_PIN_HASH` | No | Salted SHA-256 hash of your PIN. Format: `salt:hash`. Setup wizard generates this. |
 | `IDLE_LOCK_MINUTES` | No | Auto-lock after N minutes of inactivity. Only active when PIN is set. |
@@ -1670,7 +1688,7 @@ Or view it in the dashboard via the API: `GET /api/audit?limit=50`.
 
 **WhatsApp daemon runs on localhost only.** The `wa-daemon` HTTP API (port 4242) and Chrome DevTools Protocol (port 9222) bind to `127.0.0.1`. They are not accessible from outside your machine, but any local process can reach them.
 
-**`notify.sh` is called by Claude.** The notification script sends Telegram messages via `curl`. Since Claude has full shell access, it can call this script with any content. This is by design (progress updates), but prompt injection via external content could theoretically cause unexpected messages.
+**`notify.sh` is called by Claude.** The notification script sends chat messages (Slack or Telegram) via `curl`. Since Claude has full shell access, it can call this script with any content. This is by design (progress updates), but prompt injection via external content could theoretically cause unexpected messages.
 
 ---
 
@@ -1728,7 +1746,7 @@ Or view it in the dashboard via the API: `GET /api/audit?limit=50`.
 No. There is no separate prompt to execute and no `Rebuild_Prompt.md` file. `CLAUDE.md` in the repo **is** the prompt, it loads automatically into every Claude Code session. You personalize it once (replace the `[BRACKETED]` placeholders with your info) and forget about it. Just clone the repo, run setup, and go. When you `git pull` updates, your personalized `.env` stays untouched (gitignored) and `CLAUDE.md` changes are merged by git.
 
 **"Does this use Claude Remote?"**
-No. ClaudeClaw has nothing to do with Anthropic's Remote product. It runs the `claude` CLI locally on your own machine (Mac, Linux, or Windows via WSL2) and pipes results to Telegram. No cloud VMs, no remote sessions.
+No. ClaudeClaw has nothing to do with Anthropic's Remote product. It runs the `claude` CLI locally on your own machine (Mac, Linux, or Windows via WSL2) and pipes results to Slack or Telegram. No cloud VMs, no remote sessions.
 
 **"Does this work on Windows?"**
 Yes, two ways. WSL2 is the smoothest (install WSL2, clone ClaudeClaw inside the WSL filesystem, run the normal Linux setup). Native Windows also works: the setup wizard registers a per-user Scheduled Task at logon (no admin rights), and agent activate/deactivate uses `schtasks` under the hood. War Room voice still needs WSL2 because the Python stack is POSIX-only.
@@ -1746,7 +1764,7 @@ Recommended but not required. The video covers how Claude Code works under the h
 ClaudeClaw converts Claude's Markdown to Telegram-safe HTML (bold, italic, code blocks, links). Telegram's formatting support is limited compared to a full web page. If something looks off, it's usually Telegram's rendering, not a bug. For very long or complex responses, the formatting is intentionally kept simple to avoid Telegram parse errors.
 
 **"Can I add extra security like 2FA?"**
-`ALLOWED_CHAT_ID` restricts the bot to your Telegram account, which is the default security layer. Community members have added Google Authenticator (TOTP) for tiered permissions (read-only vs elevated actions with time-limited re-auth). This isn't built in yet, but it's a straightforward addition to `handleMessage()` in `src/bot.ts` if you want that extra layer.
+`ALLOWED_SLACK_USER_ID` (Slack) or `ALLOWED_CHAT_ID` (Telegram) restricts the bot to your account, which is the default security layer. Community members have added Google Authenticator (TOTP) for tiered permissions (read-only vs elevated actions with time-limited re-auth). This isn't built in yet, but it's a straightforward addition to `handleMessage()` in `src/bot.ts` if you want that extra layer.
 
 ---
 
@@ -1754,8 +1772,8 @@ ClaudeClaw converts Claude's Markdown to Telegram-safe HTML (bold, italic, code 
 
 ```mermaid
 flowchart TD
-    Phone["Telegram App"] -->|message| TGAPI["Telegram Bot API"]
-    TGAPI -->|long-poll| Bot["bot.ts\n(grammy)"]
+    Phone["Slack / Telegram App"] -->|message| TGAPI["Slack Socket Mode /\nTelegram Bot API"]
+    TGAPI -->|events / long-poll| Bot["slack-bot.ts / bot.ts"]
 
     Bot -->|voice note| STT["Groq Whisper\nTranscription"]
     Bot -->|photo / doc / video| DL["Media Download\nworkspace/uploads/"]
@@ -1850,7 +1868,7 @@ claudeclaw/
 ├── scripts/
 │   ├── setup.ts          Interactive setup wizard. run with: npm run setup
 │   ├── status.ts         Health check. run with: npm run status
-│   ├── notify.sh         Sends a Telegram message from the shell (used by Claude)
+│   ├── notify.sh         Sends a chat message (Slack/Telegram) from the shell (used by Claude)
 │   └── wa-daemon.ts      WhatsApp daemon. run separately for WhatsApp bridge
 │
 │  ← Runtime data (auto-created, gitignored)
@@ -1875,11 +1893,13 @@ Everything else runs without modification.
 
 This is a core feature, not experimental. Setting up multiple agents is straightforward and one of the most powerful things about ClaudeClaw.
 
-**What are agents?** Instead of one bot doing everything, you can spin up specialist bots. Each one is its own Telegram chat with its own personality, its own context window, and its own focus area. Think of it like having a small team of people, each in their own DM thread on your phone.
+**What are agents?** Instead of one bot doing everything, you can spin up specialist agents. Each one has its own personality, its own context window, and its own focus area. Think of it like having a small team of people, each with their own role.
 
-**How it works in plain English:** Each agent is just another Telegram bot running the same ClaudeClaw code, but with a different personality file (CLAUDE.md) and a different Telegram token. They all share your machine, your database, and your skills. The main agent can delegate work to specialists, and they ping you back on Telegram when they're done.
+**How it works in plain English:** Each agent runs the same ClaudeClaw code with a different personality file (CLAUDE.md). They all share your machine, your database, and your skills. The main agent can delegate work to specialists, and they ping you back in chat when they're done.
 
-ClaudeClaw can run **specialist agents** alongside the main bot. Each agent is its own Telegram bot with its own personality, its own Claude Code session, and its own chat on your phone.
+**On Slack (primary):** agents are **delegation-only** — no extra bots or tokens needed. You reach them through the main bot with `@agent: your request` or `/delegate`, and they answer back in the same Slack DM.
+
+**On Telegram:** each agent can also run as its own standalone Telegram bot (its own token from @BotFather, its own chat on your phone), or stay delegation-only just like on Slack.
 
 ![Agent avatars](assets/agent-comms.png) ![Agent avatars](assets/agent-content.png) ![Agent avatars](assets/agent-ops.png) ![Agent avatars](assets/agent-research.png)
 
