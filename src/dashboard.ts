@@ -91,6 +91,7 @@ import {
   isAgentRunning,
 } from './agent-create.js';
 import { getMainModelOverride, processMessageFromDashboard } from './bot.js';
+import { UPLOADS_DIR } from './media.js';
 import { getDashboardHtml } from './dashboard-html.js';
 import { getWarRoomHtml } from './warroom-html.js';
 import { getWarRoomPickerHtml } from './warroom-text-picker-html.js';
@@ -2936,12 +2937,71 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return c.json({ turns });
   });
 
+  // Upload chat attachments (documents, spreadsheets, images, etc.).
+  // Files land in workspace/uploads/ — the same directory Telegram media
+  // uses, so the 24h cleanup sweep applies to them too. The client then
+  // references the returned paths in /api/chat/send.
+  app.post('/api/chat/upload', async (c) => {
+    const body = await c.req.parseBody({ all: true });
+    const raw = body['files'] ?? body['file'];
+    const list = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(
+      (f): f is File => typeof f !== 'string' && !!f,
+    );
+    if (list.length === 0) return c.json({ error: 'No files uploaded' }, 400);
+    if (list.length > 5) return c.json({ error: 'Max 5 files per message' }, 400);
+
+    const saved: { name: string; path: string; size: number }[] = [];
+    for (const file of list) {
+      const buf = Buffer.from(await file.arrayBuffer());
+      if (buf.length > 50 * 1024 * 1024) {
+        return c.json({ error: `"${file.name}" is too large (max 50MB)` }, 400);
+      }
+      const safeName = (file.name || 'upload').replace(/[^a-zA-Z0-9._-]/g, '_').slice(-120);
+      const localPath = path.join(UPLOADS_DIR, `dash_${Date.now()}_${saved.length}_${safeName}`);
+      fs.writeFileSync(localPath, buf);
+      saved.push({ name: file.name || safeName, path: localPath, size: buf.length });
+    }
+    logger.info({ count: saved.length }, 'Dashboard chat attachments uploaded');
+    return c.json({ files: saved });
+  });
+
   // Send message from dashboard
   app.post('/api/chat/send', async (c) => {
     if (!relayToUser) return c.json({ error: 'Chat relay not available' }, 503);
-    const body = await c.req.json<{ message?: string }>();
-    const message = body?.message?.trim();
-    if (!message) return c.json({ error: 'message required' }, 400);
+    const body = await c.req.json<{ message?: string; attachments?: { path?: string; name?: string }[] }>();
+    let message = body?.message?.trim() || '';
+
+    // Attachments must be files that came through /api/chat/upload —
+    // anything outside UPLOADS_DIR is rejected so a token holder can't
+    // point Claude at arbitrary filesystem paths via this field.
+    const attachments: { path: string; name: string }[] = [];
+    for (const att of body?.attachments ?? []) {
+      if (!att?.path) continue;
+      const resolved = path.resolve(att.path);
+      if (!resolved.startsWith(UPLOADS_DIR + path.sep) || !fs.existsSync(resolved)) {
+        return c.json({ error: `Invalid attachment path: ${att.path}` }, 400);
+      }
+      attachments.push({ path: resolved, name: att.name || path.basename(resolved) });
+    }
+
+    if (!message && attachments.length === 0) {
+      return c.json({ error: 'message required' }, 400);
+    }
+
+    if (attachments.length > 0) {
+      const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.heic'];
+      const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+      const lines = attachments.map((a) => {
+        const ext = path.extname(a.path).toLowerCase();
+        const kind = imageExts.includes(ext) ? 'image' : videoExts.includes(ext) ? 'video' : 'document';
+        return `- ${kind}: ${a.name} — saved at ${a.path}`;
+      });
+      const hasVideo = lines.some((l) => l.startsWith('- video'));
+      const block =
+        `[Attached file${attachments.length > 1 ? 's' : ''}]\n${lines.join('\n')}\n` +
+        `Read and process the attached file(s) as appropriate (analyze images${hasVideo ? '; for videos use the gemini-api-dev skill with GOOGLE_API_KEY from .env' : ''}).`;
+      message = message ? `${message}\n\n${block}` : block;
+    }
 
     // Reject if a turn is already in flight. Without this guard, rapid
     // clicks (or a scripted token holder) can stack N agent invocations,

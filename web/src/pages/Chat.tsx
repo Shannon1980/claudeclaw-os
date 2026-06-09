@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Send, Square, Sparkles, ArrowDown } from 'lucide-preact';
+import { Send, Square, Sparkles, ArrowDown, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { StatusDot } from '@/components/Pill';
 import { useFetch } from '@/lib/useFetch';
-import { apiGet, apiPost, chatId } from '@/lib/api';
+import { apiGet, apiPost, apiUpload, chatId } from '@/lib/api';
 import { renderMarkdown } from '@/lib/markdown';
 import { formatCost, formatNumber } from '@/lib/format';
 import { showCosts } from '@/lib/theme';
@@ -23,6 +23,22 @@ const QUICK_ACTIONS = [
   { label: 'Recent wins', prompt: 'What did I accomplish in the last 24 hours?' },
 ];
 
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const ATTACH_ACCEPT = [
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv',
+  '.md', '.txt', '.json', '.yaml', '.yml',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp',
+  '.mp4', '.mov',
+].join(',');
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'heic'];
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function Chat() {
   const agents = useFetch<{ agents: Agent[] }>('/api/agents', 60_000);
   const [activeAgent, setActiveAgent] = useState<string>('all');
@@ -35,6 +51,10 @@ export function Chat() {
   const [error, setError] = useState<string | null>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const streamConnected = chatStreamConnected.value;
   // Track whether the message list is scrolled near the bottom. Drives
   // the floating "scroll to latest" button and tells the auto-scroll
@@ -126,16 +146,52 @@ export function Chat() {
     return unsub;
   }, [activeAgent]);
 
+  function addFiles(files: FileList | File[] | null | undefined) {
+    if (!files) return;
+    setError(null);
+    const incoming = Array.from(files);
+    const rejected = incoming.find((f) => f.size > MAX_ATTACHMENT_BYTES);
+    if (rejected) {
+      setError(`"${rejected.name}" is too large (max 50MB)`);
+      return;
+    }
+    setAttachments((prev) => {
+      const merged = [...prev];
+      for (const f of incoming) {
+        if (merged.length >= MAX_ATTACHMENTS) {
+          setError(`Max ${MAX_ATTACHMENTS} files per message`);
+          break;
+        }
+        // Skip exact duplicates (same name + size) already queued
+        if (!merged.some((m) => m.name === f.name && m.size === f.size)) merged.push(f);
+      }
+      return merged;
+    });
+  }
+
   async function send(textOverride?: string) {
     const message = (textOverride ?? draft).trim();
-    if (!message) return;
+    const files = textOverride ? [] : attachments;
+    if (!message && files.length === 0) return;
     setSending(true); setError(null);
     try {
-      const res = await apiPost<{ ok?: boolean; error?: string }>('/api/chat/send', { message });
+      // Upload attachments first; the send call references the saved paths.
+      let uploaded: { name: string; path: string }[] = [];
+      if (files.length > 0) {
+        const form = new FormData();
+        for (const f of files) form.append('files', f, f.name);
+        const up = await apiUpload<{ files: { name: string; path: string }[] }>('/api/chat/upload', form);
+        uploaded = up.files || [];
+      }
+      const res = await apiPost<{ ok?: boolean; error?: string }>('/api/chat/send', {
+        message,
+        ...(uploaded.length > 0 ? { attachments: uploaded } : {}),
+      });
       if (!res.ok && res.error) {
         setError(res.error === 'busy' ? 'A turn is already in flight. Wait for it to finish.' : res.error);
       } else if (!textOverride) {
         setDraft('');
+        setAttachments([]);
       }
     } catch (err: any) {
       setError(err?.message || String(err));
@@ -161,7 +217,34 @@ export function Chat() {
     : agentTokens.data?.todayTurns ?? 0;
 
   return (
-    <div class="flex flex-col h-full">
+    <div
+      class="flex flex-col h-full relative"
+      onDragEnter={(e) => {
+        if (!e.dataTransfer?.types?.includes('Files')) return;
+        e.preventDefault();
+        dragDepth.current++;
+        setDragging(true);
+      }}
+      onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        dragDepth.current = 0;
+        setDragging(false);
+        addFiles(e.dataTransfer?.files);
+      }}
+    >
+      {dragging && (
+        <div class="absolute inset-0 z-20 flex items-center justify-center bg-[var(--color-bg)]/80 border-2 border-dashed border-[var(--color-accent)] rounded-lg m-2 pointer-events-none">
+          <span class="flex items-center gap-2 text-[13px] text-[var(--color-accent)] font-medium">
+            <Paperclip size={16} /> Drop files to attach
+          </span>
+        </div>
+      )}
       <PageHeader
         title="Chat"
         actions={
@@ -213,6 +296,32 @@ export function Chat() {
 
       <div class="border-t border-[var(--color-border)] px-4 pt-2 pb-3">
         <div class="max-w-4xl mx-auto">
+          {attachments.length > 0 && (
+            <div class="flex items-center gap-1.5 mb-2 flex-wrap">
+              {attachments.map((f, i) => {
+                const ext = f.name.split('.').pop()?.toLowerCase() || '';
+                const isImage = IMAGE_EXTS.includes(ext);
+                return (
+                  <span
+                    key={`${f.name}-${f.size}-${i}`}
+                    class="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-md text-[11px] bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
+                  >
+                    {isImage ? <ImageIcon size={11} class="text-[var(--color-accent)]" /> : <FileText size={11} class="text-[var(--color-accent)]" />}
+                    <span class="max-w-[180px] truncate">{f.name}</span>
+                    <span class="text-[var(--color-text-faint)]">{formatBytes(f.size)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                      class="p-0.5 rounded hover:bg-[var(--color-card)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                      aria-label={`Remove ${f.name}`}
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <div class="flex items-center gap-1 mb-2 flex-wrap">
             {QUICK_ACTIONS.map((qa) => (
               <button
@@ -227,6 +336,28 @@ export function Chat() {
             ))}
           </div>
           <div class="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={ATTACH_ACCEPT}
+              class="hidden"
+              onChange={(e) => {
+                const input = e.target as HTMLInputElement;
+                addFiles(input.files);
+                input.value = ''; // allow re-attaching the same file
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={sending}
+              title="Attach files (or drag & drop anywhere)"
+              class="p-2 rounded-lg border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              aria-label="Attach files"
+            >
+              <Paperclip size={14} />
+            </button>
             <textarea
               ref={inputRef}
               value={draft}
@@ -234,10 +365,10 @@ export function Chat() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  if (draft.trim()) void send();
+                  if (draft.trim() || attachments.length > 0) void send();
                 }
               }}
-              placeholder="Type a message. Shift+Enter for newline."
+              placeholder={attachments.length > 0 ? 'Add a note about the attached files (optional)…' : 'Type a message. Shift+Enter for newline.'}
               rows={1}
               class="flex-1 bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[var(--color-accent)] resize-none max-h-32"
             />
@@ -253,7 +384,7 @@ export function Chat() {
               <button
                 type="button"
                 onClick={() => void send()}
-                disabled={!draft.trim() || sending}
+                disabled={(!draft.trim() && attachments.length === 0) || sending}
                 class="inline-flex items-center gap-1 px-3 py-2 rounded-lg text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 <Send size={12} /> {sending ? 'Sending…' : 'Send'}

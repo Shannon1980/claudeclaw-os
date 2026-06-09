@@ -56,6 +56,18 @@ export async function apiPost<T = unknown>(path: string, body?: unknown): Promis
   return res.json();
 }
 
+/** Multipart upload. The browser sets the multipart boundary, so no
+ *  explicit content-type header here. */
+export async function apiUpload<T = unknown>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(withToken(path), { method: 'POST', body: form });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    const msg = (errBody as any)?.error || `POST ${path} failed: ${res.status}`;
+    throw new ApiError(res.status, errBody, msg);
+  }
+  return res.json();
+}
+
 export async function apiPatch<T = unknown>(path: string, body: unknown): Promise<T> {
   const res = await fetch(withToken(path), {
     method: 'PATCH',
