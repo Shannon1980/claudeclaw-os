@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
-import { Plus, Power, RotateCcw, Trash2, Copy, Check, FileText, Lightbulb, RefreshCw } from 'lucide-preact';
+import { Plus, Power, RotateCcw, Trash2, Copy, Check, FileText, Lightbulb, RefreshCw, Upload } from 'lucide-preact';
 import { Link } from 'wouter-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill, StatusDot } from '@/components/Pill';
@@ -379,8 +379,10 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
   const [model, setModel] = useState('claude-sonnet-4-6');
   const [template, setTemplate] = useState('');
   const [botToken, setBotToken] = useState('');
+  const [customClaudeMd, setCustomClaudeMd] = useState('');
+  const [customAgentYaml, setCustomAgentYaml] = useState('');
   const [createdId, setCreatedId] = useState<string | null>(null);
-  const [createdSummary, setCreatedSummary] = useState<{ envKey: string; agentDir: string } | null>(null);
+  const [createdSummary, setCreatedSummary] = useState<{ envKey: string | null; agentDir: string; hasToken: boolean } | null>(null);
   const [creating, setCreating] = useState(false);
   const [activating, setActivating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -404,6 +406,7 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
   function close() {
     setStep(1); setId(''); setName(''); setNameTouched(false); setDescription('');
     setModel('claude-sonnet-4-6'); setTemplate(''); setBotToken('');
+    setCustomClaudeMd(''); setCustomAgentYaml('');
     setCreatedId(null); setCreatedSummary(null); setError(null);
     onClose();
   }
@@ -435,6 +438,9 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
 
   const idValid = !!debouncedId && idCheck.data?.ok === true;
   const tokenValid = tokenStatus?.ok === true;
+  // Token is optional: empty = delegation-only agent. If one IS entered,
+  // it must validate before Create unlocks.
+  const tokenOk = botToken.trim() === '' || tokenValid;
   const suggestedBotName = `ClaudeClaw ${name || 'Agent'}`;
   const suggestedBotUsername = `claudeclaw_${id || 'agent'}_bot`;
 
@@ -442,10 +448,13 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
     setCreating(true); setError(null);
     try {
       const res = await apiPost<any>('/api/agents/create', {
-        id, name, description, model, template, botToken,
+        id, name, description, model, template,
+        botToken: botToken.trim() || undefined,
+        claudeMd: customClaudeMd.trim() ? customClaudeMd : undefined,
+        agentYaml: customAgentYaml.trim() ? customAgentYaml : undefined,
       });
       setCreatedId(res.agentId);
-      setCreatedSummary({ envKey: res.envKey, agentDir: res.agentDir });
+      setCreatedSummary({ envKey: res.envKey ?? null, agentDir: res.agentDir, hasToken: !!botToken.trim() });
       setStep(3);
     } catch (err: any) {
       setError(err?.message || String(err));
@@ -482,7 +491,7 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
                 disabled={!idValid || !name || !description}
                 class="ml-auto px-3 py-1.5 rounded text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Next: Bot token →
+                Next: Config →
               </button>
             </>
           )}
@@ -492,7 +501,7 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
               <button
                 type="button"
                 onClick={create}
-                disabled={!tokenValid || creating}
+                disabled={!tokenOk || creating}
                 class="ml-auto px-3 py-1.5 rounded text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {creating ? 'Creating…' : 'Create Agent'}
@@ -501,15 +510,17 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
           )}
           {step === 3 && (
             <>
-              <button type="button" onClick={close} class="px-3 py-1.5 rounded text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">Done</button>
-              <button
-                type="button"
-                onClick={activate}
-                disabled={activating}
-                class="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-40"
-              >
-                <Power size={12} /> {activating ? 'Activating…' : 'Activate (start service)'}
-              </button>
+              <button type="button" onClick={() => { onCreated(); close(); }} class="px-3 py-1.5 rounded text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">Done</button>
+              {createdSummary?.hasToken && (
+                <button
+                  type="button"
+                  onClick={activate}
+                  disabled={activating}
+                  class="ml-auto inline-flex items-center gap-1 px-3 py-1.5 rounded text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-40"
+                >
+                  <Power size={12} /> {activating ? 'Activating…' : 'Activate (start service)'}
+                </button>
+              )}
             </>
           )}
         </>
@@ -529,7 +540,7 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
               {step > n ? '✓' : n}
             </div>
             <span class={step === n ? 'text-[var(--color-text)]' : 'text-[var(--color-text-faint)]'}>
-              {n === 1 ? 'Basics' : n === 2 ? 'Bot token' : 'Activate'}
+              {n === 1 ? 'Basics' : n === 2 ? 'Config' : 'Done'}
             </span>
             {n < 3 && <span class="text-[var(--color-border)]">·</span>}
           </div>
@@ -606,30 +617,15 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
 
       {step === 2 && (
         <div class="space-y-3">
-          <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded p-3 text-[12px] leading-relaxed">
-            <div class="font-semibold text-[var(--color-text)] mb-2">Create the bot in Telegram</div>
-            <ol class="list-decimal list-inside space-y-1 text-[var(--color-text-muted)]">
-              <li>Open <span class="font-mono text-[var(--color-accent)]">@BotFather</span> in Telegram</li>
-              <li>Send <span class="font-mono text-[var(--color-accent)]">/newbot</span></li>
-              <li>
-                Name it: <CopyButton text={suggestedBotName} />
-              </li>
-              <li>
-                Username: <CopyButton text={suggestedBotUsername} />
-              </li>
-              <li>Copy the token BotFather returns</li>
-              <li>
-                Set a profile photo: send <span class="font-mono text-[var(--color-accent)]">/setuserpic</span> to BotFather, pick this bot, then upload an image. Skipping this is fine; the dashboard will fall back to initials.
-              </li>
-            </ol>
-          </div>
-
-          <Field label="Paste bot token">
+          <Field
+            label="Telegram bot token (optional)"
+            hint="Leave empty for a delegation-only agent: it runs through the main bot via @agentId: or /delegate, no Telegram bot needed. Add a token only if you want this agent as its own standalone Telegram bot."
+          >
             <input
               type="text"
               value={botToken}
               onInput={(e) => setBotToken((e.target as HTMLInputElement).value.trim())}
-              placeholder="123456789:ABC..."
+              placeholder="Empty = delegation-only (recommended)"
               class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] font-mono text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
             />
             {tokenStatus?.error && (
@@ -640,6 +636,41 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
             )}
           </Field>
 
+          {botToken.trim() !== '' && (
+            <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded p-3 text-[12px] leading-relaxed">
+              <div class="font-semibold text-[var(--color-text)] mb-2">Need a token? Create the bot in Telegram</div>
+              <ol class="list-decimal list-inside space-y-1 text-[var(--color-text-muted)]">
+                <li>Open <span class="font-mono text-[var(--color-accent)]">@BotFather</span> in Telegram</li>
+                <li>Send <span class="font-mono text-[var(--color-accent)]">/newbot</span></li>
+                <li>
+                  Name it: <CopyButton text={suggestedBotName} />
+                </li>
+                <li>
+                  Username: <CopyButton text={suggestedBotUsername} />
+                </li>
+                <li>Copy the token BotFather returns and paste it above</li>
+              </ol>
+            </div>
+          )}
+
+          <FileField
+            label="Custom CLAUDE.md (optional)"
+            hint="The agent's persona and instructions. Leave empty to use the selected template."
+            accept=".md,.txt,text/markdown,text/plain"
+            value={customClaudeMd}
+            onChange={setCustomClaudeMd}
+            placeholder={'# You are ' + (name || 'this agent') + '...\n\nPaste or upload your own CLAUDE.md'}
+          />
+
+          <FileField
+            label="Custom agent.yaml (optional)"
+            hint="Advanced config: model, mcp_servers, obsidian, warroom_tools. Leave empty to auto-generate. Your name/description/model from step 1 fill any missing fields."
+            accept=".yaml,.yml,text/yaml"
+            value={customAgentYaml}
+            onChange={setCustomAgentYaml}
+            placeholder={'name: ' + (name || 'Agent') + '\nmodel: claude-sonnet-4-6\n# mcp_servers: [...]'}
+          />
+
           {error && <div class="text-[var(--color-status-failed)] text-[11px]">{error}</div>}
         </div>
       )}
@@ -649,13 +680,24 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
           <div class="text-[var(--color-status-done)] text-[14px] font-medium">✓ Agent created</div>
           <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded p-3 space-y-1.5 font-mono text-[11px]">
             <div><span class="text-[var(--color-text-faint)]">id:</span> {createdId}</div>
-            <div><span class="text-[var(--color-text-faint)]">env:</span> {createdSummary?.envKey}</div>
+            {createdSummary?.envKey && (
+              <div><span class="text-[var(--color-text-faint)]">env:</span> {createdSummary.envKey}</div>
+            )}
             <div><span class="text-[var(--color-text-faint)]">dir:</span> {createdSummary?.agentDir}</div>
+            <div><span class="text-[var(--color-text-faint)]">mode:</span> {createdSummary?.hasToken ? 'standalone (Telegram bot)' : 'delegation-only'}</div>
           </div>
-          <div class="text-[var(--color-text-muted)]">
-            Click activate to install the launchd service and start the agent process. Once activated,
-            send it a message in Telegram and you're live.
-          </div>
+          {createdSummary?.hasToken ? (
+            <div class="text-[var(--color-text-muted)]">
+              Click activate to install the launchd service and start the agent process. Once activated,
+              send it a message in Telegram and you're live.
+            </div>
+          ) : (
+            <div class="text-[var(--color-text-muted)]">
+              Ready to use now — no service needed. Message the main bot with{' '}
+              <span class="font-mono text-[var(--color-accent)]">@{createdId}: your task</span> or{' '}
+              <span class="font-mono text-[var(--color-accent)]">/delegate {createdId} your task</span>.
+            </div>
+          )}
           {error && <div class="text-[var(--color-status-failed)] text-[11px]">{error}</div>}
         </div>
       )}
@@ -668,6 +710,66 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <div>
       <label class="block text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">{label}</label>
       {children}
+      {hint && <div class="text-[10.5px] text-[var(--color-text-faint)] mt-1">{hint}</div>}
+    </div>
+  );
+}
+
+/** Optional file content field: paste into the textarea or upload a file.
+ *  Uploads are read client-side and dropped into the textarea so the user
+ *  can still tweak before submitting. */
+function FileField({ label, hint, accept, value, onChange, placeholder }: {
+  label: string;
+  hint?: string;
+  accept: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [fileName, setFileName] = useState<string | null>(null);
+
+  function handleUpload(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      onChange(String(reader.result ?? ''));
+      setFileName(file.name);
+    };
+    reader.readAsText(file);
+    input.value = ''; // allow re-uploading the same file
+  }
+
+  return (
+    <div>
+      <div class="flex items-center justify-between mb-1">
+        <label class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)]">{label}</label>
+        <div class="flex items-center gap-2">
+          {fileName && <span class="text-[10px] text-[var(--color-status-done)]">✓ {fileName}</span>}
+          {value && (
+            <button
+              type="button"
+              onClick={() => { onChange(''); setFileName(null); }}
+              class="text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+            >
+              Clear
+            </button>
+          )}
+          <label class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] cursor-pointer bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors">
+            <Upload size={10} /> Upload
+            <input type="file" accept={accept} onChange={handleUpload} class="hidden" />
+          </label>
+        </div>
+      </div>
+      <textarea
+        value={value}
+        onInput={(e) => { onChange((e.target as HTMLTextAreaElement).value); setFileName(null); }}
+        rows={value ? 8 : 3}
+        placeholder={placeholder}
+        spellcheck={false}
+        class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[11.5px] font-mono text-[var(--color-text)] outline-none focus:border-[var(--color-accent)] resize-y"
+      />
       {hint && <div class="text-[10.5px] text-[var(--color-text-faint)] mt-1">{hint}</div>}
     </div>
   );
