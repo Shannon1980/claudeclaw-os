@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { Plus, Power, RotateCcw, Trash2, Copy, Check, FileText, Lightbulb, RefreshCw, Upload } from 'lucide-preact';
 import { Link } from 'wouter-preact';
 import { PageHeader } from '@/components/PageHeader';
@@ -715,9 +715,9 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-/** Optional file content field: paste into the textarea or upload a file.
- *  Uploads are read client-side and dropped into the textarea so the user
- *  can still tweak before submitting. */
+/** Optional file content field: paste into the textarea, upload a file, or
+ *  drag-and-drop one onto the textarea. Files are read client-side and
+ *  dropped into the textarea so the user can still tweak before submitting. */
 function FileField({ label, hint, accept, value, onChange, placeholder }: {
   label: string;
   hint?: string;
@@ -727,18 +727,53 @@ function FileField({ label, hint, accept, value, onChange, placeholder }: {
   placeholder?: string;
 }) {
   const [fileName, setFileName] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dropError, setDropError] = useState<string | null>(null);
+  // dragenter/dragleave fire for every child element; a depth counter keeps
+  // the highlight stable until the pointer actually leaves the drop zone.
+  const dragDepth = useRef(0);
 
-  function handleUpload(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
+  const acceptExts = accept.split(',').map((s) => s.trim()).filter((s) => s.startsWith('.'));
+
+  function readFile(file: File) {
+    if (acceptExts.length && !acceptExts.some((ext) => file.name.toLowerCase().endsWith(ext))) {
+      setDropError(`Expected a ${acceptExts.join(' or ')} file, got "${file.name}"`);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       onChange(String(reader.result ?? ''));
       setFileName(file.name);
+      setDropError(null);
     };
     reader.readAsText(file);
+  }
+
+  function handleUpload(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (file) readFile(file);
     input.value = ''; // allow re-uploading the same file
+  }
+
+  function handleDragEnter(e: DragEvent) {
+    e.preventDefault();
+    dragDepth.current++;
+    setDragging(true);
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) readFile(file);
   }
 
   return (
@@ -750,7 +785,7 @@ function FileField({ label, hint, accept, value, onChange, placeholder }: {
           {value && (
             <button
               type="button"
-              onClick={() => { onChange(''); setFileName(null); }}
+              onClick={() => { onChange(''); setFileName(null); setDropError(null); }}
               class="text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
             >
               Clear
@@ -762,14 +797,32 @@ function FileField({ label, hint, accept, value, onChange, placeholder }: {
           </label>
         </div>
       </div>
-      <textarea
-        value={value}
-        onInput={(e) => { onChange((e.target as HTMLTextAreaElement).value); setFileName(null); }}
-        rows={value ? 8 : 3}
-        placeholder={placeholder}
-        spellcheck={false}
-        class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[11.5px] font-mono text-[var(--color-text)] outline-none focus:border-[var(--color-accent)] resize-y"
-      />
+      <div
+        class="relative"
+        onDragEnter={handleDragEnter}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <textarea
+          value={value}
+          onInput={(e) => { onChange((e.target as HTMLTextAreaElement).value); setFileName(null); }}
+          rows={value ? 8 : 3}
+          placeholder={placeholder}
+          spellcheck={false}
+          class={`w-full bg-[var(--color-elevated)] border rounded px-2.5 py-1.5 text-[11.5px] font-mono text-[var(--color-text)] outline-none focus:border-[var(--color-accent)] resize-y transition-colors ${
+            dragging ? 'border-[var(--color-accent)] border-dashed' : 'border-[var(--color-border)]'
+          }`}
+        />
+        {dragging && (
+          <div class="absolute inset-0 flex items-center justify-center rounded bg-[var(--color-elevated)]/85 pointer-events-none">
+            <span class="flex items-center gap-1.5 text-[11px] text-[var(--color-accent)]">
+              <Upload size={12} /> Drop {acceptExts.join(' / ') || 'file'} here
+            </span>
+          </div>
+        )}
+      </div>
+      {dropError && <div class="text-[10.5px] text-[var(--color-status-failed)] mt-1">{dropError}</div>}
       {hint && <div class="text-[10.5px] text-[var(--color-text-faint)] mt-1">{hint}</div>}
     </div>
   );
