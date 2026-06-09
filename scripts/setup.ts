@@ -628,8 +628,10 @@ async function main() {
   info('Full skills catalog: https://github.com/anthropics/claude-code/tree/main/skills');
   console.log();
 
-  // ── 8. API keys ───────────────────────────────────────────────────────────
-  section('Telegram');
+  // ── 8. Transport + API keys ───────────────────────────────────────────────
+  section('Chat app');
+  info('ClaudeClaw can run on Telegram or Slack. Pick your front-end.');
+  console.log();
 
   const envPath = path.join(PROJECT_ROOT, '.env');
   const env: Record<string, string> = fs.existsSync(envPath) ? parseEnvFile(envPath) : {};
@@ -637,86 +639,136 @@ async function main() {
   // Persist CLAUDECLAW_CONFIG determined in section 6
   env.CLAUDECLAW_CONFIG = claudeclawConfigDir;
 
+  const transportDefault = (env.TRANSPORT || '').toLowerCase() === 'slack' ? '2' : '1';
+  const transportChoice = await ask('Use (1) Telegram or (2) Slack?', transportDefault);
+  const transport: 'telegram' | 'slack' =
+    (transportChoice.trim() === '2' || /slack/i.test(transportChoice)) ? 'slack' : 'telegram';
+  env.TRANSPORT = transport;
+
   let botUsername = '';
-  if (env.TELEGRAM_BOT_TOKEN) {
-    const s = spinner('Validating existing bot token...');
-    const r = await validateBotToken(env.TELEGRAM_BOT_TOKEN);
-    if (r.valid) {
-      botUsername = r.username || '';
-      s.stop('ok', `Bot: @${botUsername}`);
-    } else {
-      s.stop('fail', 'Existing token invalid — enter a new one');
-      delete env.TELEGRAM_BOT_TOKEN;
-    }
-  }
 
-  if (!env.TELEGRAM_BOT_TOKEN) {
-    console.log();
-    info('You need a Telegram bot token. Get one from @BotFather:');
-    bullet('Open Telegram → search @BotFather');
-    bullet('Send /newbot');
-    bullet('Follow the prompts, copy the token it gives you');
-    console.log();
+  if (transport === 'telegram') {
+    section('Telegram');
 
-    let valid = false;
-    while (!valid) {
-      const token = await ask('Paste your bot token');
-      if (!token) { console.log(`  ${c.red}Required.${c.reset}`); continue; }
-      const s = spinner('Validating...');
-      const r = await validateBotToken(token);
+    if (env.TELEGRAM_BOT_TOKEN) {
+      const s = spinner('Validating existing bot token...');
+      const r = await validateBotToken(env.TELEGRAM_BOT_TOKEN);
       if (r.valid) {
-        env.TELEGRAM_BOT_TOKEN = token;
         botUsername = r.username || '';
         s.stop('ok', `Bot: @${botUsername}`);
-        valid = true;
       } else {
-        s.stop('fail', 'Invalid token. Try again.');
+        s.stop('fail', 'Existing token invalid — enter a new one');
+        delete env.TELEGRAM_BOT_TOKEN;
       }
     }
-  }
 
-  console.log();
-  if (env.ALLOWED_CHAT_ID) {
-    ok(`Chat ID: ${env.ALLOWED_CHAT_ID}`);
-  } else {
-    info('Your chat ID locks the bot so only YOU can talk to it.');
-    info('We\'ll detect it automatically. Just message your bot on Telegram:');
-    console.log();
-    bullet('Open Telegram on your phone or desktop');
-    bullet(`Search for your bot: @${botUsername || 'your_bot_username'}`);
-    bullet('Tap Start or send any message to it');
-    console.log();
+    if (!env.TELEGRAM_BOT_TOKEN) {
+      console.log();
+      info('You need a Telegram bot token. Get one from @BotFather:');
+      bullet('Open Telegram → search @BotFather');
+      bullet('Send /newbot');
+      bullet('Follow the prompts, copy the token it gives you');
+      console.log();
 
-    const wantAuto = await confirm('Ready? Send a message to your bot, then press Y');
-
-    if (wantAuto) {
-      const s = spinner('Waiting for your message...');
-      let detected = '';
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await sleep(2000);
-        try {
-          const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getUpdates?limit=5&timeout=0`);
-          const data = (await res.json()) as { ok: boolean; result?: Array<{ message?: { chat?: { id?: number } } }> };
-          if (data.ok && data.result?.length) {
-            const chatId = data.result[data.result.length - 1]?.message?.chat?.id;
-            if (chatId) {
-              detected = String(chatId);
-              break;
-            }
-          }
-        } catch { /* retry */ }
+      let valid = false;
+      while (!valid) {
+        const token = await ask('Paste your bot token');
+        if (!token) { console.log(`  ${c.red}Required.${c.reset}`); continue; }
+        const s = spinner('Validating...');
+        const r = await validateBotToken(token);
+        if (r.valid) {
+          env.TELEGRAM_BOT_TOKEN = token;
+          botUsername = r.username || '';
+          s.stop('ok', `Bot: @${botUsername}`);
+          valid = true;
+        } else {
+          s.stop('fail', 'Invalid token. Try again.');
+        }
       }
+    }
 
-      if (detected) {
-        s.stop('ok', `Detected chat ID: ${detected}`);
-        env.ALLOWED_CHAT_ID = detected;
-      } else {
-        s.stop('warn', 'No message detected. You can add ALLOWED_CHAT_ID to .env later.');
-        info('The bot will show your chat ID the first time you message it.');
-      }
+    console.log();
+    if (env.ALLOWED_CHAT_ID) {
+      ok(`Chat ID: ${env.ALLOWED_CHAT_ID}`);
     } else {
-      info('No problem. The bot will show your chat ID the first time you');
-      info('message it. Add it to .env and restart.');
+      info('Your chat ID locks the bot so only YOU can talk to it.');
+      info('We\'ll detect it automatically. Just message your bot on Telegram:');
+      console.log();
+      bullet('Open Telegram on your phone or desktop');
+      bullet(`Search for your bot: @${botUsername || 'your_bot_username'}`);
+      bullet('Tap Start or send any message to it');
+      console.log();
+
+      const wantAuto = await confirm('Ready? Send a message to your bot, then press Y');
+
+      if (wantAuto) {
+        const s = spinner('Waiting for your message...');
+        let detected = '';
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await sleep(2000);
+          try {
+            const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getUpdates?limit=5&timeout=0`);
+            const data = (await res.json()) as { ok: boolean; result?: Array<{ message?: { chat?: { id?: number } } }> };
+            if (data.ok && data.result?.length) {
+              const chatId = data.result[data.result.length - 1]?.message?.chat?.id;
+              if (chatId) {
+                detected = String(chatId);
+                break;
+              }
+            }
+          } catch { /* retry */ }
+        }
+
+        if (detected) {
+          s.stop('ok', `Detected chat ID: ${detected}`);
+          env.ALLOWED_CHAT_ID = detected;
+        } else {
+          s.stop('warn', 'No message detected. You can add ALLOWED_CHAT_ID to .env later.');
+          info('The bot will show your chat ID the first time you message it.');
+        }
+      } else {
+        info('No problem. The bot will show your chat ID the first time you');
+        info('message it. Add it to .env and restart.');
+      }
+    }
+  } else {
+    section('Slack');
+    info('Slack runs over Socket Mode (no public URL). Create a Slack app first —');
+    info('the full app manifest is in the README under "Slack (transport)".');
+    console.log();
+    bullet('api.slack.com/apps → Create New App → From manifest');
+    bullet('Enable Socket Mode; generate an App-Level Token (xapp-…, scope connections:write)');
+    bullet('Install to your workspace; copy the Bot User OAuth Token (xoxb-…)');
+    console.log();
+
+    if (env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN) {
+      ok('Slack tokens already configured');
+    } else {
+      if (!env.SLACK_BOT_TOKEN) {
+        let bt = '';
+        while (!bt) {
+          bt = (await ask('Paste your Bot User OAuth Token (xoxb-…)')).trim();
+          if (!bt) console.log(`  ${c.red}Required.${c.reset}`);
+        }
+        env.SLACK_BOT_TOKEN = bt;
+      }
+      if (!env.SLACK_APP_TOKEN) {
+        let at = '';
+        while (!at) {
+          at = (await ask('Paste your App-Level Token (xapp-…)')).trim();
+          if (!at) console.log(`  ${c.red}Required.${c.reset}`);
+        }
+        env.SLACK_APP_TOKEN = at;
+      }
+      ok('Slack tokens saved');
+    }
+
+    console.log();
+    if (env.ALLOWED_SLACK_USER_ID) {
+      ok(`Slack user lock: ${env.ALLOWED_SLACK_USER_ID}`);
+    } else {
+      info('After the bot starts, DM it /whoami to get your Slack user ID, then add');
+      info('ALLOWED_SLACK_USER_ID=U… to .env and restart. (The bot is fail-closed until then.)');
     }
   }
 
@@ -878,9 +930,17 @@ async function main() {
     '# ClaudeClaw — generated by setup wizard',
     '# Edit freely. Re-run: npm run setup',
     '',
-    '# ── Required ──────────────────────────────────────────────────',
+    '# ── Transport (telegram | slack) ──────────────────────────────',
+    `TRANSPORT=${env.TRANSPORT || 'telegram'}`,
+    '',
+    '# ── Telegram front-end ────────────────────────────────────────',
     `TELEGRAM_BOT_TOKEN=${env.TELEGRAM_BOT_TOKEN || ''}`,
     `ALLOWED_CHAT_ID=${env.ALLOWED_CHAT_ID || ''}`,
+    '',
+    '# ── Slack front-end (Socket Mode) ─────────────────────────────',
+    `SLACK_BOT_TOKEN=${env.SLACK_BOT_TOKEN || ''}`,
+    `SLACK_APP_TOKEN=${env.SLACK_APP_TOKEN || ''}`,
+    `ALLOWED_SLACK_USER_ID=${env.ALLOWED_SLACK_USER_ID || ''}`,
     '',
     '# ── Config directory (personal config, never committed) ───────',
     `CLAUDECLAW_CONFIG=${env.CLAUDECLAW_CONFIG || ''}`,
@@ -916,7 +976,7 @@ async function main() {
   ];
 
   // Preserve unknown keys
-  const known = new Set(['TELEGRAM_BOT_TOKEN','ALLOWED_CHAT_ID','CLAUDECLAW_CONFIG','ANTHROPIC_API_KEY','GROQ_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','GOOGLE_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','WHATSAPP_ENABLED','WARROOM_ENABLED','DB_ENCRYPTION_KEY','DASHBOARD_TOKEN','DASHBOARD_PORT','DASHBOARD_URL','SECURITY_PIN_HASH','IDLE_LOCK_MINUTES','EMERGENCY_KILL_PHRASE','DESTRUCTIVE_CONFIRM']);
+  const known = new Set(['TRANSPORT','TELEGRAM_BOT_TOKEN','ALLOWED_CHAT_ID','SLACK_BOT_TOKEN','SLACK_APP_TOKEN','ALLOWED_SLACK_USER_ID','CLAUDECLAW_CONFIG','ANTHROPIC_API_KEY','GROQ_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','GOOGLE_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','WHATSAPP_ENABLED','WARROOM_ENABLED','DB_ENCRYPTION_KEY','DASHBOARD_TOKEN','DASHBOARD_PORT','DASHBOARD_URL','SECURITY_PIN_HASH','IDLE_LOCK_MINUTES','EMERGENCY_KILL_PHRASE','DESTRUCTIVE_CONFIRM']);
   for (const [k, v] of Object.entries(env)) {
     if (!known.has(k) && v) lines.push(`${k}=${v}`);
   }
@@ -1165,8 +1225,15 @@ async function main() {
   console.log(`  ${c.cyan}╚════════════════════════════════════════════╝${c.reset}`);
   console.log();
 
-  ok(`Bot: @${botUsername || '(configure TELEGRAM_BOT_TOKEN)'}`);
-  env.ALLOWED_CHAT_ID ? ok(`Chat ID: ${env.ALLOWED_CHAT_ID}`) : warn('Chat ID: not set (bot will tell you on first message)');
+  if (transport === 'slack') {
+    ok(`Transport: Slack${env.SLACK_BOT_TOKEN ? '' : ' (configure SLACK_BOT_TOKEN)'}`);
+    env.ALLOWED_SLACK_USER_ID
+      ? ok(`Slack user lock: ${env.ALLOWED_SLACK_USER_ID}`)
+      : warn('Slack user not set — DM /whoami after start, then set ALLOWED_SLACK_USER_ID');
+  } else {
+    ok(`Bot: @${botUsername || '(configure TELEGRAM_BOT_TOKEN)'}`);
+    env.ALLOWED_CHAT_ID ? ok(`Chat ID: ${env.ALLOWED_CHAT_ID}`) : warn('Chat ID: not set (bot will tell you on first message)');
+  }
   env.ANTHROPIC_API_KEY ? ok('Claude: API key (pay-per-token)') : ok('Claude: Max plan subscription');
   wantVoiceIn && env.GROQ_API_KEY ? ok('Voice input: Groq Whisper ✓') : wantVoiceIn ? warn('Voice input: GROQ_API_KEY not set') : info('Voice input: not enabled');
   wantVoiceOut && env.ELEVENLABS_API_KEY ? ok('Voice output: ElevenLabs ✓') : wantVoiceOut ? warn('Voice output: ElevenLabs keys not set') : info('Voice output: not enabled');

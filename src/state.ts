@@ -14,7 +14,7 @@ export function getBotInfo(): { username: string; name: string } {
   return { username: _botUsername, name: _botName };
 }
 
-// ── Telegram connection state ────────────────────────────────────────
+// ── Transport connection state ───────────────────────────────────────
 
 let _telegramConnected = false;
 
@@ -26,14 +26,27 @@ export function setTelegramConnected(v: boolean): void {
   _telegramConnected = v;
 }
 
+let _slackConnected = false;
+
+export function getSlackConnected(): boolean {
+  return _slackConnected;
+}
+
+export function setSlackConnected(v: boolean): void {
+  _slackConnected = v;
+}
+
 // ── Chat event bus (SSE broadcasting) ────────────────────────────────
+
+/** Which front-end transport (or the dashboard) a chat event originated from. */
+export type ChatEventSource = 'telegram' | 'slack' | 'dashboard';
 
 export interface ChatEvent {
   type: 'user_message' | 'assistant_message' | 'assistant_photo' | 'processing' | 'progress' | 'error' | 'hive_mind';
   chatId: string;
   agentId?: string;
   content?: string;
-  source?: 'telegram' | 'dashboard';
+  source?: ChatEventSource;
   description?: string;
   processing?: boolean;
   // Inline photo payload — emitted alongside assistant_message when the

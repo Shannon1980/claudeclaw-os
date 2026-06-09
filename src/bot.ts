@@ -5,9 +5,12 @@ import { Api, Bot, Context, InputFile, RawApi } from 'grammy';
 
 import { runAgent, runAgentWithRetry, UsageInfo, AgentProgressEvent } from './agent.js';
 import { AgentError } from './errors.js';
+import { processUserMessage, clearSessionBaseline, type TransportCallbacks } from './message-core.js';
+import { splitMessage, extractFileMarkers, type FileMarker, type ExtractResult } from './format.js';
 import {
   AGENT_ID,
   ALLOWED_CHAT_ID,
+  PRIMARY_CHAT_ID,
   CONTEXT_LIMIT,
   DASHBOARD_PORT,
   DASHBOARD_TOKEN,
@@ -54,57 +57,6 @@ import {
   audit,
 } from './security.js';
 
-// ── Streaming rate limiter ───────────────────────────────────────────
-const globalStreamLastEdit = new Map<string, number>();
-const GLOBAL_STREAM_INTERVAL_MS = 2500;
-
-// ── Context window tracking ──────────────────────────────────────────
-// Uses input_tokens from the last API call (= actual context window size:
-// system prompt + conversation history + tool results for that call).
-// Compares against CONTEXT_LIMIT (default 1M for Opus 4.6 1M, configurable).
-//
-// On a fresh session the base overhead (system prompt, skills, CLAUDE.md,
-// MCP tools) can be 200-400k+ tokens. We track that baseline per session
-// so the warning reflects conversation growth, not fixed overhead.
-const CONTEXT_WARN_PCT = 0.75; // Warn when conversation fills 75% of available space
-const lastUsage = new Map<string, UsageInfo>();
-const sessionBaseline = new Map<string, number>(); // sessionId -> first turn's input_tokens
-
-/**
- * Check if context usage is getting high and return a warning string, or null.
- * Uses input_tokens (total context) not cache_read_input_tokens (partial metric).
- */
-function checkContextWarning(chatId: string, sessionId: string | undefined, usage: UsageInfo): string | null {
-  lastUsage.set(chatId, usage);
-
-  if (usage.didCompact) {
-    return '⚠️ Context window was auto-compacted this turn. Some earlier conversation may have been summarized. Consider /newchat + /respin if things feel off.';
-  }
-
-  const contextTokens = usage.lastCallInputTokens;
-  if (contextTokens <= 0) return null;
-
-  // Record baseline on first turn of session (system prompt overhead)
-  const baseKey = sessionId ?? chatId;
-  if (!sessionBaseline.has(baseKey)) {
-    sessionBaseline.set(baseKey, contextTokens);
-    // First turn — no warning, just establishing baseline
-    return null;
-  }
-
-  const baseline = sessionBaseline.get(baseKey)!;
-  const available = CONTEXT_LIMIT - baseline;
-  if (available <= 0) return null;
-
-  const conversationTokens = contextTokens - baseline;
-  const pct = Math.round((conversationTokens / available) * 100);
-
-  if (pct >= Math.round(CONTEXT_WARN_PCT * 100)) {
-    return `⚠️ Context window at ~${pct}% of available space (~${Math.round(conversationTokens / 1000)}k / ${Math.round(available / 1000)}k conversation tokens). Consider /newchat + /respin soon.`;
-  }
-
-  return null;
-}
 import {
   downloadTelegramFile,
   transcribeAudio,
@@ -243,83 +195,11 @@ export function formatForTelegram(text: string): string {
   return result.trim();
 }
 
-/**
- * Split a long response into Telegram-safe chunks (4096 chars).
- * Splits on newlines where possible to avoid breaking mid-sentence.
- */
-export function splitMessage(text: string): string[] {
-  if (text.length <= MAX_MESSAGE_LENGTH) return [text];
-
-  const parts: string[] = [];
-  let remaining = text;
-
-  while (remaining.length > MAX_MESSAGE_LENGTH) {
-    // Try to split on a newline within the limit
-    const chunk = remaining.slice(0, MAX_MESSAGE_LENGTH);
-    const lastNewline = chunk.lastIndexOf('\n');
-    const splitAt = lastNewline > MAX_MESSAGE_LENGTH / 2 ? lastNewline : MAX_MESSAGE_LENGTH;
-    parts.push(remaining.slice(0, splitAt));
-    remaining = remaining.slice(splitAt).trimStart();
-  }
-
-  if (remaining) parts.push(remaining);
-  return parts;
-}
-
-// ── File marker types ─────────────────────────────────────────────────
-export interface FileMarker {
-  type: 'document' | 'photo';
-  filePath: string;
-  caption?: string;
-}
-
-export interface ExtractResult {
-  text: string;
-  files: FileMarker[];
-}
-
-/**
- * Extract [SEND_FILE:path] and [SEND_PHOTO:path] markers from Claude's response.
- * Supports optional captions via pipe: [SEND_FILE:/path/to/file.pdf|Here's your report]
- *
- * Tolerant of common malformed variants observed in the wild:
- *   - Pipe used as the primary separator instead of colon
- *     ([SEND_PHOTO|https://...] or SEND_PHOTO|https://...)
- *   - Missing surrounding brackets entirely
- *   - http(s) URLs in addition to filesystem paths
- *
- * Returns the cleaned text (markers stripped) and an array of file descriptors.
- */
-export function extractFileMarkers(text: string): ExtractResult {
-  const files: FileMarker[] = [];
-
-  // Canonical bracketed form: [SEND_FILE:/abs/path|caption]
-  // Tolerant variants: pipe instead of colon, optional brackets, URL paths.
-  // The bracketed form is preferred (it's documented in CLAUDE.md), but the
-  // bare/pipe forms are recognized so a malformed agent reply still gets
-  // its image rendered instead of leaking the raw command string into chat.
-  const patterns: RegExp[] = [
-    /\[SEND_(FILE|PHOTO)[:|]\s*([^\]|]+?)(?:\s*\|\s*([^\]]*))?\]/g,
-    /(?:^|\s)SEND_(FILE|PHOTO)\s*[:|]\s*((?:https?:\/\/|\/)[^\s|\]]+)(?:\s*\|\s*([^\n]+))?/g,
-  ];
-
-  let cleaned = text;
-  for (const pattern of patterns) {
-    cleaned = cleaned.replace(pattern, (_match: string, kind: string, filePath: string, caption?: string) => {
-      files.push({
-        type: kind === 'PHOTO' ? 'photo' : 'document',
-        filePath: filePath.trim(),
-        caption: caption?.trim() || undefined,
-      });
-      return '';
-    });
-  }
-
-  // Collapse extra blank lines left by stripped markers
-  const trimmed = cleaned.replace(/\n{3,}/g, '\n\n').trim();
-
-  return { text: trimmed, files };
-}
+// `splitMessage` and `extractFileMarkers` now live in format.ts (shared with
+// the Slack transport / message core). Re-exported here so existing importers
+// (scheduler.ts, index.ts, tests) keep resolving them from './bot.js'.
+export { splitMessage, extractFileMarkers };
+export type { FileMarker, ExtractResult };
 
 /**
  * Send a Telegram typing action. Silently ignores errors (e.g. bot was blocked).
@@ -410,380 +290,32 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
     return;
   }
 
-  // ── Emergency kill check (runs even when locked) ────────────────
-  if (checkKillPhrase(message)) {
-    audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'kill', detail: 'Emergency kill triggered', blocked: false });
-    await ctx.reply('EMERGENCY KILL activated. All agents stopping.');
-    executeEmergencyKill();
-    return;
-  }
+  // Hand off to the transport-agnostic core. Every Telegram interaction is
+  // expressed as a callback so the exact same pipeline drives Slack too.
+  const cb: TransportCallbacks = {
+    chatId: chatIdStr,
+    agentId: AGENT_ID,
+    source: 'telegram',
+    format: formatForTelegram,
+    maxLen: MAX_MESSAGE_LENGTH,
+    sendFormatted: (text) => ctx.reply(text, { parse_mode: 'HTML' }).then((m) => ({ messageId: m.message_id })),
+    sendPlain: (text) => ctx.reply(text).then((m) => ({ messageId: m.message_id })),
+    editPlain: (id, text) => ctx.api.editMessageText(chatId, Number(id), text).then(() => {}),
+    deleteMessage: (id) => ctx.api.deleteMessage(chatId, Number(id)).then(() => {}),
+    sendTyping: () => sendTyping(ctx.api, chatId),
+    sendFile: (filePath, caption) =>
+      ctx.replyWithDocument(new InputFile(filePath), caption ? { caption } : undefined).then(() => {}),
+    sendPhoto: (filePath, caption) =>
+      ctx.replyWithPhoto(new InputFile(filePath), caption ? { caption } : undefined).then(() => {}),
+    sendVoice: (audio) => ctx.replyWithVoice(new InputFile(audio, 'response.ogg')).then(() => {}),
+  };
 
-  // ── PIN lock check ─────────────────────────────────────────────
-  if (isLocked()) {
-    // Try to unlock with the message as a PIN
-    if (unlock(message)) {
-      audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'unlock', detail: 'PIN accepted', blocked: false });
-      await ctx.reply('Unlocked. Session active.');
-      return;
-    }
-    // Wrong PIN or not a PIN
-    audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'blocked', detail: 'Session locked, message rejected', blocked: true });
-    await ctx.reply('Session locked. Send your PIN to unlock.');
-    return;
-  }
-
-  // Record activity for idle timer
-  touchActivity();
-
-  // Audit the incoming message
-  audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'message', detail: message.slice(0, 200), blocked: false });
-
-  logger.info(
-    { chatId, messageLen: message.length },
-    'Processing message',
-  );
-
-  // Emit user message to SSE clients
-  emitChatEvent({ type: 'user_message', chatId: chatIdStr, content: message, source: 'telegram' });
-
-  // ── Delegation detection ────────────────────────────────────────────
-  // Intercept @agentId or /delegate syntax before running the main agent.
-  const delegation = parseDelegation(message);
-  if (delegation) {
-    setProcessing(chatIdStr, true);
-    await sendTyping(ctx.api, chatId);
-    try {
-      const delegationResult = await delegateToAgent(
-        delegation.agentId,
-        delegation.prompt,
-        chatIdStr,
-        AGENT_ID,
-        (progressMsg) => {
-          emitChatEvent({ type: 'progress', chatId: chatIdStr, description: progressMsg });
-          void ctx.reply(progressMsg).catch(() => {});
-        },
-      );
-
-      const response = delegationResult.text?.trim() || 'Agent completed with no output.';
-      const header = `[${delegationResult.agentId} — ${Math.round(delegationResult.durationMs / 1000)}s]`;
-
-      if (!skipLog) {
-        // Attribute to the delegated agent, not the caller, so memories
-        // created from this conversation are tagged with the correct agent.
-        saveConversationTurn(chatIdStr, delegation.prompt, response, undefined, delegation.agentId);
-      }
-      emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: response, source: 'telegram' });
-
-      for (const part of splitMessage(formatForTelegram(`${header}\n\n${response}`))) {
-        await ctx.reply(part, { parse_mode: 'HTML' });
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error({ err, agentId: delegation.agentId }, 'Delegation failed');
-      await ctx.reply(`Delegation to ${delegation.agentId} failed: ${errMsg}`);
-    } finally {
-      setProcessing(chatIdStr, false);
-    }
-    return;
-  }
-
-  // Fetch session first: if resuming, the model already has the system prompt in context.
-  const sessionId = getSession(chatIdStr, AGENT_ID);
-
-  // Build memory context and prepend to message
-  const { contextText: memCtx, surfacedMemoryIds, surfacedMemorySummaries } = await buildMemoryContext(chatIdStr, message, AGENT_ID);
-  const parts: string[] = [];
-  if (agentSystemPrompt && !sessionId) parts.push(`[Agent role — follow these instructions]\n${agentSystemPrompt}\n[End agent role]`);
-  if (memCtx) parts.push(memCtx);
-
-  // Inject recent scheduled task outputs so the user can reply to them naturally.
-  // Without this, Claude has no idea what a scheduled task just showed the user.
-  const recentTasks = getRecentTaskOutputs(AGENT_ID, 30);
-  if (recentTasks.length > 0) {
-    const taskLines = recentTasks.map((t) => {
-      const ago = Math.round((Date.now() / 1000 - t.last_run) / 60);
-      return `[Scheduled task ran ${ago}m ago]\nTask: ${t.prompt}\nOutput:\n${t.last_result}`;
-    });
-    parts.push(`[Recent scheduled task context — the user may be replying to this]\n${taskLines.join('\n\n')}\n[End task context]`);
-  }
-
-  // Memory nudge: remind the agent to persist knowledge if it's been a while
-  if (shouldNudgeMemory(chatIdStr, AGENT_ID)) {
-    parts.push(MEMORY_NUDGE_TEXT);
-  }
-
-  parts.push(message);
-  const fullMessage = parts.join('\n\n');
-
-  // Smart model routing: use cheap model for simple acknowledgments
-  const userModel = chatModelOverride.get(chatIdStr) ?? agentDefaultModel;
-  const effectiveModel = (SMART_ROUTING_ENABLED && !userModel && classifyMessageComplexity(message) === 'simple')
-    ? SMART_ROUTING_CHEAP_MODEL
-    : (userModel ?? 'claude-opus-4-6');
-
-  // Start typing immediately, then refresh on interval
-  await sendTyping(ctx.api, chatId);
-  const typingInterval = setInterval(
-    () => void sendTyping(ctx.api, chatId),
-    TYPING_REFRESH_MS,
-  );
-
-  setProcessing(chatIdStr, true);
-
-  try {
-    // Progress callback: surface agent activity to Telegram + SSE.
-    // Tool activity is throttled to one Telegram update per 30s to avoid spam.
-    let lastToolNotifyTime = 0;
-    let lastToolDesc = '';
-    const TOOL_NOTIFY_INTERVAL_MS = 30_000;
-
-    const onProgress = (event: AgentProgressEvent) => {
-      if (event.type === 'task_started') {
-        emitChatEvent({ type: 'progress', chatId: chatIdStr, description: event.description });
-        void ctx.reply(`🔄 ${event.description}`).catch(() => {});
-      } else if (event.type === 'task_completed') {
-        emitChatEvent({ type: 'progress', chatId: chatIdStr, description: event.description });
-        void ctx.reply(`✓ ${event.description}`).catch(() => {});
-      } else if (event.type === 'tool_active') {
-        emitChatEvent({ type: 'progress', chatId: chatIdStr, description: event.description });
-        lastToolDesc = event.description;
-        // Only send tool notifications to Telegram if streaming is off.
-        // When streaming is active, the live text updates already show progress.
-        if (!streamingEnabled) {
-          const now = Date.now();
-          if (now - lastToolNotifyTime >= TOOL_NOTIFY_INTERVAL_MS) {
-            lastToolNotifyTime = now;
-            void ctx.reply(`⚙️ ${event.description}...`).catch(() => {});
-          }
-        }
-      }
-    };
-
-    const abortCtrl = new AbortController();
-    setActiveAbort(chatIdStr, abortCtrl);
-
-    // Auto-abort if the agent runs too long (prevents runaway commands from blocking the bot)
-    const timeoutId = setTimeout(() => {
-      logger.warn({ chatId: chatIdStr, timeoutMs: AGENT_TIMEOUT_MS }, 'Agent query timed out, aborting');
-      abortCtrl.abort();
-    }, AGENT_TIMEOUT_MS);
-
-    // Streaming: send a placeholder message and edit it as text arrives
-    let streamMsgId: number | undefined;
-    let lastEditLength = 0;
-    const streamingEnabled = STREAM_STRATEGY !== 'off';
-
-    const onStreamText = streamingEnabled ? (accumulated: string) => {
-      const now = Date.now();
-      const globalLast = globalStreamLastEdit.get(chatIdStr) ?? 0;
-      const deltaLen = accumulated.length - lastEditLength;
-
-      if (now - globalLast < GLOBAL_STREAM_INTERVAL_MS || deltaLen < 20) return;
-
-      let displayText = accumulated;
-      if (displayText.length > 4000) {
-        displayText = '...' + displayText.slice(displayText.length - 3900);
-      }
-      displayText += ' ▍';
-
-      globalStreamLastEdit.set(chatIdStr, now);
-      lastEditLength = accumulated.length;
-
-      if (!streamMsgId) {
-        void ctx.reply(displayText).then((sent) => {
-          streamMsgId = sent.message_id;
-        }).catch(() => {});
-      } else {
-        void ctx.api.editMessageText(chatId, streamMsgId, displayText).catch(() => {});
-      }
-    } : undefined;
-
-    const result = await runAgentWithRetry(
-      fullMessage,
-      sessionId,
-      () => void sendTyping(ctx.api, chatId),
-      onProgress,
-      effectiveModel,
-      abortCtrl,
-      onStreamText,
-      (attempt, error) => {
-        void ctx.reply(`${error.recovery.userMessage} (retry ${attempt}/${2})`).catch(() => {});
-      },
-      MODEL_FALLBACK_CHAIN.length > 0 ? MODEL_FALLBACK_CHAIN : undefined,
-      agentMcpAllowlist,
-    );
-
-    clearTimeout(timeoutId);
-    setActiveAbort(chatIdStr, null);
-    clearInterval(typingInterval);
-
-    // Clean up the streaming placeholder before sending the final formatted response
-    if (streamMsgId) {
-      try { await ctx.api.deleteMessage(chatId, streamMsgId); } catch { /* best effort */ }
-    }
-
-    // Handle abort (manual /stop or timeout)
-    if (result.aborted) {
-      setProcessing(chatIdStr, false);
-      const msg = result.text === null
-        ? `Timed out after ${Math.round(AGENT_TIMEOUT_MS / 1000)}s. The task may have been too complex or a command got stuck. Try breaking it into smaller steps.`
-        : 'Stopped.';
-      emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: msg, source: 'telegram' });
-      await ctx.reply(msg);
-      return;
-    }
-
-    if (result.newSessionId) {
-      setSession(chatIdStr, result.newSessionId, AGENT_ID);
-      logger.info({ newSessionId: result.newSessionId }, 'Session saved');
-    }
-
-    let rawResponse = result.text?.trim() || 'Done.';
-
-    // Exfiltration guard: scan for leaked secrets before sending to Telegram
-    if (EXFILTRATION_GUARD_ENABLED) {
-      const protectedValues = PROTECTED_ENV_VARS
-        .map((key) => process.env[key])
-        .filter((v): v is string => !!v && v.length > 8);
-      const secretMatches = scanForSecrets(rawResponse, protectedValues);
-      if (secretMatches.length > 0) {
-        rawResponse = redactSecrets(rawResponse, secretMatches);
-        logger.warn(
-          { matchCount: secretMatches.length, types: secretMatches.map((m) => m.type) },
-          'Exfiltration guard: redacted secrets from response',
-        );
-      }
-    }
-
-    // Extract file markers before any formatting
-    const { text: responseText, files: fileMarkers } = extractFileMarkers(rawResponse);
-
-    // Add cost footer
-    const costFooter = buildCostFooter(SHOW_COST_FOOTER, result.usage, effectiveModel);
-
-    // Save conversation turn to memory (including full log).
-    // Skip logging for synthetic messages like /respin to avoid self-referential growth.
-    if (!skipLog) {
-      saveConversationTurn(chatIdStr, message, rawResponse, result.newSessionId ?? sessionId, AGENT_ID);
-      // Fire-and-forget: evaluate which surfaced memories were useful
-      if (surfacedMemoryIds.length > 0) {
-        void evaluateMemoryRelevance(surfacedMemoryIds, surfacedMemorySummaries, message, rawResponse).catch(() => {});
-      }
-    }
-
-    // Emit assistant response to SSE clients
-    emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: rawResponse, source: 'telegram' });
-
-    // Send any attached files first
-    for (const file of fileMarkers) {
-      try {
-        if (!fs.existsSync(file.filePath)) {
-          await ctx.reply(`Could not send file: ${file.filePath} (not found)`);
-          continue;
-        }
-        const input = new InputFile(file.filePath);
-        if (file.type === 'photo') {
-          await ctx.replyWithPhoto(input, file.caption ? { caption: file.caption } : undefined);
-        } else {
-          await ctx.replyWithDocument(input, file.caption ? { caption: file.caption } : undefined);
-        }
-      } catch (fileErr) {
-        logger.error({ err: fileErr, filePath: file.filePath }, 'Failed to send file via Telegram');
-        await ctx.reply(`Failed to send file: ${file.filePath}`);
-      }
-    }
-
-    // Voice response: send audio if user sent a voice note (forceVoiceReply)
-    // OR if they've toggled /voice on for text messages.
-    const caps = voiceCapabilities();
-    const shouldSpeakBack = caps.tts && (forceVoiceReply || voiceEnabledChats.has(chatIdStr));
-
-    // Send text response (if there's any left after stripping markers)
-    const textWithFooter = responseText ? responseText + costFooter : '';
-    if (textWithFooter) {
-      if (shouldSpeakBack) {
-        try {
-          // Don't speak the cost footer, just the actual response
-          const audioBuffer = await synthesizeSpeech(responseText);
-          await ctx.replyWithVoice(new InputFile(audioBuffer, 'response.ogg'));
-        } catch (ttsErr) {
-          logger.error({ err: ttsErr }, 'TTS failed, falling back to text');
-          for (const part of splitMessage(formatForTelegram(textWithFooter))) {
-            await ctx.reply(part, { parse_mode: 'HTML' });
-          }
-        }
-      } else {
-        for (const part of splitMessage(formatForTelegram(textWithFooter))) {
-          await ctx.reply(part, { parse_mode: 'HTML' });
-        }
-      }
-    }
-
-    // Log token usage to SQLite and check for context warnings
-    if (result.usage) {
-      const activeSessionId = result.newSessionId ?? sessionId;
-      try {
-        saveTokenUsage(
-          chatIdStr,
-          activeSessionId,
-          result.usage.inputTokens,
-          result.usage.outputTokens,
-          result.usage.lastCallCacheRead,
-          result.usage.lastCallCacheRead + result.usage.lastCallInputTokens,
-          result.usage.totalCostUsd,
-          result.usage.didCompact,
-          AGENT_ID,
-        );
-      } catch (dbErr) {
-        logger.error({ err: dbErr }, 'Failed to save token usage');
-      }
-
-      // Track usage for rate limiting
-      trackUsage(result.usage.inputTokens + result.usage.outputTokens, result.usage.totalCostUsd);
-
-      // Compaction tracking
-      if (result.usage.didCompact && activeSessionId) {
-        saveCompactionEvent(
-          activeSessionId,
-          result.usage.preCompactTokens ?? 0,
-          result.usage.lastCallInputTokens,
-          0,
-        );
-        const compactionCount = getCompactionCount(activeSessionId);
-        if (compactionCount >= 2) {
-          await ctx.reply('Context compacted multiple times. Consider /newchat to keep response quality high.');
-        }
-      }
-
-      const warning = checkContextWarning(chatIdStr, activeSessionId, result.usage);
-      if (warning) {
-        await ctx.reply(warning);
-      }
-
-      // Rate limit warnings
-      const rateStatus = getRateStatus(DAILY_COST_BUDGET, HOURLY_TOKEN_BUDGET);
-      for (const rateWarning of rateStatus.warnings) {
-        await ctx.reply(rateWarning);
-      }
-    }
-
-    setProcessing(chatIdStr, false);
-  } catch (err) {
-    clearInterval(typingInterval);
-    setActiveAbort(chatIdStr, null);
-    setProcessing(chatIdStr, false);
-
-    if (err instanceof AgentError) {
-      logger.error(
-        { category: err.category, recovery: err.recovery },
-        'Agent error (classified)',
-      );
-      await ctx.reply(err.recovery.userMessage);
-    } else {
-      logger.error({ err }, 'Agent error (unclassified)');
-      await ctx.reply('Something went wrong. Check the logs and try again.');
-    }
-  }
+  await processUserMessage(message, cb, {
+    forceVoiceReply,
+    skipLog,
+    voiceEnabled: voiceEnabledChats.has(chatIdStr),
+    modelOverride: chatModelOverride.get(chatIdStr),
+  });
 }
 
 /**
@@ -942,7 +474,7 @@ export function createBot(): Bot {
     // Auto-commit session summary to hive mind (async, don't block the user)
     if (oldSessionId) {
       const sessionToSummarize = oldSessionId;
-      sessionBaseline.delete(oldSessionId);
+      clearSessionBaseline(oldSessionId);
 
       // Fire-and-forget: ask the agent to produce a one-liner summary
       (async () => {
@@ -984,7 +516,7 @@ export function createBot(): Bot {
     }
 
     clearSession(chatIdStr, AGENT_ID);
-    sessionBaseline.delete(chatIdStr);
+    clearSessionBaseline(chatIdStr);
     await ctx.reply('Session cleared. Starting fresh.');
     logger.info({ chatId: ctx.chat!.id }, 'Session cleared by user');
   });
@@ -1606,22 +1138,22 @@ export function createBot(): Bot {
  * Response is delivered via SSE (fire-and-forget from the caller's perspective).
  */
 export async function processMessageFromDashboard(
-  botApi: Api<RawApi>,
+  relay: (text: string) => Promise<void>,
   text: string,
 ): Promise<void> {
-  if (!ALLOWED_CHAT_ID) return;
+  if (!PRIMARY_CHAT_ID) return;
 
-  const chatIdStr = ALLOWED_CHAT_ID;
+  const chatIdStr = PRIMARY_CHAT_ID;
 
   logger.info({ messageLen: text.length, source: 'dashboard' }, 'Processing dashboard message');
 
   // Route through the message queue so dashboard messages wait for any
-  // in-flight Telegram message or scheduled task to finish first.
-  messageQueue.enqueue(chatIdStr, () => processDashboardMessage(botApi, text, chatIdStr));
+  // in-flight chat message or scheduled task to finish first.
+  messageQueue.enqueue(chatIdStr, () => processDashboardMessage(relay, text, chatIdStr));
 }
 
 async function processDashboardMessage(
-  botApi: Api<RawApi>,
+  relay: (text: string) => Promise<void>,
   text: string,
   chatIdStr: string,
 ): Promise<void> {
@@ -1720,35 +1252,19 @@ async function processDashboardMessage(
       });
     }
 
-    // Relay to Telegram so the user sees it there too. Wrap the relay
-    // in its own try/catch so a bad bot token (401 Unauthorized) does
-    // NOT bubble Telegram's raw error description into the chat feed.
-    // The dashboard already received the assistant message via SSE
-    // above; the Telegram leg is best-effort.
+    // Relay to the active chat app (Telegram or Slack) so the user sees it
+    // there too. Best-effort: the dashboard already received the assistant
+    // message via SSE above. The relay closure owns transport formatting.
     if (responseText) {
       try {
-        for (const part of splitMessage(formatForTelegram(responseText))) {
-          await botApi.sendMessage(parseInt(chatIdStr), part, { parse_mode: 'HTML' });
-        }
-      } catch (relayErr: any) {
-        const code = relayErr?.error_code ?? relayErr?.status ?? null;
-        const desc = String(relayErr?.description ?? relayErr?.message ?? '').toLowerCase();
-        const looksAuth = code === 401 || desc.includes('unauthorized') || desc.includes('not authenticated');
-        if (looksAuth) {
-          logger.warn({ err: relayErr }, 'Telegram relay failed: bot token not authorized');
-          emitChatEvent({
-            type: 'error',
-            chatId: chatIdStr,
-            content: 'Telegram relay skipped: this bot token is not authorized. Update TELEGRAM_BOT_TOKEN in Settings or re-issue with @BotFather.',
-          });
-        } else {
-          logger.warn({ err: relayErr }, 'Telegram relay failed (non-auth)');
-          emitChatEvent({
-            type: 'error',
-            chatId: chatIdStr,
-            content: 'Could not relay reply to Telegram. The dashboard reply above is current.',
-          });
-        }
+        await relay(responseText);
+      } catch (relayErr) {
+        logger.warn({ err: relayErr }, 'Dashboard relay to chat app failed');
+        emitChatEvent({
+          type: 'error',
+          chatId: chatIdStr,
+          content: 'Could not relay the reply to your chat app. The dashboard reply above is current.',
+        });
       }
     }
 

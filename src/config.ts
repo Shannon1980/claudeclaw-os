@@ -12,6 +12,10 @@ const envConfig = readEnvFile([
   'ELEVENLABS_VOICE_ID',
   'WHATSAPP_ENABLED',
   'SLACK_USER_TOKEN',
+  'SLACK_BOT_TOKEN',
+  'SLACK_APP_TOKEN',
+  'ALLOWED_SLACK_USER_ID',
+  'TRANSPORT',
   'CONTEXT_LIMIT',
   'DASHBOARD_PORT',
   'DASHBOARD_TOKEN',
@@ -89,6 +93,41 @@ export const WHATSAPP_ENABLED =
 
 export const SLACK_USER_TOKEN =
   process.env.SLACK_USER_TOKEN || envConfig.SLACK_USER_TOKEN || '';
+
+// ── Slack transport (front-end bot) ──────────────────────────────────
+// Distinct from SLACK_USER_TOKEN above (that's the read/reply integration).
+// SLACK_BOT_TOKEN (xoxb) + SLACK_APP_TOKEN (xapp, for Socket Mode) drive the
+// Slack bot you actually message, mirroring the Telegram front-end.
+export const SLACK_BOT_TOKEN =
+  process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN =
+  process.env.SLACK_APP_TOKEN || envConfig.SLACK_APP_TOKEN || '';
+
+// Only respond to this Slack user ID (the Slack analog of ALLOWED_CHAT_ID).
+// DM the bot `/whoami` to discover yours.
+export const ALLOWED_SLACK_USER_ID =
+  process.env.ALLOWED_SLACK_USER_ID || envConfig.ALLOWED_SLACK_USER_ID || '';
+
+// Active front-end transport. Explicit TRANSPORT wins; otherwise auto-detect:
+// Slack when both Slack tokens are present, else Telegram.
+export type Transport = 'telegram' | 'slack';
+export const TRANSPORT: Transport = ((): Transport => {
+  const explicit = (process.env.TRANSPORT || envConfig.TRANSPORT || '').trim().toLowerCase();
+  if (explicit === 'slack' || explicit === 'telegram') return explicit;
+  return SLACK_BOT_TOKEN && SLACK_APP_TOKEN ? 'slack' : 'telegram';
+})();
+
+// Slack message length cap for splitMessage. Slack's hard limit is ~40k, but a
+// smaller cap keeps streaming edits (chat.update) snappy and mirrors Telegram.
+export const SLACK_MAX_LEN = 3900;
+
+// The primary user's session/memory bucket key, transport-agnostic. Telegram
+// uses the numeric chat id; Slack namespaces the user id as "slack:<Uxxxx>".
+// Used by the scheduler, dashboard relay, and memory consolidation.
+export const PRIMARY_CHAT_ID =
+  TRANSPORT === 'slack'
+    ? (ALLOWED_SLACK_USER_ID ? `slack:${ALLOWED_SLACK_USER_ID}` : '')
+    : ALLOWED_CHAT_ID;
 
 // Voice — read via readEnvFile, not process.env
 export const GROQ_API_KEY = envConfig.GROQ_API_KEY ?? '';
@@ -250,7 +289,7 @@ export const EXFILTRATION_GUARD_ENABLED =
   (process.env.EXFILTRATION_GUARD_ENABLED || envConfig.EXFILTRATION_GUARD_ENABLED || 'true').toLowerCase() === 'true';
 export const PROTECTED_ENV_VARS = (
   process.env.PROTECTED_ENV_VARS || envConfig.PROTECTED_ENV_VARS ||
-  'ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DB_ENCRYPTION_KEY,TELEGRAM_BOT_TOKEN,SLACK_USER_TOKEN,GROQ_API_KEY,ELEVENLABS_API_KEY,GOOGLE_API_KEY'
+  'ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DB_ENCRYPTION_KEY,TELEGRAM_BOT_TOKEN,SLACK_USER_TOKEN,SLACK_BOT_TOKEN,SLACK_APP_TOKEN,GROQ_API_KEY,ELEVENLABS_API_KEY,GOOGLE_API_KEY'
 ).split(',').map((s) => s.trim()).filter(Boolean);
 
 // ── War Room (voice meeting via Pipecat WebSocket) ──────────────────
