@@ -94,10 +94,10 @@ export const WHATSAPP_ENABLED =
 export const SLACK_USER_TOKEN =
   process.env.SLACK_USER_TOKEN || envConfig.SLACK_USER_TOKEN || '';
 
-// ── Slack transport (front-end bot) ──────────────────────────────────
+// ── Slack transport (primary front-end bot) ──────────────────────────
 // Distinct from SLACK_USER_TOKEN above (that's the read/reply integration).
 // SLACK_BOT_TOKEN (xoxb) + SLACK_APP_TOKEN (xapp, for Socket Mode) drive the
-// Slack bot you actually message, mirroring the Telegram front-end.
+// Slack bot you actually message. Telegram is the alternative front-end.
 export const SLACK_BOT_TOKEN =
   process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
 export const SLACK_APP_TOKEN =
@@ -108,8 +108,8 @@ export const SLACK_APP_TOKEN =
 export const ALLOWED_SLACK_USER_ID =
   process.env.ALLOWED_SLACK_USER_ID || envConfig.ALLOWED_SLACK_USER_ID || '';
 
-// Active front-end transport. Explicit TRANSPORT wins; otherwise auto-detect:
-// Slack when both Slack tokens are present, else Telegram.
+// Active front-end transport. Slack is primary: explicit TRANSPORT wins;
+// otherwise Slack whenever both Slack tokens are present, else Telegram.
 export type Transport = 'telegram' | 'slack';
 export const TRANSPORT: Transport = ((): Transport => {
   const explicit = (process.env.TRANSPORT || envConfig.TRANSPORT || '').trim().toLowerCase();

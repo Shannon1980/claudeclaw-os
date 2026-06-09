@@ -94,33 +94,72 @@ async function main() {
   const envPath = path.join(PROJECT_ROOT, '.env');
   const env = parseEnvFile(envPath);
 
-  // Bot token
-  if (env.TELEGRAM_BOT_TOKEN) {
-    try {
-      const res = await fetch(
-        `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`,
-      );
-      const data = (await res.json()) as {
-        ok: boolean;
-        result?: { username?: string };
-      };
-      if (data.ok && data.result?.username) {
-        ok(`Bot token: @${data.result.username}`);
-      } else {
-        fail('Bot token: invalid');
+  // Transport (mirrors src/config.ts: explicit TRANSPORT wins, else Slack
+  // when both Slack tokens are present, else Telegram)
+  const explicitTransport = (env.TRANSPORT || '').trim().toLowerCase();
+  const transport =
+    explicitTransport === 'slack' || explicitTransport === 'telegram'
+      ? explicitTransport
+      : env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN
+        ? 'slack'
+        : 'telegram';
+
+  if (transport === 'slack') {
+    // Slack tokens
+    if (env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN) {
+      try {
+        const res = await fetch('https://slack.com/api/auth.test', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${env.SLACK_BOT_TOKEN}` },
+        });
+        const data = (await res.json()) as { ok: boolean; user?: string };
+        if (data.ok) {
+          ok(`Slack bot: @${data.user || 'connected'}`);
+        } else {
+          fail('Slack bot token: invalid');
+        }
+      } catch {
+        warn('Slack bot token: set but could not validate (network error)');
       }
-    } catch {
-      warn('Bot token: set but could not validate (network error)');
+    } else {
+      fail('Slack tokens: not configured (need SLACK_BOT_TOKEN + SLACK_APP_TOKEN)');
+    }
+
+    // Slack user lock
+    if (env.ALLOWED_SLACK_USER_ID) {
+      ok(`Slack user lock: ${env.ALLOWED_SLACK_USER_ID}`);
+    } else {
+      warn('Slack user lock: not set (DM the bot /whoami, then set ALLOWED_SLACK_USER_ID)');
     }
   } else {
-    fail('Bot token: not configured');
-  }
+    // Telegram bot token
+    if (env.TELEGRAM_BOT_TOKEN) {
+      try {
+        const res = await fetch(
+          `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`,
+        );
+        const data = (await res.json()) as {
+          ok: boolean;
+          result?: { username?: string };
+        };
+        if (data.ok && data.result?.username) {
+          ok(`Bot token: @${data.result.username}`);
+        } else {
+          fail('Bot token: invalid');
+        }
+      } catch {
+        warn('Bot token: set but could not validate (network error)');
+      }
+    } else {
+      fail('Bot token: not configured');
+    }
 
-  // Chat ID
-  if (env.ALLOWED_CHAT_ID) {
-    ok(`Chat ID: ${env.ALLOWED_CHAT_ID}`);
-  } else {
-    warn('Chat ID: not set');
+    // Chat ID
+    if (env.ALLOWED_CHAT_ID) {
+      ok(`Chat ID: ${env.ALLOWED_CHAT_ID}`);
+    } else {
+      warn('Chat ID: not set');
+    }
   }
 
   // Voice STT
@@ -210,7 +249,10 @@ async function main() {
   console.log(`  ${c.gray}${'─'.repeat(17)}${c.reset}`);
 
   // Determine overall status
-  const hasToken = !!env.TELEGRAM_BOT_TOKEN;
+  const hasToken =
+    transport === 'slack'
+      ? !!(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN)
+      : !!env.TELEGRAM_BOT_TOKEN;
   const hasClaude = (() => {
     try {
       execSync('which claude', { stdio: 'pipe' });

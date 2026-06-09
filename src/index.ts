@@ -125,7 +125,7 @@ async function main(): Promise<void> {
     }
   } else if (!activeBotToken) {
     if (AGENT_ID === 'main') {
-      logger.error('Bot token is not set. Run npm run setup to configure it.');
+      logger.error('No chat front-end configured. Run npm run setup to set up Slack (SLACK_BOT_TOKEN + SLACK_APP_TOKEN) or Telegram (TELEGRAM_BOT_TOKEN).');
     } else {
       logger.error({ agentId: AGENT_ID }, `Configuration for agent "${AGENT_ID}" is broken: bot token not set. Check .env or re-run npm run agent:create.`);
     }
