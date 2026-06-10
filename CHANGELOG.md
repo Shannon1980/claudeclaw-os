@@ -2,6 +2,17 @@
 
 All notable changes to ClaudeClaw will be documented here.
 
+## [unreleased] - 2026-06-10
+
+### Added — multi-agent Slack channel routing
+- A single Slack app now serves **all** agents. Map an agent to a channel with `slack_channel: C0XXXX` in its `agent.yaml`; every message in that channel runs that agent (its own `CLAUDE.md`, model, and MCP allowlist) on a persistent per-channel session. DMs still go to `main`, and `@agentId:` / `/delegate` keep working everywhere. No extra bot tokens — unlike Telegram's per-agent bots.
+- Requires the Slack app to subscribe to `message.channels` (and `message.groups` for private channels); `channels:history` / `groups:history` scopes are already in the manifest. The bot logs the channel→agent map on startup. Conflicting claims resolve to the alphabetically-first agent (logged as a warning).
+- `runAgent` / `runAgentWithRetry` / `processUserMessage` gained a per-call agent runtime (cwd + model + system prompt + MCP allowlist) so a routed sub-agent runs in-process without mutating the concurrency-unsafe process-global agent overrides. The SDK loads the routed agent's `cwd` (its `CLAUDE.md` + `.claude/settings.json`) for that turn.
+- Slash commands are now channel-aware: `/model`, `/voice`, `/newchat`, `/forget`, `/respin`, `/memory`, `/dashboard`, `/stop`, and `/delegate` act on the routed agent's per-channel session when invoked in an agent channel (previously they always targeted the user's main DM session). `/model` reports and resets to the channel agent's own default model, and `/model opus` sets opus explicitly for agents that don't default to it.
+
+### Tests
+- New `agent-config.test.ts` covering `slack_channel` parsing, `getSlackChannelMap` (including deterministic conflict resolution), and `resolveAgentRuntime`; added `slackChannelChatId` and `resolveSlackCommandTarget` coverage to `slack-bot.test.ts`.
+
 ## [unreleased] - 2026-06-09
 
 ### Added — Slack front-end transport

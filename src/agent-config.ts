@@ -56,6 +56,12 @@ export interface AgentConfig {
   /** Display name shown in the meeting ("Your Agent wants to join"). Falls
    *  back to the agent's name or id with first letter capitalized. */
   meetBotName?: string;
+  /** Slack channel ID (e.g. "C0XXXXXXX") this agent owns. When the main
+   *  Slack bot receives a message in this channel, it routes the message to
+   *  this agent instead of main. Single Slack app, many agents — see
+   *  getSlackChannelMap(). Unset = no dedicated Slack channel (the agent is
+   *  still reachable via @agentId: / /delegate). */
+  slackChannel?: string;
 }
 
 /**
@@ -147,6 +153,10 @@ export function loadAgentConfig(agentId: string): AgentConfig {
   const warroomTools = raw['warroom_tools'] as string[] | undefined;
   const meetVoiceId = typeof raw['meet_voice_id'] === 'string' ? (raw['meet_voice_id'] as string) : undefined;
   const meetBotName = typeof raw['meet_bot_name'] === 'string' ? (raw['meet_bot_name'] as string) : undefined;
+  const slackChannel =
+    typeof raw['slack_channel'] === 'string' && (raw['slack_channel'] as string).trim()
+      ? (raw['slack_channel'] as string).trim()
+      : undefined;
 
   return {
     name,
@@ -159,7 +169,71 @@ export function loadAgentConfig(agentId: string): AgentConfig {
     obsidian,
     meetVoiceId,
     meetBotName,
+    slackChannel,
   };
+}
+
+// ── Slack channel routing ────────────────────────────────────────────
+
+/** Resolved per-agent runtime used to run a sub-agent in-process for a
+ *  routed Slack channel message: the SDK cwd (so it loads the agent's
+ *  CLAUDE.md + .claude/settings.json), the default model, the system prompt
+ *  injected on a fresh session, and the MCP allowlist. */
+export interface AgentRuntime {
+  agentId: string;
+  cwd: string;
+  model?: string;
+  systemPrompt?: string;
+  mcpAllowlist?: string[];
+}
+
+/**
+ * Resolve the full runtime for a sub-agent so the shared message core can
+ * run it without flipping the process-global agent overrides (which are not
+ * concurrency-safe). Throws if the agent config can't be loaded.
+ */
+export function resolveAgentRuntime(agentId: string): AgentRuntime {
+  const config = loadAgentConfig(agentId);
+  const cwd = resolveAgentDir(agentId);
+  let systemPrompt: string | undefined;
+  const claudeMdPath = resolveAgentClaudeMd(agentId);
+  if (claudeMdPath) {
+    try {
+      systemPrompt = fs.readFileSync(claudeMdPath, 'utf-8');
+    } catch {
+      /* no CLAUDE.md — fine */
+    }
+  }
+  return { agentId, cwd, model: config.model, systemPrompt, mcpAllowlist: config.mcpServers };
+}
+
+/**
+ * Build the Slack channel → agentId routing map from all configured agents.
+ * Agents whose config fails to load (or that declare no slack_channel) are
+ * skipped. If two agents claim the same channel the first one wins and a
+ * warning is logged.
+ */
+export function getSlackChannelMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  // Sort for deterministic conflict resolution: when two agents claim the
+  // same channel, the alphabetically-first id wins regardless of the
+  // filesystem's directory scan order.
+  for (const id of listAgentIds().sort()) {
+    let channel: string | undefined;
+    try {
+      channel = loadAgentConfig(id).slackChannel;
+    } catch {
+      continue; // broken config — skip
+    }
+    if (!channel) continue;
+    if (map.has(channel)) {
+      // eslint-disable-next-line no-console
+      console.warn(`[agent-config] Slack channel ${channel} claimed by both "${map.get(channel)}" and "${id}"; keeping "${map.get(channel)}".`);
+      continue;
+    }
+    map.set(channel, id);
+  }
+  return map;
 }
 
 /** Update the model field in an agent's agent.yaml file. */
