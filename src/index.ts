@@ -6,7 +6,7 @@ import { createBot } from './bot.js';
 import { createSlackBot, type SlackBot } from './slack-bot.js';
 import { splitMessage } from './format.js';
 import { checkPendingMigrations } from './migrations.js';
-import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
+import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
 import { startDashboard } from './dashboard.js';
 import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
 import { initSecurity, setAuditCallback } from './security.js';
@@ -145,10 +145,8 @@ async function main(): Promise<void> {
   }
   logger.info('Database ready');
 
-  // Initialize security (PIN lock, kill phrase, destructive confirmation, audit)
+  // Initialize security (kill phrase, audit)
   initSecurity({
-    pinHash: SECURITY_PIN_HASH || undefined,
-    idleLockMinutes: IDLE_LOCK_MINUTES,
     killPhrase: EMERGENCY_KILL_PHRASE || undefined,
   });
   setAuditCallback((entry) => {

@@ -223,8 +223,7 @@ async function main() {
   console.log();
   console.log(`  ${c.cyan}Q:${c.reset} Is it safe? Can someone else use my bot?`);
   info('Your bot is locked to your Slack user ID (or Telegram chat ID). No one else can use it.');
-  info('Optional PIN lock adds a second layer. An emergency kill phrase lets you');
-  info('shut everything down instantly from your phone.');
+  info('An emergency kill phrase lets you shut everything down instantly from your phone.');
   console.log();
   console.log(`  ${c.cyan}Q:${c.reset} Can I run this on a server / VPS?`);
   info('Yes. Set an ANTHROPIC_API_KEY instead of using claude login, and use');
@@ -785,51 +784,6 @@ async function main() {
   }
   ok('Dashboard token set');
 
-  // PIN lock
-  console.log();
-  info('PIN lock: like a password for the bot. Even if someone opens your');
-  info('Slack or Telegram, they can\'t use the bot without the PIN.');
-  console.log();
-
-  if (env.SECURITY_PIN_HASH) {
-    ok('PIN lock already configured');
-  } else {
-    let pinSet = false;
-    // Single prompt: type a PIN to enable, or Enter to skip
-    while (!pinSet) {
-      const pin = await ask('Choose a PIN (4+ characters, or Enter to skip)');
-      if (!pin) {
-        info('No PIN set. Add SECURITY_PIN_HASH to .env later if you change your mind.');
-        break;
-      }
-      if (pin.length < 4) {
-        console.log(`  ${c.red}PIN must be at least 4 characters.${c.reset}`);
-        continue;
-      }
-      const pinConfirm = await ask('Confirm PIN');
-      if (pin !== pinConfirm) {
-        console.log(`  ${c.red}PINs don't match. Try again.${c.reset}`);
-        continue;
-      }
-      // Salted hash: "salt:hash"
-      const salt = crypto.randomBytes(16).toString('hex');
-      const hash = crypto.createHash('sha256').update(salt + pin).digest('hex');
-      env.SECURITY_PIN_HASH = `${salt}:${hash}`;
-      ok('PIN set. Bot will start locked, send the PIN to unlock.');
-      pinSet = true;
-
-      // Idle timeout (only ask when PIN is set)
-      console.log();
-      info('Auto-lock re-locks the bot after a period of inactivity.');
-      const idleMin = await ask('Lock after how many minutes idle?', '30');
-      const idleVal = parseInt(idleMin) || 0;
-      if (idleVal > 0) {
-        env.IDLE_LOCK_MINUTES = String(idleVal);
-        ok(`Auto-lock after ${idleVal}m of inactivity`);
-      }
-    }
-  }
-
   // Emergency kill phrase (auto-generate with option to customize)
   console.log();
   if (env.EMERGENCY_KILL_PHRASE) {
@@ -966,8 +920,6 @@ async function main() {
     env.DASHBOARD_URL ? `DASHBOARD_URL=${env.DASHBOARD_URL}` : '# DASHBOARD_URL=',
     '',
     '# ── Security ──────────────────────────────────────────────────',
-    env.SECURITY_PIN_HASH ? `SECURITY_PIN_HASH=${env.SECURITY_PIN_HASH}` : '# SECURITY_PIN_HASH=',
-    env.IDLE_LOCK_MINUTES ? `IDLE_LOCK_MINUTES=${env.IDLE_LOCK_MINUTES}` : '# IDLE_LOCK_MINUTES=30',
     env.EMERGENCY_KILL_PHRASE ? `EMERGENCY_KILL_PHRASE=${env.EMERGENCY_KILL_PHRASE}` : '# EMERGENCY_KILL_PHRASE=',
     '',
     '# ── Database Encryption ───────────────────────────────────────',
@@ -976,7 +928,7 @@ async function main() {
   ];
 
   // Preserve unknown keys
-  const known = new Set(['TRANSPORT','TELEGRAM_BOT_TOKEN','ALLOWED_CHAT_ID','SLACK_BOT_TOKEN','SLACK_APP_TOKEN','ALLOWED_SLACK_USER_ID','CLAUDECLAW_CONFIG','ANTHROPIC_API_KEY','GROQ_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','GOOGLE_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','WHATSAPP_ENABLED','WARROOM_ENABLED','DB_ENCRYPTION_KEY','DASHBOARD_TOKEN','DASHBOARD_PORT','DASHBOARD_URL','SECURITY_PIN_HASH','IDLE_LOCK_MINUTES','EMERGENCY_KILL_PHRASE','DESTRUCTIVE_CONFIRM']);
+  const known = new Set(['TRANSPORT','TELEGRAM_BOT_TOKEN','ALLOWED_CHAT_ID','SLACK_BOT_TOKEN','SLACK_APP_TOKEN','ALLOWED_SLACK_USER_ID','CLAUDECLAW_CONFIG','ANTHROPIC_API_KEY','GROQ_API_KEY','ELEVENLABS_API_KEY','ELEVENLABS_VOICE_ID','GOOGLE_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','WHATSAPP_ENABLED','WARROOM_ENABLED','DB_ENCRYPTION_KEY','DASHBOARD_TOKEN','DASHBOARD_PORT','DASHBOARD_URL','EMERGENCY_KILL_PHRASE','DESTRUCTIVE_CONFIRM']);
   for (const [k, v] of Object.entries(env)) {
     if (!known.has(k) && v) lines.push(`${k}=${v}`);
   }

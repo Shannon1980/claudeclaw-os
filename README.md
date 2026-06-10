@@ -148,7 +148,7 @@ The wizard walks you through everything interactively:
 - Checks your environment (Node, Claude CLI, builds if needed)
 - Asks which features you want (voice, video, War Room, WhatsApp)
 - Sets up your chat front-end — Slack (primary) or Telegram — and locks the bot to you
-- **Configures security**: PIN lock, emergency kill phrase, idle auto-lock
+- **Configures security**: emergency kill phrase
 - Creates your `CLAUDE.md` personality file from a template
 - Collects API keys **only for the features you selected**
 - Optionally sets up specialist agents (custom or from templates)
@@ -541,8 +541,7 @@ Every skill in `~/.claude/skills/` loads on every session. Call them directly (`
 
 | Command | What it does |
 |---------|-------------|
-| `/lock` | Lock the session immediately. Requires PIN to unlock. Only works when PIN is configured. |
-| `/status` | Show current security status: PIN enabled, locked/unlocked, idle timeout, kill phrase |
+| `/status` | Show current security status: kill phrase configured or not |
 
 **Setup (one-time):**
 
@@ -867,7 +866,6 @@ features:
     - { command: /stop,      description: Stop current processing }
     - { command: /agents,    description: List available agents }
     - { command: /delegate,  description: Delegate a task to an agent }
-    - { command: /lock,      description: Lock the session }
     - { command: /status,    description: Security status }
     - { command: /help,      description: List commands }
 oauth_config:
@@ -1668,19 +1666,6 @@ These protections are active in every ClaudeClaw installation, no configuration 
 
 **`bypassPermissions` mode.** The bot runs Claude Code with `permissionMode: 'bypassPermissions'` because there is no terminal to approve tool-use prompts. Claude can execute any tool (shell commands, file reads, web requests) without confirmation. This is safe when the bot is locked to your chat ID on your own machine. Do not expose it to untrusted users.
 
-### PIN lock (opt-in)
-
-PIN lock adds a session gate. When enabled, the bot starts locked and ignores all messages until you send the correct PIN.
-
-| Behavior | Detail |
-|----------|--------|
-| **Startup** | Bot starts locked. Send your PIN as a regular message to unlock. |
-| **`/lock`** | Locks the session immediately. |
-| **`/status`** | Shows current security status (locked/unlocked, idle timeout, kill phrase). |
-| **Idle auto-lock** | If `IDLE_LOCK_MINUTES` is set, the session re-locks after that many minutes of inactivity. |
-
-The PIN is stored as a salted SHA-256 hash. The plaintext never touches disk.
-
 ### Emergency kill switch (opt-in)
 
 Set `EMERGENCY_KILL_PHRASE` to a unique phrase. Sending it immediately stops all ClaudeClaw launchd/systemd services and force-exits the process. This is a hard stop, not a lock. Use it if something goes wrong and you need everything shut down now.
@@ -1694,8 +1679,6 @@ The setup wizard can generate one for you, or you can choose your own.
 | `ALLOWED_SLACK_USER_ID` | **Yes** (Slack) | Your Slack user ID. Bot ignores all other users. |
 | `ALLOWED_CHAT_ID` | **Yes** (Telegram) | Your Telegram chat ID. Bot ignores all other users. |
 | `DB_ENCRYPTION_KEY` | **Yes** | AES-256 key for message field encryption. Auto-generated on first run. |
-| `SECURITY_PIN_HASH` | No | Salted SHA-256 hash of your PIN. Format: `salt:hash`. Setup wizard generates this. |
-| `IDLE_LOCK_MINUTES` | No | Auto-lock after N minutes of inactivity. Only active when PIN is set. |
 | `EMERGENCY_KILL_PHRASE` | No | Phrase that immediately kills all agents and exits. |
 
 ### Viewing the audit log

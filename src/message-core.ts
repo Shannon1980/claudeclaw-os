@@ -28,7 +28,7 @@ import { trackUsage, getRateStatus } from './rate-tracker.js';
 import { buildCostFooter } from './cost-footer.js';
 import { parseDelegation, delegateToAgent } from './orchestrator.js';
 import { emitChatEvent, setProcessing, setActiveAbort, ChatEventSource } from './state.js';
-import { isLocked, unlock, touchActivity, checkKillPhrase, executeEmergencyKill, audit } from './security.js';
+import { checkKillPhrase, executeEmergencyKill, audit } from './security.js';
 import { voiceCapabilities, synthesizeSpeech } from './voice.js';
 import { splitMessage, extractFileMarkers } from './format.js';
 
@@ -158,7 +158,7 @@ export interface ProcessOptions {
 
 /**
  * Transport-agnostic core message handler. Runs the full pipeline —
- * kill-phrase / PIN lock, delegation, memory context, the Claude agent,
+ * kill-phrase check, delegation, memory context, the Claude agent,
  * exfiltration guard, file markers, TTS, token accounting, and warnings —
  * driving all I/O through `cb`.
  *
@@ -181,23 +181,6 @@ export async function processUserMessage(
     executeEmergencyKill();
     return;
   }
-
-  // ── PIN lock check ─────────────────────────────────────────────
-  if (isLocked()) {
-    // Try to unlock with the message as a PIN
-    if (unlock(message)) {
-      audit({ agentId, chatId: chatIdStr, action: 'unlock', detail: 'PIN accepted', blocked: false });
-      await cb.sendPlain('Unlocked. Session active.');
-      return;
-    }
-    // Wrong PIN or not a PIN
-    audit({ agentId, chatId: chatIdStr, action: 'blocked', detail: 'Session locked, message rejected', blocked: true });
-    await cb.sendPlain('Session locked. Send your PIN to unlock.');
-    return;
-  }
-
-  // Record activity for idle timer
-  touchActivity();
 
   // Audit the incoming message
   audit({ agentId, chatId: chatIdStr, action: 'message', detail: message.slice(0, 200), blocked: false });
