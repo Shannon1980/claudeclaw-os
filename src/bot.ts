@@ -74,11 +74,7 @@ const voiceEnabledChats = new Set<string>();
 // When not set, uses CLI default (Opus via Max/OAuth)
 const chatModelOverride = new Map<string, string>();
 
-const AVAILABLE_MODELS: Record<string, string> = {
-  opus: 'claude-opus-4-6',
-  sonnet: 'claude-sonnet-4-5',
-  haiku: 'claude-haiku-4-5',
-};
+import { CLAUDE_MODEL_CHAT_ALIASES, resolveClaudeModelAlias } from './models.js';
 const DEFAULT_MODEL_LABEL = 'opus';
 
 export function setMainModelOverride(model: string): void {
@@ -577,9 +573,9 @@ export function createBot(): Bot {
     if (!arg) {
       const current = chatModelOverride.get(chatIdStr);
       const currentLabel = current
-        ? Object.entries(AVAILABLE_MODELS).find(([, v]) => v === current)?.[0] ?? current
+        ? Object.entries(CLAUDE_MODEL_CHAT_ALIASES).find(([, v]) => v === current)?.[0] ?? current
         : DEFAULT_MODEL_LABEL + ' (default)';
-      const models = Object.keys(AVAILABLE_MODELS).join(', ');
+      const models = Object.keys(CLAUDE_MODEL_CHAT_ALIASES).join(', ');
       await ctx.reply(`Current model: ${currentLabel}\nAvailable: ${models}\n\nUsage: /model haiku`);
       return;
     }
@@ -590,9 +586,9 @@ export function createBot(): Bot {
       return;
     }
 
-    const modelId = AVAILABLE_MODELS[arg];
+    const modelId = resolveClaudeModelAlias(arg);
     if (!modelId) {
-      await ctx.reply(`Unknown model: ${arg}\nAvailable: ${Object.keys(AVAILABLE_MODELS).join(', ')}`);
+      await ctx.reply(`Unknown model: ${arg}\nAvailable: ${Object.keys(CLAUDE_MODEL_CHAT_ALIASES).join(', ')}`);
       return;
     }
 

@@ -18,6 +18,7 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
+      "@claudeclaw/models": ["../src/models.ts"],
       "@/*": ["src/*"],
       "react": ["../node_modules/preact/compat"],
       "react-dom": ["../node_modules/preact/compat"]

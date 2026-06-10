@@ -32,11 +32,7 @@ const { App } = boltPkg;
 const slackModelOverride = new Map<string, string>();
 const slackVoiceEnabled = new Set<string>();
 
-const AVAILABLE_MODELS: Record<string, string> = {
-  opus: 'claude-opus-4-6',
-  sonnet: 'claude-sonnet-4-5',
-  haiku: 'claude-haiku-4-5',
-};
+import { CLAUDE_MODEL_CHAT_ALIASES, resolveClaudeModelAlias } from './models.js';
 const DEFAULT_MODEL_LABEL = 'opus';
 
 /** Build the per-message core options from this chat's model/voice state. */
@@ -365,9 +361,9 @@ function registerSlackCommands(app: InstanceType<typeof App>): void {
     if (!arg) {
       const current = slackModelOverride.get(chatId);
       const currentLabel = current
-        ? (Object.entries(AVAILABLE_MODELS).find(([, v]) => v === current)?.[0] ?? current)
+        ? (Object.entries(CLAUDE_MODEL_CHAT_ALIASES).find(([, v]) => v === current)?.[0] ?? current)
         : DEFAULT_MODEL_LABEL + ' (default)';
-      await respond(eph(`Current model: ${currentLabel}\nAvailable: ${Object.keys(AVAILABLE_MODELS).join(', ')}\n\nUsage: /model haiku`));
+      await respond(eph(`Current model: ${currentLabel}\nAvailable: ${Object.keys(CLAUDE_MODEL_CHAT_ALIASES).join(', ')}\n\nUsage: /model haiku`));
       return;
     }
     if (arg === 'reset' || arg === 'default' || arg === 'opus') {
@@ -375,8 +371,8 @@ function registerSlackCommands(app: InstanceType<typeof App>): void {
       await respond(eph('Model reset to default (opus)'));
       return;
     }
-    const modelId = AVAILABLE_MODELS[arg];
-    if (!modelId) { await respond(eph(`Unknown model: ${arg}\nAvailable: ${Object.keys(AVAILABLE_MODELS).join(', ')}`)); return; }
+    const modelId = resolveClaudeModelAlias(arg);
+    if (!modelId) { await respond(eph(`Unknown model: ${arg}\nAvailable: ${Object.keys(CLAUDE_MODEL_CHAT_ALIASES).join(', ')}`)); return; }
     slackModelOverride.set(chatId, modelId);
     await respond(eph(`Model changed: ${arg} (${modelId})`));
   });

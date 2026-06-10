@@ -6,6 +6,7 @@ import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
 import { Modal } from '@/components/Modal';
 import { ModelPicker } from '@/components/ModelPicker';
+import { CLAUDE_MODELS } from '@claudeclaw/models';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { AgentDetail } from '@/components/AgentDetail';
 import { AgentSuggestionBadge, AgentSuggestionModal, useAgentSuggestions, type AgentSuggestion } from '@/components/AgentSuggestions';
@@ -196,7 +197,14 @@ export function Agents() {
           description: suggestionPrefill.suggested_description,
         } : undefined}
       />
-      <AgentDetail agent={detailAgent} onClose={() => setDetailAgent(null)} />
+      <AgentDetail
+        agent={detailAgent}
+        onClose={() => setDetailAgent(null)}
+        onUpdated={(updated) => {
+          setDetailAgent(updated);
+          refresh();
+        }}
+      />
       <AgentSuggestionModal
         suggestion={openedSuggestion}
         onClose={() => setOpenedSuggestion(null)}
@@ -347,10 +355,10 @@ function AgentCard({ agent, onChange, onOpen, suggestions, onOpenSuggestion }: {
         )}
         <Link
           href={`/agents/${agent.id}/files`}
-          class="inline-flex items-center justify-center px-2 py-1.5 rounded text-[11px] bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors"
-          title="Edit persona + config"
+          class="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded text-[11px] bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors"
+          title="Edit CLAUDE.md and agent.yaml"
         >
-          <FileText size={11} />
+          <FileText size={11} /> Files
         </Link>
         {!isDelegationOnly && (
           <button
@@ -611,10 +619,9 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
                 onChange={(e) => setModel((e.target as HTMLSelectElement).value)}
                 class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
               >
-                <option value="claude-opus-4-6">Opus 4.6</option>
-                <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-                <option value="claude-sonnet-4-5">Sonnet 4.5</option>
-                <option value="claude-haiku-4-5">Haiku 4.5</option>
+                {CLAUDE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
               </select>
             </Field>
             <Field label="Template">

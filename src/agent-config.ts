@@ -173,6 +173,28 @@ export function setAgentModel(agentId: string, model: string): void {
   fs.writeFileSync(configPath, yaml.dump(raw, { lineWidth: -1 }), 'utf-8');
 }
 
+/** Update display name and/or description in agent.yaml. */
+export function setAgentProfile(
+  agentId: string,
+  fields: { name?: string; description?: string },
+): void {
+  const agentDir = resolveAgentDir(agentId);
+  const configPath = path.join(agentDir, 'agent.yaml');
+  if (!fs.existsSync(configPath)) throw new Error(`Agent config not found: ${configPath}`);
+
+  const raw = yaml.load(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+  if (fields.name !== undefined) {
+    const name = fields.name.trim();
+    if (!name) throw new Error('name required');
+    raw['name'] = name;
+  }
+  if (fields.description !== undefined) {
+    raw['description'] = fields.description.trim();
+  }
+  if (!raw['name']) throw new Error('agent.yaml requires a name field');
+  fs.writeFileSync(configPath, yaml.dump(raw, { lineWidth: -1 }), 'utf-8');
+}
+
 /** List all configured agent IDs (directories under agents/ with agent.yaml).
  *  Scans both CLAUDECLAW_CONFIG/agents/ and PROJECT_ROOT/agents/, deduplicating.
  */

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'wouter-preact';
-import { Plus, Wand2, Trash2, X, History, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check, Paperclip, FileText, Image as ImageIcon, FolderKanban } from 'lucide-preact';
+import { Plus, Wand2, Trash2, X, History, Clock, PlayCircle, CheckCircle2, Paperclip, FileText, Image as ImageIcon, FolderKanban } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
@@ -11,14 +11,7 @@ import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiPatch, apiDelete, apiGet, apiUpload } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { pushToast } from '@/lib/toasts';
-import {
-  workspaceName,
-  missionColumnOrder,
-  missionColumnWidths,
-  setMissionColumnOrder,
-  setMissionColumnWidth,
-  setMissionColumnWidthsBulk,
-} from '@/lib/personalization';
+import { workspaceName } from '@/lib/personalization';
 
 interface MissionTask {
   id: string;
@@ -40,6 +33,20 @@ interface Agent { id: string; name: string; description: string; running: boolea
 
 const TERMINAL: MissionTask['status'][] = ['completed', 'failed', 'cancelled'];
 const DONE_VISIBLE_SECS = 30 * 60;
+
+type KanbanLane = 'pending' | 'in_progress' | 'done';
+
+const KANBAN_COLUMNS: {
+  id: KanbanLane;
+  title: string;
+  subtitle: string;
+  icon: typeof Clock;
+  tone: 'queued' | 'running' | 'done';
+}[] = [
+  { id: 'pending', title: 'Pending', subtitle: 'Queued', icon: Clock, tone: 'queued' },
+  { id: 'in_progress', title: 'In progress', subtitle: 'Running now', icon: PlayCircle, tone: 'running' },
+  { id: 'done', title: 'Done', subtitle: 'Last 30 min', icon: CheckCircle2, tone: 'done' },
+];
 
 export function MissionControl() {
   const [location, navigate] = useLocation();
@@ -70,24 +77,30 @@ export function MissionControl() {
     }
   }, [location]);
 
-  const { byAgent, inbox, totalActive } = useMemo(() => {
+  const { lanes, unassignedPending, totalActive } = useMemo(() => {
     const all = tasks.data?.tasks ?? [];
-    const agentList = agents.data?.agents ?? [];
     const now = Date.now() / 1000;
     const visible = all.filter((t) => {
       if (!TERMINAL.includes(t.status)) return true;
       if (!t.completed_at) return true;
       return now - t.completed_at < DONE_VISIBLE_SECS;
     });
-    const inbox = visible.filter((t) => !t.assigned_agent);
-    const byAgent: Record<string, MissionTask[]> = {};
-    for (const a of agentList) byAgent[a.id] = [];
-    for (const t of visible) {
-      if (!t.assigned_agent) continue;
-      (byAgent[t.assigned_agent] ??= []).push(t);
-    }
-    return { byAgent, inbox, totalActive: visible.filter((t) => !TERMINAL.includes(t.status)).length };
-  }, [tasks.data, agents.data]);
+    const sortTasks = (list: MissionTask[]) =>
+      [...list].sort((a, b) => b.priority - a.priority || b.created_at - a.created_at);
+    const pending = sortTasks(visible.filter((t) => t.status === 'queued'));
+    const inProgress = sortTasks(visible.filter((t) => t.status === 'running'));
+    const done = sortTasks(visible.filter((t) => TERMINAL.includes(t.status)));
+    return {
+      lanes: { pending, in_progress: inProgress, done } as Record<KanbanLane, MissionTask[]>,
+      unassignedPending: pending.filter((t) => !t.assigned_agent).length,
+      totalActive: visible.filter((t) => !TERMINAL.includes(t.status)).length,
+    };
+  }, [tasks.data]);
+
+  const agentById = useMemo(
+    () => new Map((agents.data?.agents ?? []).map((a) => [a.id, a])),
+    [agents.data],
+  );
 
   async function autoAssignAll() {
     setBulkAssigning(true);
@@ -108,35 +121,6 @@ export function MissionControl() {
   const wsName = workspaceName.value;
   const headerTitle = wsName && wsName !== 'ClaudeClaw' ? `${wsName} · Tasks` : 'Mission Control';
 
-  // Apply user-saved column order on top of API agent order. Any agents
-  // not in the saved order keep their API position; saved agents that no
-  // longer exist are skipped.
-  const orderedAgents = useMemo(() => {
-    const live = agents.data?.agents ?? [];
-    const saved = missionColumnOrder.value;
-    if (saved.length === 0) return live;
-    const byId = new Map(live.map((a) => [a.id, a]));
-    const out: Agent[] = [];
-    for (const id of saved) {
-      const a = byId.get(id);
-      if (a) { out.push(a); byId.delete(id); }
-    }
-    for (const a of live) if (byId.has(a.id)) out.push(a);
-    return out;
-  }, [agents.data, missionColumnOrder.value]);
-
-  function handleColumnDrop(targetId: string, draggedId: string) {
-    if (targetId === draggedId) return;
-    const ids = orderedAgents.map((a) => a.id);
-    const from = ids.indexOf(draggedId);
-    const to = ids.indexOf(targetId);
-    if (from < 0 || to < 0) return;
-    const next = [...ids];
-    next.splice(from, 1);
-    next.splice(to, 0, draggedId);
-    setMissionColumnOrder(next);
-  }
-
   return (
     <div class="flex flex-col h-full">
       <PageHeader
@@ -144,9 +128,18 @@ export function MissionControl() {
         actions={
           <>
             <span class="text-[11px] text-[var(--color-text-muted)] tabular-nums mr-2">
-              {totalActive} active · {inbox.length} unassigned · {tasks.data?.tasks?.length ?? 0} total
+              {totalActive} active · {unassignedPending} unassigned · {tasks.data?.tasks?.length ?? 0} total
             </span>
-            <LayoutMenu agents={orderedAgents} />
+            {unassignedPending > 0 && (
+              <button
+                type="button"
+                onClick={autoAssignAll}
+                disabled={bulkAssigning}
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] border border-[var(--color-border)] transition-colors disabled:opacity-40"
+              >
+                <Wand2 size={13} /> {bulkAssigning ? 'Assigning…' : `Auto-assign all (${unassignedPending})`}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setHistoryOpen(true)}
@@ -154,16 +147,6 @@ export function MissionControl() {
             >
               <History size={13} /> History
             </button>
-            {inbox.length > 0 && (
-              <button
-                type="button"
-                onClick={autoAssignAll}
-                disabled={bulkAssigning}
-                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] border border-[var(--color-border)] transition-colors disabled:opacity-40"
-              >
-                <Wand2 size={13} /> {bulkAssigning ? 'Assigning…' : `Auto-assign all (${inbox.length})`}
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
@@ -180,22 +163,17 @@ export function MissionControl() {
 
       {!loading && !error && (
         <div class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
-          <div class="flex gap-3 p-4 h-full min-w-max">
-            <InboxColumn
-              tasks={inbox}
-              onChange={tasks.refresh}
-              agents={orderedAgents}
-              projects={(projects.data?.projects ?? []).filter((p) => p.status === 'active')}
-            />
-            {orderedAgents.map((a) => (
-              <AgentColumn
-                key={a.id}
-                agent={a}
-                tasks={byAgent[a.id] ?? []}
-                onChange={tasks.refresh}
-                onColumnDrop={handleColumnDrop}
-                projectNames={projectNames}
+          <div class="flex gap-3 p-4 h-full min-w-[960px]">
+            {KANBAN_COLUMNS.map((col) => (
+              <StatusColumn
+                key={col.id}
+                column={col}
+                tasks={lanes[col.id]}
+                agents={agents.data?.agents ?? []}
+                agentById={agentById}
                 projects={(projects.data?.projects ?? []).filter((p) => p.status === 'active')}
+                projectNames={projectNames}
+                onChange={tasks.refresh}
               />
             ))}
           </div>
@@ -225,385 +203,78 @@ export function MissionControl() {
   );
 }
 
-// ── Columns ─────────────────────────────────────────────────────────
+// ── Kanban columns ──────────────────────────────────────────────────
 
-// Inbox is pinned leftmost and not draggable/resizable — it's a fixed
-// landing zone for unassigned tasks. Width chosen to match the default
-// agent column width but slightly narrower since inbox cards are simpler.
-function InboxColumn({ tasks, agents, projects, onChange }: {
-  tasks: MissionTask[]; agents: Agent[]; projects: ProjectLite[]; onChange: () => void;
-}) {
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  return (
-    <div
-      class="w-[300px] shrink-0 flex flex-col bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden"
-      onDragOver={(e) => e.preventDefault()}
-    >
-      <div class="px-3 py-3 border-b border-[var(--color-border)] flex items-center gap-2">
-        <Inbox size={15} class="text-[var(--color-text-muted)]" />
-        <div class="flex-1 min-w-0">
-          <div class="text-[13.5px] font-medium text-[var(--color-text)]">Inbox</div>
-          <div class="text-[10.5px] text-[var(--color-text-faint)] uppercase tracking-wider">Unassigned</div>
-        </div>
-        <span class="text-[11.5px] text-[var(--color-text-muted)] tabular-nums">{tasks.length}</span>
-      </div>
-
-      <div class="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
-        {tasks.length === 0 && (
-          <div class="text-[11.5px] text-[var(--color-text-faint)] text-center py-6">
-            All tasks are assigned
-          </div>
-        )}
-        {tasks.map((t) => (
-          <InboxCard
-            key={t.id}
-            task={t}
-            agents={agents}
-            projects={projects}
-            onChange={onChange}
-            onDragStart={() => setDraggingId(t.id)}
-            onDragEnd={() => setDraggingId(null)}
-            isDragging={draggingId === t.id}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Width presets cycled by the maximize/minimize buttons in the header.
-// Tracks the resize handle's clamping range from personalization.ts
-// (240–640). Three quick stops give keyboard-free "compact / normal /
-// wide" behavior without needing the mouse.
-const WIDTH_PRESETS = [260, 320, 480];
-const DEFAULT_WIDTH = 320;
-const COLUMN_DRAG_MIME = 'application/x-mission-column';
-
-function AgentColumn({
-  agent, tasks, onChange, onColumnDrop, projectNames, projects,
+function StatusColumn({
+  column, tasks, agents, agentById, projects, projectNames, onChange,
 }: {
-  agent: Agent;
+  column: typeof KANBAN_COLUMNS[number];
   tasks: MissionTask[];
-  onChange: () => void;
-  onColumnDrop: (targetId: string, draggedId: string) => void;
-  projectNames: Map<string, string>;
+  agents: Agent[];
+  agentById: Map<string, Agent>;
   projects: ProjectLite[];
+  projectNames: Map<string, string>;
+  onChange: () => void;
 }) {
-  const [taskDragOver, setTaskDragOver] = useState(false);
-  const [columnDragOver, setColumnDragOver] = useState(false);
-  const queued = tasks.filter((t) => t.status === 'queued');
-  const running = tasks.filter((t) => t.status === 'running');
-  const terminal = tasks.filter((t) => TERMINAL.includes(t.status));
-
-  const widths = missionColumnWidths.value;
-  const width = widths[agent.id] ?? DEFAULT_WIDTH;
-
-  function cyclePreset(direction: 'up' | 'down') {
-    const stops = WIDTH_PRESETS;
-    const i = stops.findIndex((px) => px >= width);
-    const idx = i < 0 ? stops.length - 1 : i;
-    const next = direction === 'up'
-      ? Math.min(stops.length - 1, idx + 1)
-      : Math.max(0, idx - 1);
-    setMissionColumnWidth(agent.id, stops[next]);
-  }
-
-  // Card dropped from inbox or another column.
-  async function handleTaskDrop(taskId: string) {
-    try {
-      await apiPatch(`/api/mission/tasks/${taskId}`, { assigned_agent: agent.id });
-      onChange();
-    } catch (err: any) {
-      alert('Reassign failed: ' + (err?.message || err));
-    }
-  }
-
-  // Top-level drop handler discriminates between a card drop (text/plain
-  // is a task id) and a column reorder (custom MIME type).
-  function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    setTaskDragOver(false); setColumnDragOver(false);
-    const draggedColumnId = e.dataTransfer?.getData(COLUMN_DRAG_MIME);
-    if (draggedColumnId) {
-      onColumnDrop(agent.id, draggedColumnId);
-      return;
-    }
-    const taskId = e.dataTransfer?.getData('text/plain');
-    if (taskId) void handleTaskDrop(taskId);
-  }
+  const Icon = column.icon;
+  const emptyCopy =
+    column.id === 'pending' ? 'No queued tasks'
+    : column.id === 'in_progress' ? 'Nothing running'
+    : 'No recent completions';
 
   return (
-    <div
-      class={[
-        'shrink-0 flex flex-col bg-[var(--color-card)] border rounded-lg overflow-hidden relative transition-colors',
-        taskDragOver
-          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-          : columnDragOver
-          ? 'border-[var(--color-accent)]'
-          : 'border-[var(--color-border)]',
-      ].join(' ')}
-      style={{ width: width + 'px' }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        const isColumn = Array.from(e.dataTransfer?.types ?? []).includes(COLUMN_DRAG_MIME);
-        if (isColumn) setColumnDragOver(true); else setTaskDragOver(true);
-      }}
-      onDragLeave={(e) => {
-        const rel = e.relatedTarget as Node | null;
-        if (rel && (e.currentTarget as Node).contains(rel)) return;
-        setTaskDragOver(false); setColumnDragOver(false);
-      }}
-      onDrop={handleDrop}
-    >
-      <div
-        class="px-3 py-3 border-b border-[var(--color-border)] flex items-center gap-2"
-      >
-        <button
-          type="button"
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer?.setData(COLUMN_DRAG_MIME, agent.id);
-            e.dataTransfer!.effectAllowed = 'move';
-          }}
-          class="cursor-grab active:cursor-grabbing text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] -ml-1"
-          title="Drag to reorder"
-        >
-          <GripVertical size={14} />
-        </button>
-        <AgentAvatar agentId={agent.id} name={agent.name} running={agent.running} size={28} />
+    <div class="flex-1 min-w-[280px] flex flex-col bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden">
+      <div class="px-3 py-3 border-b border-[var(--color-border)] flex items-center gap-2">
+        <Icon size={15} class="text-[var(--color-text-muted)]" />
         <div class="flex-1 min-w-0">
-          <div class="text-[13.5px] font-medium text-[var(--color-text)] truncate">{agent.name || agent.id}</div>
+          <div class="text-[13.5px] font-medium text-[var(--color-text)]">{column.title}</div>
           <div class="text-[10.5px] text-[var(--color-text-faint)] uppercase tracking-wider flex items-center gap-1">
-            <StatusDot tone={agent.running ? 'done' : agent.delegationOnly ? 'accent' : 'cancelled'} />
-            {agent.running ? 'Live' : agent.delegationOnly ? 'Delegated' : 'Offline'}
+            <StatusDot tone={column.tone} />
+            {column.subtitle}
           </div>
         </div>
         <span class="text-[11.5px] text-[var(--color-text-muted)] tabular-nums">{tasks.length}</span>
-        <div class="flex items-center">
-          <button
-            type="button"
-            onClick={() => cyclePreset('down')}
-            disabled={width <= WIDTH_PRESETS[0]}
-            class="p-1 rounded text-[var(--color-text-faint)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"
-            title="Narrower"
-          >
-            <Minimize2 size={12} />
-          </button>
-          <button
-            type="button"
-            onClick={() => cyclePreset('up')}
-            disabled={width >= WIDTH_PRESETS[WIDTH_PRESETS.length - 1]}
-            class="p-1 rounded text-[var(--color-text-faint)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"
-            title="Wider"
-          >
-            <Maximize2 size={12} />
-          </button>
-        </div>
       </div>
 
       <div class="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
         {tasks.length === 0 && (
-          <div class="text-[11.5px] text-[var(--color-text-faint)] text-center py-6">
-            No tasks
-          </div>
+          <div class="text-[11.5px] text-[var(--color-text-faint)] text-center py-6">{emptyCopy}</div>
         )}
-        {[...running, ...queued, ...terminal].map((t) => (
-          <TaskCard
-            key={t.id}
-            task={t}
-            onChange={onChange}
-            projectName={t.project_id ? projectNames.get(t.project_id) : undefined}
-            projects={projects}
-          />
-        ))}
+        {tasks.map((t) => {
+          if (column.id === 'pending' && !t.assigned_agent) {
+            return (
+              <InboxCard
+                key={t.id}
+                task={t}
+                agents={agents}
+                projects={projects}
+                onChange={onChange}
+              />
+            );
+          }
+          const agent = t.assigned_agent ? agentById.get(t.assigned_agent) : undefined;
+          return (
+            <TaskCard
+              key={t.id}
+              task={t}
+              onChange={onChange}
+              projectName={t.project_id ? projectNames.get(t.project_id) : undefined}
+              projects={projects}
+              agent={agent}
+            />
+          );
+        })}
       </div>
-
-      <ResizeHandle agentId={agent.id} currentWidth={width} />
     </div>
-  );
-}
-
-// Drag the right edge to resize. Mousemove updates the width signal
-// optimistically; mouseup commits. We bind listeners on document so
-// the user can drag past the column edge without losing the drag.
-function ResizeHandle({ agentId, currentWidth }: { agentId: string; currentWidth: number }) {
-  const startX = useRef(0);
-  const startWidth = useRef(0);
-  const dragging = useRef(false);
-
-  function onPointerDown(e: PointerEvent) {
-    e.preventDefault();
-    dragging.current = true;
-    startX.current = e.clientX;
-    startWidth.current = currentWidth;
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp, { once: true });
-  }
-  function onMove(e: PointerEvent) {
-    if (!dragging.current) return;
-    const dx = e.clientX - startX.current;
-    setMissionColumnWidth(agentId, startWidth.current + dx);
-  }
-  function onUp() {
-    dragging.current = false;
-    document.removeEventListener('pointermove', onMove);
-  }
-
-  return (
-    <div
-      onPointerDown={onPointerDown}
-      class="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-[var(--color-accent)] active:bg-[var(--color-accent)] opacity-0 hover:opacity-50 transition-opacity"
-      title="Drag to resize"
-    />
-  );
-}
-
-// ── Layout menu ─────────────────────────────────────────────────────
-//
-// Magnet/Rectangle-style layout presets. Snaps every agent column to
-// the same width in one shot — uniform Compact/Normal/Wide, plus
-// "Fit to viewport" that divides available horizontal space evenly,
-// and Reset which clears all custom widths so columns revert to default.
-//
-// Inbox is intentionally not affected — it stays pinned at its
-// hand-picked width regardless of layout choice.
-
-const SIDEBAR_WIDTH = 260;
-const INBOX_WIDTH = 300;
-const PAGE_PADDING_X = 32; // p-4 on container = 16 each side
-const COLUMN_GAP = 12; // gap-3
-
-function LayoutMenu({ agents }: { agents: Agent[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const widths = missionColumnWidths.value;
-
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    function onEsc(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('click', onClick);
-    document.addEventListener('keydown', onEsc);
-    return () => {
-      document.removeEventListener('click', onClick);
-      document.removeEventListener('keydown', onEsc);
-    };
-  }, [open]);
-
-  function applyUniform(px: number) {
-    const next: Record<string, number> = {};
-    for (const a of agents) next[a.id] = px;
-    setMissionColumnWidthsBulk(next);
-    setOpen(false);
-  }
-
-  function applyFit() {
-    if (agents.length === 0) { setOpen(false); return; }
-    const available = window.innerWidth - SIDEBAR_WIDTH - INBOX_WIDTH - PAGE_PADDING_X
-      - (agents.length + 1) * COLUMN_GAP;
-    const per = Math.floor(available / agents.length);
-    const next: Record<string, number> = {};
-    for (const a of agents) next[a.id] = per;
-    setMissionColumnWidthsBulk(next);
-    setOpen(false);
-  }
-
-  function reset() {
-    setMissionColumnWidthsBulk({});
-    setOpen(false);
-  }
-
-  // Detect "currently active" preset by checking whether all agent
-  // columns share a single width that matches one of our presets.
-  const sample = agents[0] ? widths[agents[0].id] : undefined;
-  const allSame = agents.length > 0 && agents.every((a) => widths[a.id] === sample);
-  const activePreset =
-    !allSame ? null
-    : sample === 260 ? 'compact'
-    : sample === 320 ? 'normal'
-    : sample === 480 ? 'wide'
-    : sample === undefined ? 'reset'
-    : null;
-
-  return (
-    <div ref={ref} class="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
-        title="Column layout presets"
-      >
-        <LayoutIcon size={13} /> Layout
-      </button>
-      {open && (
-        <div class="absolute right-0 top-full mt-1 z-50 w-[240px] bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-2xl overflow-hidden">
-          <div class="px-3 py-2 section-label border-b border-[var(--color-border)]">Uniform width</div>
-          <LayoutItem
-            label="Compact"
-            hint="260 px each"
-            active={activePreset === 'compact'}
-            onClick={() => applyUniform(260)}
-          />
-          <LayoutItem
-            label="Normal"
-            hint="320 px each"
-            active={activePreset === 'normal'}
-            onClick={() => applyUniform(320)}
-          />
-          <LayoutItem
-            label="Wide"
-            hint="480 px each"
-            active={activePreset === 'wide'}
-            onClick={() => applyUniform(480)}
-          />
-          <div class="border-t border-[var(--color-border)]" />
-          <LayoutItem
-            label="Fit to viewport"
-            hint="divide space evenly"
-            onClick={applyFit}
-          />
-          <div class="border-t border-[var(--color-border)]" />
-          <LayoutItem
-            label="Reset"
-            hint="clear custom widths"
-            active={activePreset === 'reset'}
-            onClick={reset}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LayoutItem({
-  label, hint, active, onClick,
-}: {
-  label: string; hint: string; active?: boolean; onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      class="w-full flex items-center gap-2 px-3 py-2 text-[12.5px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors"
-    >
-      <span class="text-[var(--color-text)]">{label}</span>
-      <span class="ml-auto text-[10.5px] text-[var(--color-text-faint)]">{hint}</span>
-      {active && <Check size={12} class="text-[var(--color-accent)] ml-1" />}
-    </button>
   );
 }
 
 // ── Cards ──────────────────────────────────────────────────────────
 
 function InboxCard({
-  task, agents, projects, onChange, onDragStart, onDragEnd, isDragging,
+  task, agents, projects, onChange,
 }: {
   task: MissionTask; agents: Agent[]; projects: ProjectLite[]; onChange: () => void;
-  onDragStart: () => void; onDragEnd: () => void; isDragging: boolean;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -649,13 +320,7 @@ function InboxCard({
   return (
     <>
     <div
-      draggable
-      onDragStart={(e) => { e.dataTransfer?.setData('text/plain', task.id); onDragStart(); }}
-      onDragEnd={onDragEnd}
-      class={[
-        'bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5 transition-all',
-        isDragging ? 'opacity-40' : 'hover:border-[var(--color-border-strong)] cursor-grab',
-      ].join(' ')}
+      class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5 transition-all hover:border-[var(--color-border-strong)]"
     >
       <div
         class="cursor-pointer"
@@ -672,11 +337,8 @@ function InboxCard({
           {task.title}
         </div>
       </div>
-      {/* draggable=false on the action row stops the parent's HTML5 drag
-          from swallowing button clicks. Without it, mousedown on Auto /
-          select / Trash gets intercepted as drag-prep and onClick never
-          fires. The card body above stays draggable so reassign-by-drag
-          still works. */}
+      {/* draggable=false on the action row stops mousedown from bubbling
+          into the card click handler. */}
       <div
         class="flex items-center gap-1"
         draggable={false}
@@ -835,13 +497,14 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TaskCard({ task, onChange, projectName, projects }: {
+function TaskCard({ task, onChange, projectName, projects, agent }: {
   task: MissionTask; onChange: () => void; projectName?: string; projects: ProjectLite[];
+  agent?: Agent;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const priorityTone = task.priority >= 7 ? 'high' : task.priority >= 4 ? 'medium' : 'low';
-  const draggable = task.status === 'queued';
+  const agentLabel = agent?.name || task.assigned_agent;
 
   async function cancel() {
     setBusy('cancel');
@@ -860,14 +523,8 @@ function TaskCard({ task, onChange, projectName, projects }: {
 
   return (
     <div
-      draggable={draggable}
-      onDragStart={(e) => { if (draggable) e.dataTransfer?.setData('text/plain', task.id); }}
       onClick={() => setExpanded((v) => !v)}
-      class={[
-        'bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5 transition-colors',
-        draggable ? 'cursor-grab' : 'cursor-pointer',
-        'hover:border-[var(--color-border-strong)]',
-      ].join(' ')}
+      class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5 transition-colors cursor-pointer hover:border-[var(--color-border-strong)]"
     >
       <div class="flex items-center gap-1.5 mb-1">
         <StatusDot tone={task.status as any} />
@@ -883,7 +540,21 @@ function TaskCard({ task, onChange, projectName, projects }: {
       </div>
       <div class="flex items-center gap-1.5 flex-wrap">
         {task.priority > 0 && <Pill tone={priorityTone}>P{task.priority}</Pill>}
-        <Pill tone={task.status as any}>{task.status}</Pill>
+        {agentLabel && (
+          <Pill tone="accent">
+            {agent && (
+              <AgentAvatar
+                agentId={agent.id}
+                name={agent.name}
+                running={agent.running}
+                size={14}
+              />
+            )}
+            <span class="max-w-[100px] truncate">{agentLabel}</span>
+          </Pill>
+        )}
+        {task.status === 'failed' && <Pill tone="failed">{task.status}</Pill>}
+        {task.status === 'cancelled' && <Pill tone="cancelled">{task.status}</Pill>}
         {projectName && (
           <Pill tone="accent">
             <FolderKanban size={9} /> <span class="max-w-[90px] truncate">{projectName}</span>

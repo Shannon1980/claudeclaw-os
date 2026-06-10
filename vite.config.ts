@@ -43,6 +43,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      '@claudeclaw/models': resolve(__dirname, 'src/models.ts'),
       '@': resolve(__dirname, 'web/src'),
       // Wouter pulls in `react` shims; alias to preact/compat for the few
       // places it asks. preset-vite handles this automatically for most

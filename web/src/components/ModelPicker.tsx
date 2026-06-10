@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ChevronDown, Check } from 'lucide-preact';
-
-const MODELS = [
-  { id: 'claude-opus-4-6', label: 'Opus 4.6' },
-  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5' },
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
-];
+import { CLAUDE_MODELS, claudeModelLabel } from '@claudeclaw/models';
 
 interface Props {
   value: string;
@@ -18,7 +12,7 @@ interface Props {
 export function ModelPicker({ value, onSelect, disabled, size = 'sm' }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const current = MODELS.find((m) => m.id === value);
+  const currentLabel = value ? claudeModelLabel(value) : 'default';
 
   useEffect(() => {
     if (!open) return;
@@ -50,15 +44,15 @@ export function ModelPicker({ value, onSelect, disabled, size = 'sm' }: Props) {
             : 'bg-[var(--color-elevated)] text-[var(--color-text-muted)] border-[var(--color-border)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]',
         ].join(' ')}
       >
-        {current?.label || value || 'default'}
+        {currentLabel}
         {!disabled && <ChevronDown size={size === 'md' ? 12 : 10} />}
       </button>
       {open && (
         <div
-          class="absolute top-full left-0 mt-1 z-30 bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-2xl overflow-hidden min-w-[140px]"
+          class="absolute top-full left-0 mt-1 z-30 bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg shadow-2xl overflow-hidden min-w-[168px] max-h-[320px] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
-          {MODELS.map((m) => (
+          {CLAUDE_MODELS.map((m) => (
             <button
               key={m.id}
               type="button"

@@ -6,6 +6,7 @@ import { serve } from '@hono/node-server';
 import fs from 'fs';
 import path from 'path';
 import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_URL, PROJECT_ROOT, STORE_DIR, WHATSAPP_ENABLED, SLACK_USER_TOKEN, CONTEXT_LIMIT, agentDefaultModel, CLAUDECLAW_CONFIG } from './config.js';
+import { isValidClaudeModel } from './models.js';
 import crypto from 'crypto';
 import {
   getAllScheduledTasks,
@@ -75,7 +76,7 @@ import {
 import { computeNextRun } from './scheduler.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { getSecurityStatus } from './security.js';
-import { AGENT_ID_RE, agentExists, listAgentIds, loadAgentConfig, resolveAgentDir, setAgentModel } from './agent-config.js';
+import { AGENT_ID_RE, agentExists, listAgentIds, loadAgentConfig, refreshWarRoomRoster, resolveAgentDir, setAgentModel, setAgentProfile } from './agent-config.js';
 import {
   resolveAgentAvatar,
   avatarEtag,
@@ -2113,8 +2114,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const model = body?.model?.trim();
     if (!model) return c.json({ error: 'model required' }, 400);
 
-    const validModels = ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
-    if (!validModels.includes(model)) return c.json({ error: `Invalid model` }, 400);
+    if (!isValidClaudeModel(model)) return c.json({ error: 'Invalid model' }, 400);
 
     const agentIds = listAgentIds();
     const updated: string[] = [];
@@ -2138,8 +2138,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const model = body?.model?.trim();
     if (!model) return c.json({ error: 'model required' }, 400);
 
-    const validModels = ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
-    if (!validModels.includes(model)) return c.json({ error: `Invalid model. Valid: ${validModels.join(', ')}` }, 400);
+    if (!isValidClaudeModel(model)) return c.json({ error: 'Invalid model' }, 400);
 
     try {
       if (agentId === 'main') {
@@ -2157,6 +2156,44 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       return c.json({ ok: true, agent: agentId, model, restartRequired: true });
     } catch (err) {
       return c.json({ error: 'Failed to update model' }, 500);
+    }
+  });
+
+  // Update agent display name / description (agent.yaml for sub-agents).
+  app.patch('/api/agents/:id/profile', async (c) => {
+    const agentId = c.req.param('id');
+    if (!AGENT_ID_RE.test(agentId)) return c.json({ error: 'invalid id' }, 400);
+    if (agentId === 'main') {
+      return c.json({ error: 'main agent has no agent.yaml; edit CLAUDE.md for persona name' }, 400);
+    }
+    if (!agentExists(agentId)) return c.json({ error: 'agent not found' }, 404);
+
+    const body = await c.req.json().catch(() => null) as { name?: string; description?: string } | null;
+    if (!body || (body.name === undefined && body.description === undefined)) {
+      return c.json({ error: 'expected { name?: string, description?: string }' }, 400);
+    }
+
+    const name = typeof body.name === 'string' ? body.name.trim() : undefined;
+    const description = typeof body.description === 'string' ? body.description.trim() : undefined;
+    if (name !== undefined && !name) return c.json({ error: 'name cannot be empty' }, 400);
+    if (name !== undefined && name.length > 80) return c.json({ error: 'name max 80 chars' }, 400);
+    if (description !== undefined && description.length > 500) {
+      return c.json({ error: 'description max 500 chars' }, 400);
+    }
+
+    try {
+      setAgentProfile(agentId, { name, description });
+      refreshWarRoomRoster();
+      insertAuditLog(agentId, '', 'edit_agent_profile', JSON.stringify({ name, description }), false);
+      const config = loadAgentConfig(agentId);
+      return c.json({
+        ok: true,
+        agent: agentId,
+        name: config.name,
+        description: config.description,
+      });
+    } catch (err: any) {
+      return c.json({ error: err?.message || 'Failed to update profile' }, 500);
     }
   });
 

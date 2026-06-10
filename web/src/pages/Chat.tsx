@@ -78,23 +78,22 @@ export function Chat() {
   // Load conversation history when active agent changes.
   useEffect(() => {
     setLoading(true);
+    setAtBottom(true);
     const path = activeAgent === 'all'
       ? `/api/chat/history?chatId=${encodeURIComponent(chatId)}&limit=50`
       : `/api/agents/${activeAgent}/conversation?chatId=${encodeURIComponent(chatId)}&limit=50`;
     apiGet<{ turns: Turn[] }>(path)
-      .then((d) => setTurns(d.turns || []))
+      // API returns newest-first; chat UI shows oldest at top, latest at bottom.
+      .then((d) => setTurns([...(d.turns || [])].reverse()))
       .catch((e) => setError(e?.message || String(e)))
       .finally(() => setLoading(false));
   }, [activeAgent]);
 
-  // Auto-scroll only when the user is already near the bottom. New
-  // messages arriving while they're reading history shouldn't yank
-  // them away.
+  // Auto-scroll when the user is at the bottom (including after history load).
   useEffect(() => {
-    if (atBottom && messagesRef.current) {
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-    }
-  }, [turns, processing, atBottom]);
+    if (!atBottom) return;
+    requestAnimationFrame(() => scrollToBottom(false));
+  }, [turns, processing, atBottom, loading]);
 
   // Watch the message list scroll position so the "scroll to latest"
   // button shows up the moment the user scrolls away from the bottom.
@@ -108,7 +107,7 @@ export function Chat() {
     el.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
     return () => el.removeEventListener('scroll', onScroll);
-  }, [activeAgent]);
+  }, [activeAgent, loading, turns.length]);
 
   // Subscribe to the global chat SSE (started in main.tsx). The page just
   // reads the events; the stream itself stays open for the whole app

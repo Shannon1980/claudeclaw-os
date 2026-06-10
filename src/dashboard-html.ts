@@ -1,5 +1,15 @@
+import { CLAUDE_MODELS } from './models.js';
+
 export function getDashboardHtml(token: string, chatId: string, warroomEnabled = false): string {
 const WARROOM_ENABLED = warroomEnabled;
+  const globalModelOpts = CLAUDE_MODELS.map(
+    (m) => `<div class="model-opt" data-model="${m.id}" onclick="pickGlobalModel(this)">All ${m.label}</div>`,
+  ).join('\n          ');
+  const createAgentModelOpts = CLAUDE_MODELS.map(
+    (m) => `<option value="${m.id}"${m.id === 'claude-sonnet-4-6' ? ' selected' : ''}>${m.label}</option>`,
+  ).join('\n            ');
+  const modelOptsJson = JSON.stringify(CLAUDE_MODELS.map((m) => m.id));
+  const modelShortJson = JSON.stringify(Object.fromEntries(CLAUDE_MODELS.map((m) => [m.id, m.label])));
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -200,9 +210,7 @@ const WARROOM_ENABLED = warroomEnabled;
       <div class="model-picker" onclick="toggleModelPicker(this)" style="display:inline-block">
         <span class="model-current" style="color:#6b7280">Set all <span style="font-size:8px;opacity:0.5">&#9662;</span></span>
         <div class="model-menu" style="display:none;right:0;left:auto">
-          <div class="model-opt" data-model="claude-opus-4-6" onclick="pickGlobalModel(this)">All Opus</div>
-          <div class="model-opt" data-model="claude-sonnet-4-6" onclick="pickGlobalModel(this)">All Sonnet</div>
-          <div class="model-opt" data-model="claude-haiku-4-5" onclick="pickGlobalModel(this)">All Haiku</div>
+          ${globalModelOpts}
         </div>
       </div>
     </div>
@@ -393,9 +401,7 @@ ${WARROOM_ENABLED ? `<div class="card" style="border:1px solid #1e3a5f">
         <div style="flex:1">
           <label class="text-xs text-gray-400 block mb-1">Model</label>
           <select id="caw-model" style="width:100%;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 10px;color:#e0e0e0;font-size:12px;outline:none">
-            <option value="claude-sonnet-4-6" selected>Sonnet 4.6</option>
-            <option value="claude-opus-4-6">Opus 4.6</option>
-            <option value="claude-haiku-4-5">Haiku 4.5</option>
+            ${createAgentModelOpts}
           </select>
         </div>
         <div style="flex:1">
@@ -1495,8 +1501,8 @@ async function loadAgents() {
       const color = AGENT_COLORS[a.id] || '#6b7280';
       const dot = a.running ? '<span style="color:#6ee7b7">\u25CF</span>' : '<span style="color:#666">\u25CB</span>';
       const statusText = a.running ? 'live' : 'off';
-      const modelOpts = ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-4-5'];
-      const modelShort = function(m) { return {'claude-opus-4-6':'Opus','claude-sonnet-4-6':'Sonnet','claude-sonnet-4-5':'Sonnet 4.5','claude-haiku-4-5':'Haiku'}[m] || m; };
+      const modelOpts = ${modelOptsJson};
+      const modelShort = function(m) { return (${modelShortJson})[m] || m; };
       const currentModel = a.model || (a.id === 'main' ? 'claude-opus-4-6' : 'claude-sonnet-4-6');
       const modelLabel = modelShort(currentModel);
       const modelSelect = '<div class="model-picker" data-agent="' + a.id + '" onclick="event.stopPropagation();toggleModelPicker(this)">' +

@@ -1,12 +1,13 @@
-import { useRef, useState } from 'preact/hooks';
-import { Camera, Trash2, ExternalLink } from 'lucide-preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { Link } from 'wouter-preact';
+import { Camera, Trash2, ExternalLink, FileText, Save } from 'lucide-preact';
 import { Modal } from '@/components/Modal';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { Pill, StatusDot } from '@/components/Pill';
 import { Tab } from '@/components/PageHeader';
 import { useFetch } from '@/lib/useFetch';
 import { formatRelativeTime, formatCost } from '@/lib/format';
-import { chatId, dashboardToken } from '@/lib/api';
+import { chatId, dashboardToken, apiPatch } from '@/lib/api';
 import { pushToast } from '@/lib/toasts';
 import { showCosts } from '@/lib/theme';
 
@@ -30,9 +31,10 @@ type TabKey = 'overview' | 'conversation' | 'tasks' | 'hive';
 interface Props {
   agent: Agent | null;
   onClose: () => void;
+  onUpdated?: (agent: Agent) => void;
 }
 
-export function AgentDetail({ agent, onClose }: Props) {
+export function AgentDetail({ agent, onClose, onUpdated }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   if (!agent) return null;
 
@@ -46,7 +48,9 @@ export function AgentDetail({ agent, onClose }: Props) {
         <Tab label="Hive Mind" active={activeTab === 'hive'} onClick={() => setActiveTab('hive')} />
       </div>
 
-      {activeTab === 'overview' && <OverviewTab agent={agent} />}
+      {activeTab === 'overview' && (
+        <OverviewTab agent={agent} onEditFiles={onClose} onUpdated={onUpdated} />
+      )}
       {activeTab === 'conversation' && <ConversationTab agentId={agent.id} />}
       {activeTab === 'tasks' && <TasksTab agentId={agent.id} />}
       {activeTab === 'hive' && <HiveTab agentId={agent.id} />}
@@ -198,9 +202,46 @@ function Header({ agent }: { agent: Agent }) {
   );
 }
 
-function OverviewTab({ agent }: { agent: Agent }) {
+function OverviewTab({
+  agent, onEditFiles, onUpdated,
+}: {
+  agent: Agent;
+  onEditFiles: () => void;
+  onUpdated?: (agent: Agent) => void;
+}) {
   const tokens = useFetch<AgentTokens>(`/api/agents/${agent.id}/tokens`);
   const costsOn = showCosts.value;
+  const isMain = agent.id === 'main';
+  const [name, setName] = useState(agent.name || '');
+  const [description, setDescription] = useState(agent.description || '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setName(agent.name || '');
+    setDescription(agent.description || '');
+  }, [agent.id, agent.name, agent.description]);
+
+  const dirty =
+    !isMain && (
+      name.trim() !== (agent.name || '').trim()
+      || description.trim() !== (agent.description || '').trim()
+    );
+
+  async function saveProfile() {
+    setSaving(true);
+    try {
+      const res = await apiPatch<{ ok: boolean; name: string; description: string }>(
+        `/api/agents/${encodeURIComponent(agent.id)}/profile`,
+        { name: name.trim(), description: description.trim() },
+      );
+      const updated = { ...agent, name: res.name, description: res.description };
+      onUpdated?.(updated);
+      pushToast({ tone: 'success', title: 'Profile updated', description: res.name });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Save failed', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setSaving(false); }
+  }
+
   return (
     <div class="space-y-3">
       <div class={(costsOn ? 'grid-cols-3' : 'grid-cols-1') + ' grid gap-2'}>
@@ -208,11 +249,70 @@ function OverviewTab({ agent }: { agent: Agent }) {
         {costsOn && <Kpi label="Today cost" value={formatCost(agent.todayCost)} />}
         {costsOn && <Kpi label="Lifetime cost" value={formatCost(tokens.data?.allTimeCost || 0)} />}
       </div>
+
+      <Section label="Profile">
+        {isMain ? (
+          <p class="text-[11.5px] text-[var(--color-text-muted)] leading-snug">
+            Main uses a fixed dashboard label. Change how the bot introduces itself in{' '}
+            <Link href="/agents/main/files" onClick={onEditFiles} class="text-[var(--color-accent)] hover:underline">
+              CLAUDE.md
+            </Link>.
+          </p>
+        ) : (
+          <div class="space-y-2">
+            <label class="block">
+              <span class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1 block">Display name</span>
+              <input
+                type="text"
+                value={name}
+                maxLength={80}
+                onInput={(e) => setName((e.target as HTMLInputElement).value)}
+                class="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+              />
+            </label>
+            <label class="block">
+              <span class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1 block">Description</span>
+              <textarea
+                value={description}
+                maxLength={500}
+                rows={3}
+                onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
+                placeholder="What this agent handles — used for routing and the Agents page"
+                class="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)] resize-none"
+              />
+            </label>
+            <div class="flex items-center justify-end gap-2 pt-1">
+              <span class="text-[10px] text-[var(--color-text-faint)] tabular-nums mr-auto">
+                {description.length}/500
+              </span>
+              <button
+                type="button"
+                onClick={saveProfile}
+                disabled={!dirty || saving || !name.trim()}
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-[12px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Save size={12} /> {saving ? 'Saving…' : 'Save profile'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Section>
+
       <Section label="Configuration">
         <Row label="Model"><Pill tone="neutral">{agent.model || 'default'}</Pill></Row>
         <Row label="Status">{agent.running
           ? <Pill tone="done">running</Pill>
           : <Pill tone="cancelled">offline</Pill>}</Row>
+        <Row label="Persona & config">
+          <Link
+            href={`/agents/${agent.id}/files`}
+            onClick={onEditFiles}
+            class="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] border border-[var(--color-border)] transition-colors"
+          >
+            <FileText size={11} />
+            {isMain ? 'Edit CLAUDE.md' : 'Edit CLAUDE.md & agent.yaml'}
+          </Link>
+        </Row>
       </Section>
     </div>
   );
