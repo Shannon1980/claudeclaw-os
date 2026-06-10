@@ -132,6 +132,7 @@ export function parseDelegation(
  * @param fromAgent  The requesting agent's ID (usually 'main')
  * @param onProgress Optional callback for status updates
  * @param timeoutMs  Maximum execution time (default 5 min)
+ * @param abortCtrl  Optional external controller so callers can cancel the run
  */
 export async function delegateToAgent(
   agentId: string,
@@ -140,6 +141,7 @@ export async function delegateToAgent(
   fromAgent: string,
   onProgress?: (msg: string) => void,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  abortCtrl?: AbortController,
 ): Promise<DelegationResult> {
   let agent = agentRegistry.find((a) => a.id === agentId);
   if (!agent) {
@@ -196,9 +198,9 @@ export async function delegateToAgent(
     contextParts.push(prompt);
     const fullPrompt = contextParts.join('\n\n');
 
-    // Create an AbortController with timeout
-    const abortCtrl = new AbortController();
-    const timer = setTimeout(() => abortCtrl.abort(), timeoutMs);
+    // Create an AbortController with timeout (or reuse the caller's)
+    const ctrl = abortCtrl ?? new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
     try {
       const result = await runAgent(
@@ -207,7 +209,7 @@ export async function delegateToAgent(
         () => {}, // no typing indicator needed for sub-delegation
         undefined, // no progress callback for inner agent
         undefined, // use default model
-        abortCtrl,
+        ctrl,
         undefined, // no streaming for delegation
         agentConfig.mcpServers,
       );

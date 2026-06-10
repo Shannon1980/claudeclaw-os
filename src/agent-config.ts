@@ -131,7 +131,15 @@ export function loadAgentConfig(agentId: string): AgentConfig {
     };
   }
 
-  const mcpServers = raw['mcp_servers'] as string[] | undefined;
+  // mcp_servers can be a plain string array, or (in richer custom yamls) a
+  // mapping of server name → metadata. Either way the allowlist is the names.
+  let mcpServers: string[] | undefined;
+  const mcpRaw = raw['mcp_servers'];
+  if (Array.isArray(mcpRaw)) {
+    mcpServers = mcpRaw.filter((s): s is string => typeof s === 'string');
+  } else if (mcpRaw && typeof mcpRaw === 'object') {
+    mcpServers = Object.keys(mcpRaw as Record<string, unknown>);
+  }
   // War-room tool policy override. If present in agent.yaml, this list
   // overrides the per-agent default in warroom-tool-policy.ts. Tokens
   // can be SDK tool names ("Bash", "Write") or "mcp:<name>" to opt that

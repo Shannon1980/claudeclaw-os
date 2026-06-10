@@ -12,11 +12,14 @@ import {
   completeMissionTask,
   resetStuckMissionTasks,
   getMissionTask,
+  type MissionTask,
 } from './db.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import { formatForTelegram, splitMessage } from './bot.js';
+import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
+import { isAgentRunning } from './agent-create.js';
 
 type Sender = (text: string) => Promise<void>;
 
@@ -52,6 +55,17 @@ export function initScheduler(send: Sender, agentId = 'main'): void {
   const recoveredMission = resetStuckMissionTasks(agentId);
   if (recoveredMission > 0) {
     logger.warn({ recovered: recoveredMission, agentId }, 'Reset stuck mission tasks from previous crash');
+  }
+
+  // Main also recovers stuck tasks for offline agents it runs on their behalf
+  if (agentId === 'main') {
+    for (const agent of getAvailableAgents()) {
+      if (isAgentRunning(agent.id)) continue;
+      const n = resetStuckMissionTasks(agent.id);
+      if (n > 0) {
+        logger.warn({ recovered: n, agentId: agent.id }, 'Reset stuck mission tasks for offline agent');
+      }
+    }
   }
 
   setInterval(() => void runDueTasks(), 60_000);
@@ -139,14 +153,36 @@ async function runDueTasks(): Promise<void> {
 }
 
 async function runDueMissionTasks(): Promise<void> {
-  const mission = claimNextMissionTask(schedulerAgentId);
+  // Tasks assigned to this process's own agent
+  startMissionTask(claimNextMissionTask(schedulerAgentId), null);
+
+  // The main process also executes tasks assigned to agents that have no
+  // standalone process running (delegation-only agents, or stopped services).
+  // Without this, those tasks would sit queued forever.
+  if (schedulerAgentId === 'main') {
+    for (const agent of getAvailableAgents()) {
+      if (agent.id === schedulerAgentId || isAgentRunning(agent.id)) continue;
+      startMissionTask(claimNextMissionTask(agent.id), agent.id);
+    }
+  }
+}
+
+/**
+ * Execute a claimed mission task. When `delegateAgentId` is set, the task is
+ * run through the orchestrator on behalf of an offline agent (loading that
+ * agent's CLAUDE.md, memory context, and MCP allowlist).
+ */
+function startMissionTask(mission: MissionTask | null, delegateAgentId: string | null): void {
   if (!mission) return;
 
   const missionKey = 'mission-' + mission.id;
   if (runningTaskIds.has(missionKey)) return;
   runningTaskIds.add(missionKey);
 
-  logger.info({ missionId: mission.id, title: mission.title }, 'Running mission task');
+  logger.info(
+    { missionId: mission.id, title: mission.title, delegateAgentId },
+    'Running mission task',
+  );
 
   const chatId = ALLOWED_CHAT_ID || 'mission';
   messageQueue.enqueue(chatId, async () => {
@@ -166,7 +202,21 @@ async function runDueMissionTasks(): Promise<void> {
     }, 5_000);
 
     try {
-      const result = await runAgent(mission.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
+      let result: { text: string | null; aborted?: boolean };
+      if (delegateAgentId) {
+        const delegated = await delegateToAgent(
+          delegateAgentId,
+          mission.prompt,
+          chatId,
+          'main',
+          undefined,
+          TASK_TIMEOUT_MS,
+          abortController,
+        );
+        result = { text: delegated.text, aborted: abortController.signal.aborted };
+      } else {
+        result = await runAgent(mission.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
+      }
       clearTimeout(timeout);
       clearInterval(cancelPoll);
 
@@ -188,15 +238,19 @@ async function runDueMissionTasks(): Promise<void> {
       } else {
         const text = result.text?.trim() || 'Task completed with no output.';
         completeMissionTask(mission.id, text, 'completed');
-        logger.info({ missionId: mission.id }, 'Mission task completed');
+        logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');
 
-        // Send result to Telegram
-        for (const chunk of splitMessage(formatForTelegram(text))) {
+        // Send result to the user
+        const outText = delegateAgentId
+          ? '[' + delegateAgentId + '] ' + mission.title + '\n\n' + text
+          : text;
+        for (const chunk of splitMessage(formatForTelegram(outText))) {
           await sender(chunk);
         }
 
         // Inject into conversation context so agent can reference it
-        if (ALLOWED_CHAT_ID) {
+        // (own-agent tasks only — delegated runs are logged via hive mind)
+        if (ALLOWED_CHAT_ID && !delegateAgentId) {
           const activeSession = getSession(ALLOWED_CHAT_ID, schedulerAgentId);
           logConversationTurn(ALLOWED_CHAT_ID, 'user', '[Mission task: ' + mission.title + ']: ' + mission.prompt, activeSession ?? undefined, schedulerAgentId);
           logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
