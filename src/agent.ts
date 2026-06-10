@@ -171,6 +171,10 @@ async function* singleTurn(text: string): AsyncGenerator<{
  * @param sessionId  Claude Code session ID to resume, or undefined for new session
  * @param onTyping   Called every TYPING_REFRESH_MS while waiting — sends typing action to Telegram
  * @param onProgress Called when sub-agents start/complete — sends status updates to Telegram
+ * @param cwd        Working directory for the SDK subprocess. Determines which
+ *                   CLAUDE.md + .claude/settings.json get loaded. Defaults to
+ *                   the process-global agentCwd (the running agent) or
+ *                   PROJECT_ROOT. Pass a sub-agent's dir to run it in-process.
  */
 export async function runAgent(
   message: string,
@@ -181,6 +185,7 @@ export async function runAgent(
   abortController?: AbortController,
   onStreamText?: (accumulatedText: string) => void,
   mcpAllowlist?: string[],
+  cwd?: string,
 ): Promise<AgentResult> {
   // Centralized kill-switch enforcement. Throws KillSwitchDisabledError if
   // LLM_SPAWN_ENABLED has been flipped off — caller is expected to surface
@@ -213,9 +218,16 @@ export async function runAgent(
   // Telegram's "typing..." action expires after ~5s.
   const typingInterval = setInterval(onTyping, 4000);
 
+  // Resolve the working directory once: explicit per-call cwd (sub-agent
+  // routed to a Slack channel) wins, else the process-global agent cwd, else
+  // the project root.
+  const effectiveCwd = cwd ?? agentCwd ?? PROJECT_ROOT;
+
   try {
-    // Load MCP servers from project + user settings files, filtered by agent allowlist
-    const mcpServers = loadMcpServers(mcpAllowlist);
+    // Load MCP servers from project + user settings files, filtered by agent
+    // allowlist. Use the resolved cwd so a routed sub-agent picks up its own
+    // .claude/settings.json rather than the main process's.
+    const mcpServers = loadMcpServers(mcpAllowlist, effectiveCwd);
     const mcpServerNames = Object.keys(mcpServers);
     logger.info(
       { sessionId: sessionId ?? 'new', messageLen: message.length, mcpServers: mcpServerNames },
@@ -228,9 +240,10 @@ export async function runAgent(
     for await (const event of query({
       prompt: singleTurn(message),
       options: {
-        // cwd = agent directory (if running as agent) or project root.
-        // Claude Code loads CLAUDE.md from cwd via settingSources: ['project'].
-        cwd: agentCwd ?? PROJECT_ROOT,
+        // cwd = agent directory (if running as agent), a routed sub-agent's
+        // dir, or project root. Claude Code loads CLAUDE.md from cwd via
+        // settingSources: ['project'].
+        cwd: effectiveCwd,
 
         // Resume the previous session for this chat (persistent context)
         resume: sessionId,
@@ -421,6 +434,7 @@ export async function runAgentWithRetry(
   onRetry?: (attempt: number, error: AgentError) => void,
   fallbackModels?: string[],
   mcpAllowlist?: string[],
+  cwd?: string,
 ): Promise<AgentResult> {
   let lastError: AgentError | undefined;
 
@@ -435,7 +449,7 @@ export async function runAgentWithRetry(
       return await runAgent(
         message, sessionId, onTyping, onProgress,
         currentModel, abortController, onStreamText,
-        mcpAllowlist,
+        mcpAllowlist, cwd,
       );
     } catch (err) {
       if (!(err instanceof AgentError)) throw err;

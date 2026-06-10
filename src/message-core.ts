@@ -138,6 +138,22 @@ export interface ProcessOptions {
   voiceEnabled?: boolean;
   /** Per-chat model override, if any. */
   modelOverride?: string;
+  /**
+   * Run this turn as a specific sub-agent instead of the process-global agent.
+   * Used by Slack channel routing: a single main process runs many agents,
+   * one per channel, without flipping the (concurrency-unsafe) module globals.
+   * When set, its cwd / model / systemPrompt / mcpAllowlist override the
+   * agentCwd / agentDefaultModel / agentSystemPrompt / agentMcpAllowlist
+   * globals for this turn. `cb.agentId` must match `agentRuntime.agentId` so
+   * session and memory bucketing stay consistent.
+   */
+  agentRuntime?: {
+    agentId: string;
+    cwd?: string;
+    model?: string;
+    systemPrompt?: string;
+    mcpAllowlist?: string[];
+  };
 }
 
 /**
@@ -235,10 +251,18 @@ export async function processUserMessage(
   // Fetch session first: if resuming, the model already has the system prompt in context.
   const sessionId = getSession(chatIdStr, agentId);
 
+  // Resolve the effective agent runtime. A routed sub-agent (Slack channel)
+  // supplies its own cwd / model / system prompt / MCP allowlist; otherwise
+  // fall back to the process-global agent overrides.
+  const runtime = opts.agentRuntime;
+  const effectiveSystemPrompt = runtime ? runtime.systemPrompt : agentSystemPrompt;
+  const effectiveMcpAllowlist = runtime ? runtime.mcpAllowlist : agentMcpAllowlist;
+  const effectiveCwd = runtime?.cwd;
+
   // Build memory context and prepend to message
   const { contextText: memCtx, surfacedMemoryIds, surfacedMemorySummaries } = await buildMemoryContext(chatIdStr, message, agentId);
   const parts: string[] = [];
-  if (agentSystemPrompt && !sessionId) parts.push(`[Agent role — follow these instructions]\n${agentSystemPrompt}\n[End agent role]`);
+  if (effectiveSystemPrompt && !sessionId) parts.push(`[Agent role — follow these instructions]\n${effectiveSystemPrompt}\n[End agent role]`);
   if (memCtx) parts.push(memCtx);
 
   // Inject recent scheduled task outputs so the user can reply to them naturally.
@@ -261,7 +285,7 @@ export async function processUserMessage(
   const fullMessage = parts.join('\n\n');
 
   // Smart model routing: use cheap model for simple acknowledgments
-  const userModel = opts.modelOverride ?? agentDefaultModel;
+  const userModel = opts.modelOverride ?? (runtime ? runtime.model : agentDefaultModel);
   const effectiveModel = (SMART_ROUTING_ENABLED && !userModel && classifyMessageComplexity(message) === 'simple')
     ? SMART_ROUTING_CHEAP_MODEL
     : (userModel ?? 'claude-opus-4-6');
@@ -352,7 +376,8 @@ export async function processUserMessage(
         void cb.sendPlain(`${error.recovery.userMessage} (retry ${attempt}/${2})`).catch(() => {});
       },
       MODEL_FALLBACK_CHAIN.length > 0 ? MODEL_FALLBACK_CHAIN : undefined,
-      agentMcpAllowlist,
+      effectiveMcpAllowlist,
+      effectiveCwd,
     );
 
     clearTimeout(timeoutId);

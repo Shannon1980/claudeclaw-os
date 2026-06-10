@@ -876,9 +876,11 @@ oauth_config:
           channels:history, groups:history, files:read, files:write, commands, users:read]
 settings:
   event_subscriptions:
-    bot_events: [app_mention, message.im]
+    bot_events: [app_mention, message.im, message.channels, message.groups]
   socket_mode_enabled: true
 ```
+
+> `message.channels` / `message.groups` are only needed for **multi-agent channel routing** (below). Without them the bot still works in DMs and via `@mention`; with them it can run a dedicated agent per channel.
 
 > Slack rejects **undeclared** slash commands client-side, so every command you want must be listed under `slash_commands` (it never reaches the bot otherwise).
 
@@ -904,6 +906,27 @@ Start the bot (`npm run dev` or `npm start`). When `TRANSPORT=slack`, Telegram d
 DM the bot **`/whoami`**, copy the `U…` id, add `ALLOWED_SLACK_USER_ID=U…` to `.env`, and restart. The bot is **fail-closed** — until this is set it only answers `/whoami`.
 
 Then DM it, or invite it to a channel and `@ClaudeClaw …`. Send voice notes, photos, and files just like on Telegram.
+
+### Step 5 (optional): Multi-agent channel routing
+
+One Slack app can serve **all** your agents — no extra bot tokens. Map an agent to a channel and every message in that channel runs *that* agent (its own `CLAUDE.md`, model, and MCP servers) on a persistent per-channel session. DMs to the bot always go to `main`, and `@agentId:` / `/delegate` keep working everywhere.
+
+1. **Enable channel events** (one-time): in your app's **Event Subscriptions → Subscribe to bot events**, add `message.channels` (public) and/or `message.groups` (private). The `channels:history` / `groups:history` scopes are already in the manifest above. Reinstall the app if prompted.
+2. **Create a channel** per agent and invite the bot: `/invite @ClaudeClaw`.
+3. **Get the channel ID**: open the channel → click its name → the ID (`C…` public, `G…` private) is at the bottom of the dialog.
+4. **Map it** in that agent's `agent.yaml`:
+
+   ```yaml
+   # agents/research/agent.yaml
+   name: Research
+   description: Deep web research
+   model: claude-sonnet-4-6
+   slack_channel: C0XXXXRESEARCH
+   ```
+
+5. **Restart** the bot. On startup it logs `Slack channel routing enabled` with the channel→agent map.
+
+Now anything posted in `#research` runs the research agent and replies in-channel; threads stay threaded. If two agents claim the same channel, the alphabetically-first id wins (logged as a warning). Agents without a `slack_channel` are unaffected and still reachable via delegation.
 
 ---
 

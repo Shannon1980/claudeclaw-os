@@ -18,6 +18,22 @@ telegram_bot_token_env: MYAGENT_BOT_TOKEN
 # Users can override per-chat with /model in Telegram or Slack.
 model: claude-sonnet-4-6
 
+# Slack channel routing (optional, Slack transport only).
+# Map this agent to a Slack channel: every message in that channel runs THIS
+# agent (its own CLAUDE.md, model, and MCP servers) on a persistent per-channel
+# session. DMs to the bot still go to the main agent. One Slack app serves all
+# agents — no extra bot tokens needed.
+#
+# Setup:
+#   1. Create/choose a channel, invite the bot (/invite @YourBot).
+#   2. Grab the channel ID: open the channel in Slack → click its name →
+#      the ID (starts with C... for public, G... for private) is at the bottom.
+#   3. Requires the Slack app to subscribe to message.channels (and
+#      message.groups for private channels) events, with channels:history /
+#      groups:history scopes. See README "Slack multi-agent".
+#
+# slack_channel: C0XXXXXXX
+
 # Obsidian integration (optional).
 # Assign folders from your vault so this agent auto-loads relevant context.
 # obsidian:
