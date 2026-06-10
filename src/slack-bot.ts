@@ -21,7 +21,8 @@ import { logger } from './logger.js';
 import { buildPhotoMessage, buildDocumentMessage, buildVideoMessage, UPLOADS_DIR } from './media.js';
 import { messageQueue } from './message-queue.js';
 import { processUserMessage, clearSessionBaseline, type TransportCallbacks, type ProcessOptions } from './message-core.js';
-import { getAvailableAgents } from './orchestrator.js';
+import { getAvailableAgents, delegateToAgent } from './orchestrator.js';
+import { getSlackChannelMap } from './agent-config.js';
 import { isLocked, lock, isSecurityEnabled, getSecurityStatus, audit, touchActivity } from './security.js';
 import { abortActiveQuery } from './state.js';
 import { transcribeAudio, voiceCapabilities } from './voice.js';
@@ -225,6 +226,41 @@ function buildSlackCallbacks(
       });
     },
   };
+}
+
+/**
+ * Run a channel-routed message through its dedicated agent and reply in a
+ * thread. Used when a message lands in a channel mapped to an agent via
+ * agent.yaml `slack_channel`. Stateless per message (delegation starts a
+ * fresh session each time), so there's no cross-message memory in the
+ * channel — acceptable for v1; documented in the dashboard help text.
+ */
+function routeToChannelAgent(
+  client: WebClient,
+  channel: string,
+  triggerTs: string,
+  userId: string,
+  agentId: string,
+  text: string,
+): void {
+  const chatId = slackChatId(userId);
+  messageQueue.enqueue(chatId, async () => {
+    // Acknowledge receipt without posting noise.
+    await client.reactions.add({ channel, timestamp: triggerTs, name: 'eyes' }).catch(() => {});
+    try {
+      const result = await delegateToAgent(agentId, text, chatId, AGENT_ID);
+      const out = (result.text ?? '').trim() || '(no response)';
+      for (const chunk of splitMessage(formatForSlack(out), SLACK_MAX_LEN)) {
+        await client.chat.postMessage({ channel, text: chunk, thread_ts: triggerTs });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, agentId, channel }, 'Channel-routed delegation failed');
+      await client.chat
+        .postMessage({ channel, text: `${agentId} failed: ${msg}`, mrkdwn: false, thread_ts: triggerTs })
+        .catch(() => {});
+    }
+  });
 }
 
 const SLACK_HELP_TEXT =
@@ -488,15 +524,35 @@ export function createSlackBot(): SlackBot {
   let botUserId = '';
   let dmChannelId = ''; // cached IM channel for the configured user
 
-  // ── Direct messages ────────────────────────────────────────────────
+  // Channel → agent routing map, built once at startup from each agent's
+  // agent.yaml `slack_channel`. Editing an agent's channel needs a bot
+  // restart to take effect (surfaced in the dashboard help text).
+  const channelAgentMap = getSlackChannelMap();
+  if (channelAgentMap.size > 0) {
+    logger.info({ routes: Object.fromEntries(channelAgentMap) }, 'Slack channel routing enabled');
+  }
+
+  // ── Direct messages + dedicated channel routing ────────────────────
   app.message(async ({ message, client }) => {
     const m = message as SlackInboundMessage;
-    // Only DMs. Allow plain messages (no subtype) and file shares; skip edits,
-    // joins, deletions, and bot echoes.
-    if (m.channel_type !== 'im') return;
     if (m.bot_id) return;
     if (m.subtype && m.subtype !== 'file_share') return;
     if (m.user && m.user === botUserId) return;
+
+    // Non-DM message in a channel mapped to an agent: route it there. Skip
+    // messages that @mention the bot — app_mention handles those (and would
+    // otherwise double-fire). Requires the bot to receive message.channels
+    // events and be a member of the channel.
+    if (m.channel_type !== 'im') {
+      const routedAgent = channelAgentMap.get(m.channel);
+      if (!routedAgent) return;
+      if (!isAuthorisedSlack(m.user)) return; // silent in channels
+      const text = (m.text || '').trim();
+      if (!text) return;
+      if (botUserId && text.includes(`<@${botUserId}>`)) return; // let app_mention handle
+      routeToChannelAgent(client, m.channel, m.ts, m.user!, routedAgent, text);
+      return;
+    }
 
     if (!ALLOWED_SLACK_USER_ID) {
       await client.chat.postMessage({
@@ -536,6 +592,14 @@ export function createSlackBot(): SlackBot {
     // Strip the leading "<@BOTID>" mention token.
     const text = (e.text || '').replace(/^\s*<@[A-Z0-9]+>\s*/, '').trim();
     if (!text) return;
+
+    // If this channel is dedicated to an agent, route the mention there
+    // instead of running as main.
+    const routedAgent = channelAgentMap.get(e.channel);
+    if (routedAgent) {
+      routeToChannelAgent(client, e.channel, e.thread_ts ?? e.ts, e.user!, routedAgent, text);
+      return;
+    }
 
     const chatId = slackChatId(e.user!);
     const threadTs = e.thread_ts ?? e.ts;

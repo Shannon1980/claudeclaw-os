@@ -1639,6 +1639,22 @@ async function toggleAgentDetail(agentId) {
       }).join('');
     }
 
+    // Slack channel routing (not for main — main has no agent.yaml)
+    if (agentId !== 'main') {
+      var chan = (agent && agent.slackChannel) ? agent.slackChannel : '';
+      html += '<div class="mt-4 pt-3" style="border-top:1px solid #2a2a2a">';
+      html += '<div class="text-xs text-gray-400 font-semibold mb-2 uppercase">Slack channel</div>';
+      html += '<div style="display:flex;gap:8px">';
+      html += '<input type="text" id="agent-slack-channel" value="' + escapeHtml(chan) + '" placeholder="C0XXXX (leave blank to unset)" ' +
+        'style="flex:1;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:8px 12px;color:#e0e0e0;font-size:13px;outline:none;box-sizing:border-box">';
+      html += '<button data-agent="' + agentId + '" onclick="saveAgentSlackChannel(this.dataset.agent)" ' +
+        'style="background:#1a1a1a;color:#60a5fa;border:1px solid #1e3a5f;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer">Save</button>';
+      html += '</div>';
+      html += '<div class="text-xs text-gray-600 mt-1">Messages in this channel route to this agent. Restart the bot for the change to take effect (the channel map is built at startup).</div>';
+      html += '<div id="agent-slack-status" class="text-xs mt-1" style="min-height:16px"></div>';
+      html += '</div>';
+    }
+
     // Agent management controls (not for main)
     if (agentId !== 'main') {
       html += '<div class="flex gap-2 mt-4 pt-3" style="border-top:1px solid #2a2a2a">';
@@ -1656,6 +1672,28 @@ async function toggleAgentDetail(agentId) {
     if (!html) html = '<div class="text-gray-500 text-sm text-center py-8">No activity yet for this agent.</div>';
     body.innerHTML = html;
   } catch(e) { body.innerHTML = '<div class="text-red-400 text-sm text-center py-8">Failed to load agent details</div>'; }
+}
+
+async function saveAgentSlackChannel(agentId) {
+  var input = document.getElementById('agent-slack-channel');
+  var status = document.getElementById('agent-slack-status');
+  if (!input || !status) return;
+  var channel = input.value.trim();
+  status.innerHTML = '<span style="color:#fbbf24">Saving...</span>';
+  try {
+    var res = await fetch(BASE + '/api/agents/' + agentId + '/slack-channel?token=' + TOKEN, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: channel }),
+    });
+    var data = await res.json();
+    if (data.ok) {
+      status.innerHTML = '<span style="color:#6ee7b7">Saved' + (data.restartRequired ? ' — restart the bot to apply' : '') + '</span>';
+      loadAgents();
+    } else {
+      status.innerHTML = '<span style="color:#f87171">' + escapeHtml(data.error || 'Save failed') + '</span>';
+    }
+  } catch(e) { status.innerHTML = '<span style="color:#f87171">Network error</span>'; }
 }
 
 async function agentModalAction(agentId, action) {

@@ -13,9 +13,12 @@
 // Env vars are set by `src/test-env-setup.ts` (vitest setupFiles) so they
 // land BEFORE config.ts evaluates at import time.
 
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { _initTestDatabase } from './db.js';
 import { buildDashboardApp } from './dashboard.js';
+import { resolveAgentDir } from './agent-config.js';
 import type { Hono } from 'hono';
 
 const TOKEN = 'test-contract-token';
@@ -446,6 +449,83 @@ describe('PATCH /api/agents/:id/model', () => {
       model: 'claude-sonnet-4-6',
       restartRequired: false,
     });
+  });
+});
+
+describe('PATCH /api/agents/:id/slack-channel', () => {
+  // The committed agents ship only agent.yaml.example, so no sub-agent
+  // "exists" in the test env. Channel-format validation runs only after
+  // the agentExists gate, so we stand up a throwaway agent.yaml on disk
+  // to exercise the full write / clear / format-reject paths.
+  const FIXTURE_ID = 'contractslackagent';
+  let fixtureYaml = '';
+
+  beforeAll(() => {
+    const dir = resolveAgentDir(FIXTURE_ID);
+    fixtureYaml = path.join(dir, 'agent.yaml');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(fixtureYaml, 'name: Contract Slack Agent\ndescription: fixture\n', 'utf-8');
+  });
+
+  afterAll(() => {
+    try { fs.rmSync(path.dirname(fixtureYaml), { recursive: true, force: true }); } catch {}
+  });
+
+  function patch(id: string, body: unknown) {
+    return app.request('/api/agents/' + id + '/slack-channel' + Q, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('rejects an invalid agent id with 400', async () => {
+    const res = await patch('has%20space', { channel: 'C0XXXX' });
+    expect(res.status).toBe(400);
+    expect(await jsonOf(res)).toMatchObject({ error: expect.any(String) });
+  });
+
+  it('rejects main (no agent.yaml) with 400', async () => {
+    const res = await patch('main', { channel: 'C0XXXX' });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 for an unknown agent', async () => {
+    const res = await patch('totally_made_up_agent', { channel: 'C0XXXX' });
+    expect(res.status).toBe(404);
+    expect(await jsonOf(res)).toMatchObject({ error: 'agent not found' });
+  });
+
+  it('rejects a missing channel field with 400', async () => {
+    const res = await patch(FIXTURE_ID, {});
+    expect(res.status).toBe(400);
+    expect(await jsonOf(res)).toMatchObject({ error: expect.any(String) });
+  });
+
+  it('rejects a malformed channel id with 400', async () => {
+    const res = await patch(FIXTURE_ID, { channel: 'not-a-channel' });
+    expect(res.status).toBe(400);
+    expect(await jsonOf(res)).toMatchObject({ error: expect.any(String) });
+  });
+
+  it('accepts a valid channel id and persists it (restartRequired: true)', async () => {
+    const res = await patch(FIXTURE_ID, { channel: 'C0ABCDEF1' });
+    expect(res.status).toBe(200);
+    expect(await jsonOf(res)).toMatchObject({
+      ok: true,
+      agent: FIXTURE_ID,
+      slackChannel: 'C0ABCDEF1',
+      restartRequired: true,
+    });
+    expect(fs.readFileSync(fixtureYaml, 'utf-8')).toMatch(/slack_channel:\s*C0ABCDEF1/);
+  });
+
+  it('clears the channel when given an empty string', async () => {
+    await patch(FIXTURE_ID, { channel: 'G0GROUPID' });
+    const res = await patch(FIXTURE_ID, { channel: '' });
+    expect(res.status).toBe(200);
+    expect(await jsonOf(res)).toMatchObject({ ok: true, slackChannel: '' });
+    expect(fs.readFileSync(fixtureYaml, 'utf-8')).not.toMatch(/slack_channel/);
   });
 });
 

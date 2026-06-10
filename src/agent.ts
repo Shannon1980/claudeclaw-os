@@ -171,6 +171,10 @@ async function* singleTurn(text: string): AsyncGenerator<{
  * @param sessionId  Claude Code session ID to resume, or undefined for new session
  * @param onTyping   Called every TYPING_REFRESH_MS while waiting — sends typing action to Telegram
  * @param onProgress Called when sub-agents start/complete — sends status updates to Telegram
+ * @param extra      Per-run overrides: `cwd` to run in a specific project
+ *                   directory (so the SDK loads that project's CLAUDE.md /
+ *                   .claude settings), and `allowedTools` to restrict the
+ *                   tool set. Used by per-agent delegation.
  */
 export async function runAgent(
   message: string,
@@ -181,6 +185,7 @@ export async function runAgent(
   abortController?: AbortController,
   onStreamText?: (accumulatedText: string) => void,
   mcpAllowlist?: string[],
+  extra?: { cwd?: string; allowedTools?: string[] },
 ): Promise<AgentResult> {
   // Centralized kill-switch enforcement. Throws KillSwitchDisabledError if
   // LLM_SPAWN_ENABLED has been flipped off — caller is expected to surface
@@ -214,8 +219,15 @@ export async function runAgent(
   const typingInterval = setInterval(onTyping, 4000);
 
   try {
-    // Load MCP servers from project + user settings files, filtered by agent allowlist
-    const mcpServers = loadMcpServers(mcpAllowlist);
+    // The directory the SDK runs in. A per-agent project_dir (via `extra.cwd`)
+    // takes priority so the agent loads that project's CLAUDE.md / settings;
+    // otherwise fall back to the module-level agent cwd or the repo root.
+    const runCwd = extra?.cwd ?? agentCwd ?? PROJECT_ROOT;
+
+    // Load MCP servers from project + user settings files, filtered by agent
+    // allowlist. Resolve project settings from the run cwd so a delegated
+    // agent picks up its own project's .claude/settings.json.
+    const mcpServers = loadMcpServers(mcpAllowlist, runCwd);
     const mcpServerNames = Object.keys(mcpServers);
     logger.info(
       { sessionId: sessionId ?? 'new', messageLen: message.length, mcpServers: mcpServerNames },
@@ -228,9 +240,10 @@ export async function runAgent(
     for await (const event of query({
       prompt: singleTurn(message),
       options: {
-        // cwd = agent directory (if running as agent) or project root.
-        // Claude Code loads CLAUDE.md from cwd via settingSources: ['project'].
-        cwd: agentCwd ?? PROJECT_ROOT,
+        // cwd = per-agent project_dir, the agent directory (if running as
+        // agent), or project root. Claude Code loads CLAUDE.md from cwd via
+        // settingSources: ['project'].
+        cwd: runCwd,
 
         // Resume the previous session for this chat (persistent context)
         resume: sessionId,
@@ -257,6 +270,10 @@ export async function runAgent(
 
         // Model override (e.g. 'claude-haiku-4-5', 'claude-sonnet-4-5')
         ...(model ? { model } : {}),
+
+        // Per-agent tool allowlist (from agent.yaml `tools`). When set, the
+        // agent may only use these tools; unset = all tools available.
+        ...(extra?.allowedTools?.length ? { allowedTools: extra.allowedTools } : {}),
 
         // Abort support — signals the SDK to kill the subprocess
         ...(abortController ? { abortController } : {}),

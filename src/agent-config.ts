@@ -4,6 +4,7 @@ import yaml from 'js-yaml';
 
 import { CLAUDECLAW_CONFIG, PROJECT_ROOT } from './config.js';
 import { readEnvFile } from './env.js';
+import { isValidClaudeModel, resolveClaudeModelAlias } from './models.js';
 
 // Shared roster path. Written by Node on startup and any time the agent
 // roster changes (new agent, deleted agent). Read by the Python Pipecat
@@ -17,6 +18,13 @@ export const WARROOM_ROSTER_PATH = '/tmp/warroom-agents.json';
  *  definition. Lower-case alphanumerics plus `_` and `-`; `i` flag is
  *  kept for backwards compatibility with the historical regex. */
 export const AGENT_ID_RE = /^[a-z0-9_-]+$/i;
+
+/** Loose validity check for a Slack channel/group id. Slack channel ids
+ *  start with `C` (public/private channels) or `G` (legacy private groups)
+ *  followed by uppercase alphanumerics, e.g. `C0XXXX`. We validate loosely
+ *  (don't pin the exact length) so future id shapes still pass. Used to
+ *  guard the dashboard `slack_channel` editor. */
+export const SLACK_CHANNEL_RE = /^[CG][A-Z0-9]+$/;
 
 /** Cheap "does this agent exist on disk?" check. `main` always exists
  *  (it's the root process); any other id needs an `agent.yaml` next to
@@ -39,6 +47,34 @@ export interface AgentConfig {
   botTokenEnv: string;
   botToken: string;
   model?: string;
+  /** Slack channel/group id that routes to this agent. When set, messages
+   *  posted in this channel are handled by this agent (the channel→agent
+   *  map is built once at createSlackBot startup). Unset = no dedicated
+   *  channel. */
+  slackChannel?: string;
+  /** Human-friendly display name (`display_name`), shown in UIs. Falls
+   *  back to `name` when unset. */
+  displayName?: string;
+  /** Working directory the agent runs in (`project_dir`). When set, a
+   *  delegated run uses this as its cwd so the agent loads the project's
+   *  CLAUDE.md / .claude settings and operates on those files. Unset =
+   *  inherit the parent process cwd. */
+  projectDir?: string;
+  /** SDK tool allowlist for delegated runs (`tools`). When set, the
+   *  delegated agent may only use these tools (passed as `allowedTools`).
+   *  Unset = all tools available. Distinct from `warroomTools`, which
+   *  governs the war-room session. */
+  tools?: string[];
+  /** Skills this agent specializes in (`skills`). All installed skills
+   *  remain available via the Skill tool; this list is surfaced to the
+   *  agent as its primary skills rather than hard-enforced. */
+  skills?: string[];
+  /** Free-text routing hints (`triggers`). Currently advisory only — no
+   *  automatic trigger-based routing is wired. Parsed so the dashboard
+   *  and future routing can read them without a schema change. */
+  triggers?: string[];
+  /** MCP server allowlist. Accepts either `mcp_servers` or `mcp` in
+   *  agent.yaml; both map here. */
   mcpServers?: string[];
   /** Per-agent war-room tool allowlist. Tokens are SDK tool names
    *  ("Bash", "Write") or "mcp:<name>" entries to opt an MCP server in.
@@ -100,6 +136,9 @@ export function loadAgentConfig(agentId: string): AgentConfig {
   const description = (raw['description'] as string) ?? '';
   const botTokenEnv = (raw['telegram_bot_token_env'] as string) || '';
   const model = raw['model'] as string | undefined;
+  const slackChannel = typeof raw['slack_channel'] === 'string' ? (raw['slack_channel'] as string) : undefined;
+  const displayName = typeof raw['display_name'] === 'string' ? (raw['display_name'] as string) : undefined;
+  const projectDir = typeof raw['project_dir'] === 'string' ? (raw['project_dir'] as string) : undefined;
 
   if (!name) {
     throw new Error(`Agent config ${configPath} must have 'name'`);
@@ -131,15 +170,30 @@ export function loadAgentConfig(agentId: string): AgentConfig {
     };
   }
 
-  // mcp_servers can be a plain string array, or (in richer custom yamls) a
-  // mapping of server name → metadata. Either way the allowlist is the names.
+  if (projectDir && !fs.existsSync(projectDir)) {
+    // eslint-disable-next-line no-console
+    console.warn(`[${agentId}] WARNING: project_dir does not exist: ${projectDir}`);
+    console.warn(`[${agentId}] Delegated runs will fall back to the parent process cwd.`);
+  }
+
+  // mcp_servers (canonical) or mcp (alias) can be a plain string array, or
+  // (in richer custom yamls) a mapping of server name → metadata. Either
+  // way the allowlist is the names.
   let mcpServers: string[] | undefined;
-  const mcpRaw = raw['mcp_servers'];
+  const mcpRaw = raw['mcp_servers'] ?? raw['mcp'];
   if (Array.isArray(mcpRaw)) {
     mcpServers = mcpRaw.filter((s): s is string => typeof s === 'string');
   } else if (mcpRaw && typeof mcpRaw === 'object') {
     mcpServers = Object.keys(mcpRaw as Record<string, unknown>);
   }
+
+  // Optional string-list fields. Tolerate non-array values by coercing to
+  // undefined so a malformed yaml never throws here.
+  const stringList = (v: unknown): string[] | undefined =>
+    Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : undefined;
+  const tools = stringList(raw['tools']);
+  const skills = stringList(raw['skills']);
+  const triggers = stringList(raw['triggers']);
   // War-room tool policy override. If present in agent.yaml, this list
   // overrides the per-agent default in warroom-tool-policy.ts. Tokens
   // can be SDK tool names ("Bash", "Write") or "mcp:<name>" to opt that
@@ -154,12 +208,56 @@ export function loadAgentConfig(agentId: string): AgentConfig {
     botTokenEnv,
     botToken,
     model,
+    slackChannel,
+    displayName,
+    projectDir,
+    tools,
+    skills,
+    triggers,
     mcpServers,
     warroomTools,
     obsidian,
     meetVoiceId,
     meetBotName,
   };
+}
+
+/**
+ * Resolve an agent.yaml `model` value to a canonical Claude model id.
+ * Accepts a full id ("claude-sonnet-4-6") or a chat alias ("opus",
+ * "sonnet", "haiku"). Returns undefined when unset or unrecognized so the
+ * caller can fall back to the default model.
+ */
+export function resolveAgentModel(model: string | undefined): string | undefined {
+  if (!model) return undefined;
+  if (isValidClaudeModel(model)) return model;
+  return resolveClaudeModelAlias(model);
+}
+
+/**
+ * Build the Slack channel → agent id routing map from every configured
+ * agent's `slack_channel`. Last-writer-wins if two agents claim the same
+ * channel (and we warn). Called once at createSlackBot startup; the bot
+ * must restart to pick up edits.
+ */
+export function getSlackChannelMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const id of listAgentIds()) {
+    try {
+      const cfg = loadAgentConfig(id);
+      const ch = cfg.slackChannel?.trim();
+      if (!ch) continue;
+      const existing = map.get(ch);
+      if (existing && existing !== id) {
+        // eslint-disable-next-line no-console
+        console.warn(`[slack] channel ${ch} claimed by both "${existing}" and "${id}"; using "${id}"`);
+      }
+      map.set(ch, id);
+    } catch {
+      // Skip agents whose config fails to load.
+    }
+  }
+  return map;
 }
 
 /** Update the model field in an agent's agent.yaml file. */
@@ -170,6 +268,26 @@ export function setAgentModel(agentId: string, model: string): void {
 
   const raw = yaml.load(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
   raw['model'] = model;
+  fs.writeFileSync(configPath, yaml.dump(raw, { lineWidth: -1 }), 'utf-8');
+}
+
+/** Set or clear the `slack_channel` key in an agent's agent.yaml. Pass a
+ *  channel id to route that Slack channel to this agent; pass an empty
+ *  string to remove the key entirely (channel routing off). Mirrors
+ *  setAgentModel. The channel→agent map is built once at createSlackBot
+ *  startup, so a write here only takes effect after the bot restarts. */
+export function setAgentSlackChannel(agentId: string, channel: string): void {
+  const agentDir = resolveAgentDir(agentId);
+  const configPath = path.join(agentDir, 'agent.yaml');
+  if (!fs.existsSync(configPath)) throw new Error(`Agent config not found: ${configPath}`);
+
+  const raw = yaml.load(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+  const trimmed = channel.trim();
+  if (trimmed) {
+    raw['slack_channel'] = trimmed;
+  } else {
+    delete raw['slack_channel'];
+  }
   fs.writeFileSync(configPath, yaml.dump(raw, { lineWidth: -1 }), 'utf-8');
 }
 

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { runAgent, UsageInfo } from './agent.js';
-import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd } from './agent-config.js';
+import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd, resolveAgentModel } from './agent-config.js';
 import { PROJECT_ROOT } from './config.js';
 import { logToHiveMind, createInterAgentTask, completeInterAgentTask } from './db.js';
 import { logger } from './logger.js';
@@ -195,8 +195,27 @@ export async function delegateToAgent(
     if (memCtx) {
       contextParts.push(memCtx);
     }
+    // Surface the agent's designated skills. All installed skills remain
+    // available via the Skill tool; this nudges the agent toward its
+    // specialties rather than hard-enforcing a subset.
+    if (agentConfig.skills?.length) {
+      contextParts.push(
+        `[Your primary skills — prefer these when relevant]\n${agentConfig.skills.join(', ')}`,
+      );
+    }
     contextParts.push(prompt);
     const fullPrompt = contextParts.join('\n\n');
+
+    // Per-agent run overrides from agent.yaml.
+    const model = resolveAgentModel(agentConfig.model);
+    // project_dir sets the cwd so the agent loads that project's CLAUDE.md /
+    // .claude settings and operates on its files. Skip if the path is missing
+    // (loadAgentConfig already warned) so we don't crash the SDK subprocess.
+    const cwd =
+      agentConfig.projectDir && fs.existsSync(agentConfig.projectDir)
+        ? agentConfig.projectDir
+        : undefined;
+    const allowedTools = agentConfig.tools?.length ? agentConfig.tools : undefined;
 
     // Create an AbortController with timeout (or reuse the caller's)
     const ctrl = abortCtrl ?? new AbortController();
@@ -208,10 +227,11 @@ export async function delegateToAgent(
         undefined, // fresh session for each delegation
         () => {}, // no typing indicator needed for sub-delegation
         undefined, // no progress callback for inner agent
-        undefined, // use default model
+        model, // per-agent model from agent.yaml (resolved alias), else default
         ctrl,
         undefined, // no streaming for delegation
         agentConfig.mcpServers,
+        { cwd, allowedTools }, // per-agent project_dir + tool allowlist
       );
 
       clearTimeout(timer);

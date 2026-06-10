@@ -76,7 +76,7 @@ import {
 import { computeNextRun } from './scheduler.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { getSecurityStatus } from './security.js';
-import { AGENT_ID_RE, agentExists, listAgentIds, loadAgentConfig, refreshWarRoomRoster, resolveAgentDir, setAgentModel, setAgentProfile } from './agent-config.js';
+import { AGENT_ID_RE, SLACK_CHANNEL_RE, agentExists, listAgentIds, loadAgentConfig, refreshWarRoomRoster, resolveAgentDir, setAgentModel, setAgentProfile, setAgentSlackChannel } from './agent-config.js';
 import {
   resolveAgentAvatar,
   avatarEtag,
@@ -2047,6 +2047,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           name: config.name,
           description: config.description,
           model: mainOverride ?? config.model ?? 'claude-opus-4-6',
+          slackChannel: config.slackChannel ?? '',
           running,
           // No bot token = no standalone process; reachable only via
           // delegation through the main bot (@agent: / mission tasks).
@@ -2059,7 +2060,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           avatar_etag: avatarEtagForId(id),
         };
       } catch {
-        return { id, name: id, description: '', model: 'unknown', running: false, delegationOnly: false, todayTurns: 0, todayCost: 0, avatar_etag: avatarEtagForId(id) };
+        return { id, name: id, description: '', model: 'unknown', slackChannel: '', running: false, delegationOnly: false, todayTurns: 0, todayCost: 0, avatar_etag: avatarEtagForId(id) };
       }
     });
 
@@ -2074,7 +2075,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     }
     const mainStats = getAgentTokenStats('main');
     const allAgents = [
-      { id: 'main', name: 'Main', description: 'Primary ClaudeClaw bot', model: getMainModelOverride() ?? 'claude-opus-4-6', running: mainRunning, delegationOnly: false, todayTurns: mainStats.todayTurns, todayCost: mainStats.todayCost, avatar_etag: avatarEtagForId('main') },
+      { id: 'main', name: 'Main', description: 'Primary ClaudeClaw bot', model: getMainModelOverride() ?? 'claude-opus-4-6', slackChannel: '', running: mainRunning, delegationOnly: false, todayTurns: mainStats.todayTurns, todayCost: mainStats.todayCost, avatar_etag: avatarEtagForId('main') },
       ...agents,
     ];
 
@@ -2194,6 +2195,40 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       });
     } catch (err: any) {
       return c.json({ error: err?.message || 'Failed to update profile' }, 500);
+    }
+  });
+
+  // Set or clear the Slack channel that routes to this agent (agent.yaml
+  // slack_channel key). An empty string clears the key. The channel→agent
+  // map is built once at createSlackBot startup, so the bot must restart
+  // before a change here takes effect — surfaced as restartRequired so the
+  // UI can prompt for it.
+  app.patch('/api/agents/:id/slack-channel', async (c) => {
+    const agentId = c.req.param('id');
+    if (!AGENT_ID_RE.test(agentId)) return c.json({ error: 'invalid id' }, 400);
+    if (agentId === 'main') {
+      return c.json({ error: 'main agent has no agent.yaml; set the main bot channel via .env' }, 400);
+    }
+    if (!agentExists(agentId)) return c.json({ error: 'agent not found' }, 404);
+
+    const body = await c.req.json().catch(() => null) as { channel?: string } | null;
+    if (!body || typeof body.channel !== 'string') {
+      return c.json({ error: 'expected { channel: string }' }, 400);
+    }
+
+    const channel = body.channel.trim();
+    // Non-empty channel must look like a Slack channel/group id. Empty
+    // clears routing.
+    if (channel && !SLACK_CHANNEL_RE.test(channel)) {
+      return c.json({ error: 'invalid Slack channel id (expected e.g. C0XXXX or G0XXXX)' }, 400);
+    }
+
+    try {
+      setAgentSlackChannel(agentId, channel);
+      insertAuditLog(agentId, '', 'edit_agent_slack_channel', JSON.stringify({ channel }), false);
+      return c.json({ ok: true, agent: agentId, slackChannel: channel, restartRequired: true });
+    } catch (err: any) {
+      return c.json({ error: err?.message || 'Failed to update Slack channel' }, 500);
     }
   });
 
