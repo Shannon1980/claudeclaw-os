@@ -1,5 +1,5 @@
 import {
-  LayoutGrid, ListTodo, Users, MessageSquare,
+  LayoutGrid, FolderKanban, ListTodo, Users, MessageSquare,
   Brain, Network, Activity, ShieldCheck,
   Swords,
   Settings,
@@ -21,6 +21,7 @@ export interface RouteDef {
 // "Voice config" sub-tab and is reachable via /warroom?mode=voices.
 export const ROUTES: RouteDef[] = [
   { path: '/mission',    label: 'Mission Control', section: 'workspace',    icon: LayoutGrid,    shortcut: 'g m' },
+  { path: '/projects',   label: 'Projects',        section: 'workspace',    icon: FolderKanban,  shortcut: 'g p' },
   { path: '/scheduled',  label: 'Scheduled',       section: 'workspace',    icon: ListTodo,      shortcut: 'g s' },
   { path: '/agents',     label: 'Agents',          section: 'workspace',    icon: Users,         shortcut: 'g a' },
   { path: '/chat',       label: 'Chat',            section: 'workspace',    icon: MessageSquare, shortcut: 'g c' },

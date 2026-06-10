@@ -228,11 +228,23 @@ function createSchema(database: Database.Database): void {
       priority        INTEGER NOT NULL DEFAULT 0,
       created_at      INTEGER NOT NULL,
       started_at      INTEGER,
-      completed_at    INTEGER
+      completed_at    INTEGER,
+      project_id      TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_mission_status
       ON mission_tasks(assigned_agent, status, priority DESC, created_at ASC);
+
+    CREATE TABLE IF NOT EXISTS projects (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      description TEXT,
+      status      TEXT NOT NULL DEFAULT 'active',  -- active | completed | closed
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL,
+      closed_at   INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS meet_sessions (
       id              TEXT PRIMARY KEY,         -- session id from the provider's join response
@@ -689,6 +701,17 @@ function runMigrations(database: Database.Database): void {
     `);
     logger.info('Migration: made mission_tasks.assigned_agent nullable');
   }
+
+  // Projects: link mission tasks to a project so outputs/inputs can be
+  // tracked together until the project is completed or closed.
+  const missionColsProj = database.prepare(`PRAGMA table_info(mission_tasks)`).all() as Array<{ name: string }>;
+  if (missionColsProj.length > 0 && !missionColsProj.some((c) => c.name === 'project_id')) {
+    database.exec(`ALTER TABLE mission_tasks ADD COLUMN project_id TEXT`);
+    logger.info('Migration: added project_id column to mission_tasks');
+  }
+  // Index lives here (not in the base schema block) because on pre-existing
+  // DBs the column only exists after the ALTER above has run.
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_mission_project ON mission_tasks(project_id, created_at ASC)`);
 
   // Live Meetings: add provider column so we can track which platform
   // each session used (pika avatar vs recall voice-only). Default 'pika'
@@ -2159,6 +2182,7 @@ export interface MissionTask {
   created_at: number;
   started_at: number | null;
   completed_at: number | null;
+  project_id: string | null;
 }
 
 export function createMissionTask(
@@ -2168,12 +2192,13 @@ export function createMissionTask(
   assignedAgent: string | null = null,
   createdBy = 'dashboard',
   priority = 0,
+  projectId: string | null = null,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, created_at)
-     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)`,
-  ).run(id, title, prompt, assignedAgent, createdBy, priority, now);
+    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, created_at, project_id)
+     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
+  ).run(id, title, prompt, assignedAgent, createdBy, priority, now, projectId);
 }
 
 export function getUnassignedMissionTasks(): MissionTask[] {
@@ -2260,8 +2285,10 @@ export function deleteMissionTask(id: string): boolean {
 
 export function cleanupOldMissionTasks(olderThanDays = 7): number {
   const cutoff = Math.floor(Date.now() / 1000) - olderThanDays * 86400;
+  // Project-linked tasks are kept: they're the project's input/output
+  // history and only go away when the project itself is deleted.
   const result = db.prepare(
-    `DELETE FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed') AND completed_at < ?`,
+    `DELETE FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed') AND completed_at < ? AND project_id IS NULL`,
   ).run(cutoff);
   return result.changes;
 }
@@ -2296,6 +2323,103 @@ export function resetStuckMissionTasks(agentId: string): number {
     `UPDATE mission_tasks SET status = 'queued', started_at = NULL WHERE status = 'running' AND assigned_agent = ?`,
   ).run(agentId);
   return result.changes;
+}
+
+// ── Projects (group mission tasks; track inputs/outputs to completion) ─
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  status: 'active' | 'completed' | 'closed';
+  created_at: number;
+  updated_at: number;
+  closed_at: number | null;
+}
+
+export interface ProjectWithStats extends Project {
+  task_total: number;
+  task_completed: number;
+  task_running: number;
+  task_queued: number;
+  task_failed: number;
+  last_activity: number | null;
+}
+
+const PROJECT_STATS_SELECT = `
+  SELECT p.*,
+    COUNT(t.id) AS task_total,
+    COALESCE(SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END), 0) AS task_completed,
+    COALESCE(SUM(CASE WHEN t.status = 'running' THEN 1 ELSE 0 END), 0) AS task_running,
+    COALESCE(SUM(CASE WHEN t.status = 'queued' THEN 1 ELSE 0 END), 0) AS task_queued,
+    COALESCE(SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END), 0) AS task_failed,
+    MAX(COALESCE(t.completed_at, t.started_at, t.created_at)) AS last_activity
+  FROM projects p
+  LEFT JOIN mission_tasks t ON t.project_id = p.id`;
+
+export function createProject(id: string, name: string, description: string | null): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `INSERT INTO projects (id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)`,
+  ).run(id, name, description, now, now);
+}
+
+export function getProject(id: string): ProjectWithStats | null {
+  return (db.prepare(`${PROJECT_STATS_SELECT} WHERE p.id = ? GROUP BY p.id`).get(id) as ProjectWithStats) ?? null;
+}
+
+export function getAllProjects(): ProjectWithStats[] {
+  return db
+    .prepare(
+      `${PROJECT_STATS_SELECT}
+       GROUP BY p.id
+       ORDER BY CASE p.status WHEN 'active' THEN 0 ELSE 1 END, p.updated_at DESC`,
+    )
+    .all() as ProjectWithStats[];
+}
+
+export function updateProject(
+  id: string,
+  fields: { name?: string; description?: string | null; status?: Project['status'] },
+): boolean {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (fields.name !== undefined) { sets.push('name = ?'); params.push(fields.name); }
+  if (fields.description !== undefined) { sets.push('description = ?'); params.push(fields.description); }
+  if (fields.status !== undefined) {
+    sets.push('status = ?'); params.push(fields.status);
+    sets.push('closed_at = ?');
+    params.push(fields.status === 'active' ? null : Math.floor(Date.now() / 1000));
+  }
+  if (sets.length === 0) return false;
+  sets.push('updated_at = ?');
+  params.push(Math.floor(Date.now() / 1000), id);
+  const result = db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  return result.changes > 0;
+}
+
+/** Delete a project and detach (not delete) its tasks. */
+export function deleteProject(id: string): boolean {
+  const txn = db.transaction(() => {
+    db.prepare(`UPDATE mission_tasks SET project_id = NULL WHERE project_id = ?`).run(id);
+    return db.prepare(`DELETE FROM projects WHERE id = ?`).run(id).changes > 0;
+  });
+  return txn();
+}
+
+export function getProjectTasks(projectId: string): MissionTask[] {
+  return db
+    .prepare(`SELECT * FROM mission_tasks WHERE project_id = ? ORDER BY created_at ASC`)
+    .all(projectId) as MissionTask[];
+}
+
+/** Attach or detach a mission task to/from a project (any task status). */
+export function setMissionTaskProject(taskId: string, projectId: string | null): boolean {
+  const result = db.prepare(`UPDATE mission_tasks SET project_id = ? WHERE id = ?`).run(projectId, taskId);
+  if (result.changes > 0 && projectId) {
+    db.prepare(`UPDATE projects SET updated_at = ? WHERE id = ?`).run(Math.floor(Date.now() / 1000), projectId);
+  }
+  return result.changes > 0;
 }
 
 // ── Meet Sessions (Pika video meeting skill) ────────────────────────

@@ -32,6 +32,13 @@ import {
   getMissionTasks,
   getMissionTask,
   createMissionTask,
+  createProject,
+  getProject,
+  getAllProjects,
+  updateProject,
+  deleteProject,
+  getProjectTasks,
+  setMissionTaskProject,
   cancelMissionTask,
   deleteMissionTask,
   reassignMissionTask,
@@ -1577,15 +1584,18 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       assigned_agent?: string;
       priority?: number;
       attachments?: { path?: string; name?: string }[];
+      project_id?: string;
     }>();
 
     const title = body?.title?.trim();
     let prompt = body?.prompt?.trim();
     const assignedAgent = body?.assigned_agent?.trim() || null;
     const priority = Math.max(0, Math.min(10, body?.priority ?? 0));
+    const projectId = body?.project_id?.trim() || null;
 
     if (!title || title.length > 200) return c.json({ error: 'title required (max 200 chars)' }, 400);
     if (!prompt || prompt.length > 10000) return c.json({ error: 'prompt required (max 10000 chars)' }, 400);
+    if (projectId && !getProject(projectId)) return c.json({ error: 'Unknown project: ' + projectId }, 400);
 
     // Optional file/image attachments uploaded via /api/chat/upload.
     // Appended to the prompt so the target agent knows where they live.
@@ -1604,7 +1614,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     }
 
     const id = crypto.randomBytes(4).toString('hex');
-    createMissionTask(id, title, prompt, assignedAgent, 'dashboard', priority);
+    createMissionTask(id, title, prompt, assignedAgent, 'dashboard', priority, projectId);
 
     const task = getMissionTask(id);
     return c.json({ task }, 201);
@@ -1654,9 +1664,23 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
 
   app.patch('/api/mission/tasks/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json<{ assigned_agent?: string }>();
+    const task = getMissionTask(id);
+    if (!task) return c.json({ error: 'Not found' }, 404);
+
+    const body = await c.req.json<{ assigned_agent?: string; project_id?: string | null }>();
+
+    // Attach/detach project (null detaches). Works for any task status so
+    // completed tasks can be pulled into a project retroactively.
+    if (body && 'project_id' in body) {
+      const projectId = typeof body.project_id === 'string' ? body.project_id.trim() : null;
+      if (projectId && !getProject(projectId)) return c.json({ error: 'Unknown project' }, 400);
+      const ok = setMissionTaskProject(id, projectId || null);
+      if (!body.assigned_agent) return c.json({ ok });
+      if (!ok) return c.json({ ok: false }, 400);
+    }
+
     const newAgent = body?.assigned_agent?.trim();
-    if (!newAgent) return c.json({ error: 'assigned_agent required' }, 400);
+    if (!newAgent) return c.json({ error: 'assigned_agent or project_id required' }, 400);
     const validAgents = ['main', ...listAgentIds()];
     if (!validAgents.includes(newAgent)) return c.json({ error: 'Unknown agent' }, 400);
     const ok = reassignMissionTask(id, newAgent);
@@ -1673,6 +1697,67 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const limit = parseInt(c.req.query('limit') || '30', 10);
     const offset = parseInt(c.req.query('offset') || '0', 10);
     return c.json(getMissionTaskHistory(limit, offset));
+  });
+
+  // ── Projects (group mission tasks, track to completion) ─────────────
+
+  app.get('/api/projects', (c) => {
+    return c.json({ projects: getAllProjects() });
+  });
+
+  app.post('/api/projects', async (c) => {
+    const body = await c.req.json<{ name?: string; description?: string; task_ids?: string[] }>();
+    const name = body?.name?.trim();
+    const description = body?.description?.trim() || null;
+    if (!name || name.length > 120) return c.json({ error: 'name required (max 120 chars)' }, 400);
+
+    const id = crypto.randomBytes(4).toString('hex');
+    createProject(id, name, description);
+
+    // Optionally pull existing tasks into the new project
+    for (const taskId of body?.task_ids ?? []) {
+      if (typeof taskId === 'string' && taskId) setMissionTaskProject(taskId, id);
+    }
+
+    return c.json({ project: getProject(id) }, 201);
+  });
+
+  app.get('/api/projects/:id', (c) => {
+    const id = c.req.param('id');
+    const project = getProject(id);
+    if (!project) return c.json({ error: 'Not found' }, 404);
+    return c.json({ project, tasks: getProjectTasks(id) });
+  });
+
+  app.patch('/api/projects/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!getProject(id)) return c.json({ error: 'Not found' }, 404);
+    const body = await c.req.json<{ name?: string; description?: string | null; status?: string }>();
+
+    const fields: { name?: string; description?: string | null; status?: 'active' | 'completed' | 'closed' } = {};
+    if (typeof body?.name === 'string') {
+      const name = body.name.trim();
+      if (!name || name.length > 120) return c.json({ error: 'name must be 1-120 chars' }, 400);
+      fields.name = name;
+    }
+    if (body && 'description' in body) {
+      fields.description = typeof body.description === 'string' ? body.description.trim() || null : null;
+    }
+    if (typeof body?.status === 'string') {
+      if (!['active', 'completed', 'closed'].includes(body.status)) {
+        return c.json({ error: 'status must be active, completed, or closed' }, 400);
+      }
+      fields.status = body.status as 'active' | 'completed' | 'closed';
+    }
+
+    const ok = updateProject(id, fields);
+    return c.json({ ok, project: getProject(id) });
+  });
+
+  app.delete('/api/projects/:id', (c) => {
+    const id = c.req.param('id');
+    const ok = deleteProject(id);
+    return c.json({ ok });
   });
 
   // ── Live Meetings (Pika meet-cli wrapper) ──────────────────────────

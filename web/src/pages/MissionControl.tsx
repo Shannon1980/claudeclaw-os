@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'wouter-preact';
-import { Plus, Wand2, Trash2, X, History, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check, Paperclip, FileText, Image as ImageIcon } from 'lucide-preact';
+import { Plus, Wand2, Trash2, X, History, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check, Paperclip, FileText, Image as ImageIcon, FolderKanban } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
 import { Modal, Drawer } from '@/components/Modal';
 import { AgentAvatar } from '@/components/AgentAvatar';
+import { ProjectAttachSelect, type ProjectLite } from '@/components/ProjectTaskAttach';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiPatch, apiDelete, apiGet, apiUpload } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -32,6 +33,7 @@ interface MissionTask {
   completed_at: number | null;
   result: string | null;
   error: string | null;
+  project_id: string | null;
 }
 
 interface Agent { id: string; name: string; description: string; running: boolean; delegationOnly?: boolean; }
@@ -43,17 +45,27 @@ export function MissionControl() {
   const [location, navigate] = useLocation();
   const tasks = useFetch<{ tasks: MissionTask[] }>('/api/mission/tasks', 15_000);
   const agents = useFetch<{ agents: Agent[] }>('/api/agents', 60_000);
+  const projects = useFetch<{ projects: ProjectLite[] }>('/api/projects', 60_000);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [createProjectId, setCreateProjectId] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [bulkAssigning, setBulkAssigning] = useState(false);
 
-  // ?new=1 from the command palette opens the create modal.
+  const projectNames = useMemo(
+    () => new Map((projects.data?.projects ?? []).map((p) => [p.id, p.name])),
+    [projects.data],
+  );
+
+  // ?new=1 from the command palette opens the create modal. An optional
+  // ?project=<id> (from a project's "Add task" button) preselects it.
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get('new') === '1') {
+      setCreateProjectId(url.searchParams.get('project') || '');
       setCreateOpen(true);
       url.searchParams.delete('new');
+      url.searchParams.delete('project');
       navigate(url.pathname);
     }
   }, [location]);
@@ -169,7 +181,12 @@ export function MissionControl() {
       {!loading && !error && (
         <div class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
           <div class="flex gap-3 p-4 h-full min-w-max">
-            <InboxColumn tasks={inbox} onChange={tasks.refresh} agents={orderedAgents} />
+            <InboxColumn
+              tasks={inbox}
+              onChange={tasks.refresh}
+              agents={orderedAgents}
+              projects={(projects.data?.projects ?? []).filter((p) => p.status === 'active')}
+            />
             {orderedAgents.map((a) => (
               <AgentColumn
                 key={a.id}
@@ -177,6 +194,8 @@ export function MissionControl() {
                 tasks={byAgent[a.id] ?? []}
                 onChange={tasks.refresh}
                 onColumnDrop={handleColumnDrop}
+                projectNames={projectNames}
+                projects={(projects.data?.projects ?? []).filter((p) => p.status === 'active')}
               />
             ))}
           </div>
@@ -185,15 +204,22 @@ export function MissionControl() {
 
       <CreateTaskModal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => { setCreateOpen(false); setCreateProjectId(''); }}
         agents={agents.data?.agents ?? []}
+        projects={(projects.data?.projects ?? []).filter((p) => p.status === 'active')}
+        defaultProjectId={createProjectId}
         onCreated={tasks.refresh}
       />
 
       <Drawer open={historyOpen} onClose={() => setHistoryOpen(false)} title="Task history">
         {/* Remount on each open so the fetch fires fresh and a previous
             error doesn't leave the drawer stuck on an empty state. */}
-        {historyOpen && <HistoryList />}
+        {historyOpen && (
+          <HistoryList
+            projects={(projects.data?.projects ?? []).filter((p) => p.status === 'active')}
+            onChanged={tasks.refresh}
+          />
+        )}
       </Drawer>
     </div>
   );
@@ -204,7 +230,9 @@ export function MissionControl() {
 // Inbox is pinned leftmost and not draggable/resizable — it's a fixed
 // landing zone for unassigned tasks. Width chosen to match the default
 // agent column width but slightly narrower since inbox cards are simpler.
-function InboxColumn({ tasks, agents, onChange }: { tasks: MissionTask[]; agents: Agent[]; onChange: () => void }) {
+function InboxColumn({ tasks, agents, projects, onChange }: {
+  tasks: MissionTask[]; agents: Agent[]; projects: ProjectLite[]; onChange: () => void;
+}) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   return (
     <div
@@ -231,6 +259,7 @@ function InboxColumn({ tasks, agents, onChange }: { tasks: MissionTask[]; agents
             key={t.id}
             task={t}
             agents={agents}
+            projects={projects}
             onChange={onChange}
             onDragStart={() => setDraggingId(t.id)}
             onDragEnd={() => setDraggingId(null)}
@@ -251,12 +280,14 @@ const DEFAULT_WIDTH = 320;
 const COLUMN_DRAG_MIME = 'application/x-mission-column';
 
 function AgentColumn({
-  agent, tasks, onChange, onColumnDrop,
+  agent, tasks, onChange, onColumnDrop, projectNames, projects,
 }: {
   agent: Agent;
   tasks: MissionTask[];
   onChange: () => void;
   onColumnDrop: (targetId: string, draggedId: string) => void;
+  projectNames: Map<string, string>;
+  projects: ProjectLite[];
 }) {
   const [taskDragOver, setTaskDragOver] = useState(false);
   const [columnDragOver, setColumnDragOver] = useState(false);
@@ -377,7 +408,13 @@ function AgentColumn({
           </div>
         )}
         {[...running, ...queued, ...terminal].map((t) => (
-          <TaskCard key={t.id} task={t} onChange={onChange} />
+          <TaskCard
+            key={t.id}
+            task={t}
+            onChange={onChange}
+            projectName={t.project_id ? projectNames.get(t.project_id) : undefined}
+            projects={projects}
+          />
         ))}
       </div>
 
@@ -563,9 +600,9 @@ function LayoutItem({
 // ── Cards ──────────────────────────────────────────────────────────
 
 function InboxCard({
-  task, agents, onChange, onDragStart, onDragEnd, isDragging,
+  task, agents, projects, onChange, onDragStart, onDragEnd, isDragging,
 }: {
-  task: MissionTask; agents: Agent[]; onChange: () => void;
+  task: MissionTask; agents: Agent[]; projects: ProjectLite[]; onChange: () => void;
   onDragStart: () => void; onDragEnd: () => void; isDragging: boolean;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -679,10 +716,12 @@ function InboxCard({
       onClose={() => setDetailsOpen(false)}
       task={task}
       agents={agents}
+      projects={projects}
       busy={busy}
       onAutoAssign={async () => { await autoAssign(); setDetailsOpen(false); }}
       onManualAssign={async (agentId) => { await manualAssign(agentId); setDetailsOpen(false); }}
       onDelete={async () => { await remove(); setDetailsOpen(false); }}
+      onProjectChange={onChange}
     />
     </>
   );
@@ -693,16 +732,18 @@ function InboxCard({
 // delete in a focused view rather than fighting the cramped action
 // row in the card.
 function TaskDetailsModal({
-  open, onClose, task, agents, busy, onAutoAssign, onManualAssign, onDelete,
+  open, onClose, task, agents, projects, busy, onAutoAssign, onManualAssign, onDelete, onProjectChange,
 }: {
   open: boolean;
   onClose: () => void;
   task: MissionTask;
   agents: Agent[];
+  projects: ProjectLite[];
   busy: string | null;
   onAutoAssign: () => Promise<void> | void;
   onManualAssign: (agentId: string) => Promise<void> | void;
   onDelete: () => Promise<void> | void;
+  onProjectChange: () => void;
 }) {
   const [pickerAgent, setPickerAgent] = useState('');
   return (
@@ -769,6 +810,17 @@ function TaskDetailsModal({
           <Stat label="Priority" value={task.priority > 0 ? 'P' + task.priority : '—'} />
           <Stat label="Created by" value={task.created_by || 'dashboard'} />
         </div>
+        {projects.length > 0 && (
+          <div>
+            <div class="text-[10.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Project</div>
+            <ProjectAttachSelect
+              taskId={task.id}
+              currentProjectId={task.project_id}
+              projects={projects}
+              onChanged={onProjectChange}
+            />
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -783,7 +835,9 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TaskCard({ task, onChange }: { task: MissionTask; onChange: () => void }) {
+function TaskCard({ task, onChange, projectName, projects }: {
+  task: MissionTask; onChange: () => void; projectName?: string; projects: ProjectLite[];
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const priorityTone = task.priority >= 7 ? 'high' : task.priority >= 4 ? 'medium' : 'low';
@@ -830,7 +884,21 @@ function TaskCard({ task, onChange }: { task: MissionTask; onChange: () => void 
       <div class="flex items-center gap-1.5 flex-wrap">
         {task.priority > 0 && <Pill tone={priorityTone}>P{task.priority}</Pill>}
         <Pill tone={task.status as any}>{task.status}</Pill>
+        {projectName && (
+          <Pill tone="accent">
+            <FolderKanban size={9} /> <span class="max-w-[90px] truncate">{projectName}</span>
+          </Pill>
+        )}
         <div class="ml-auto flex items-center gap-1">
+          {projects.length > 0 && (
+            <ProjectAttachSelect
+              taskId={task.id}
+              currentProjectId={task.project_id}
+              projects={projects}
+              compact
+              onChanged={onChange}
+            />
+          )}
           {(task.status === 'queued' || task.status === 'running') && (
             <button
               type="button"
@@ -893,15 +961,22 @@ function taskFormatBytes(n: number): string {
 }
 
 function CreateTaskModal({
-  open, onClose, agents, onCreated,
+  open, onClose, agents, projects, defaultProjectId, onCreated,
 }: {
-  open: boolean; onClose: () => void; agents: Agent[]; onCreated: () => void;
+  open: boolean; onClose: () => void; agents: Agent[];
+  projects: ProjectLite[]; defaultProjectId?: string; onCreated: () => void;
 }) {
   const [title, setTitle] = useState('');
   const [prompt, setPrompt] = useState('');
   const [agent, setAgent] = useState<string>('');
   const [priority, setPriority] = useState(5);
   const [autoAssign, setAutoAssign] = useState(true);
+  const [projectId, setProjectId] = useState('');
+  // Adopt the preselected project (from a project's "Add task" button)
+  // whenever the modal opens with one.
+  useEffect(() => {
+    if (open) setProjectId(defaultProjectId || '');
+  }, [open, defaultProjectId]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -911,7 +986,7 @@ function CreateTaskModal({
 
   function close() {
     setTitle(''); setPrompt(''); setAgent(''); setPriority(5); setAutoAssign(true); setErr(null);
-    setAttachments([]); setDragging(false); dragDepth.current = 0;
+    setAttachments([]); setDragging(false); dragDepth.current = 0; setProjectId('');
     onClose();
   }
 
@@ -951,6 +1026,7 @@ function CreateTaskModal({
       const body: any = { title: title.trim(), prompt: prompt.trim(), priority };
       if (!autoAssign && agent) body.assigned_agent = agent;
       if (uploaded.length > 0) body.attachments = uploaded;
+      if (projectId) body.project_id = projectId;
       const created = await apiPost<{ task: MissionTask }>('/api/mission/tasks', body);
       if (autoAssign && !agent) {
         // Fire auto-assign in background; don't block the modal close.
@@ -1106,6 +1182,19 @@ function CreateTaskModal({
             />
           </div>
         </div>
+        {projects.length > 0 && (
+          <div>
+            <label class="block text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Project (optional)</label>
+            <select
+              value={projectId}
+              onChange={(e) => setProjectId((e.target as HTMLSelectElement).value)}
+              class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+            >
+              <option value="">None</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+        )}
         {err && <div class="text-[var(--color-status-failed)] text-[11px]">{err}</div>}
       </div>
     </Modal>
@@ -1118,7 +1207,7 @@ function CreateTaskModal({
 // MissionControl. That means the fetch always retries on open — fixes
 // the "drawer empty forever" symptom where a transient backend hiccup
 // at first paint left the list permanently blank with no error visible.
-function HistoryList() {
+function HistoryList({ projects, onChanged }: { projects: ProjectLite[]; onChanged: () => void }) {
   const [items, setItems] = useState<MissionTask[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -1184,6 +1273,17 @@ function HistoryList() {
             )}
             {t.error && (
               <div class="text-[11.5px] text-[var(--color-status-failed)] whitespace-pre-wrap line-clamp-2 font-mono">{t.error}</div>
+            )}
+            {projects.length > 0 && (
+              <div class="mt-2 pt-2 border-t border-[var(--color-border)]" onClick={(e) => e.stopPropagation()}>
+                <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Project</div>
+                <ProjectAttachSelect
+                  taskId={t.id}
+                  currentProjectId={t.project_id}
+                  projects={projects}
+                  onChanged={() => { onChanged(); void load(0, true); }}
+                />
+              </div>
             )}
           </div>
         ))}
