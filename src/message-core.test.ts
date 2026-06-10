@@ -28,6 +28,7 @@ vi.mock('./exfiltration-guard.js', () => ({ scanForSecrets: vi.fn(() => []), red
 vi.mock('./rate-tracker.js', () => ({ trackUsage: vi.fn(), getRateStatus: vi.fn(() => ({ warnings: [] })) }));
 vi.mock('./cost-footer.js', () => ({ buildCostFooter: vi.fn(() => '') }));
 vi.mock('./orchestrator.js', () => ({ parseDelegation: vi.fn(() => null), delegateToAgent: vi.fn() }));
+vi.mock('./chat-task-tracker.js', () => ({ maybeStartChatTask: vi.fn(async () => null), finishChatTask: vi.fn() }));
 vi.mock('./state.js', () => ({ emitChatEvent: vi.fn(), setProcessing: vi.fn(), setActiveAbort: vi.fn() }));
 vi.mock('./security.js', () => ({
   isLocked: vi.fn(() => false),

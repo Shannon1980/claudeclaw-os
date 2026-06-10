@@ -27,6 +27,7 @@ import { scanForSecrets, redactSecrets } from './exfiltration-guard.js';
 import { trackUsage, getRateStatus } from './rate-tracker.js';
 import { buildCostFooter } from './cost-footer.js';
 import { parseDelegation, delegateToAgent } from './orchestrator.js';
+import { maybeStartChatTask, finishChatTask } from './chat-task-tracker.js';
 import { emitChatEvent, setProcessing, setActiveAbort, ChatEventSource } from './state.js';
 import { isLocked, unlock, touchActivity, checkKillPhrase, executeEmergencyKill, audit } from './security.js';
 import { voiceCapabilities, synthesizeSpeech } from './voice.js';
@@ -296,6 +297,14 @@ export async function processUserMessage(
 
   setProcessing(chatIdStr, true);
 
+  // Chat -> Mission Control bridge. If this turn is an explicit task request,
+  // mirror it onto the kanban as a live (running) card. Runs concurrently with
+  // the agent so classification never delays the reply, and is settled in every
+  // terminal branch below. Skipped for synthetic turns (e.g. /respin).
+  const chatTaskPromise: Promise<string | null> = skipLog
+    ? Promise.resolve(null)
+    : maybeStartChatTask(message, agentId, cb.source);
+
   try {
     // Progress callback: surface agent activity to chat + SSE.
     // Tool activity is throttled to one update per 30s to avoid spam.
@@ -392,6 +401,7 @@ export async function processUserMessage(
     // Handle abort (manual /stop or timeout)
     if (result.aborted) {
       setProcessing(chatIdStr, false);
+      finishChatTask(chatTaskPromise, 'cancelled');
       const msg = result.text === null
         ? `Timed out after ${Math.round(AGENT_TIMEOUT_MS / 1000)}s. The task may have been too complex or a command got stuck. Try breaking it into smaller steps.`
         : 'Stopped.';
@@ -437,6 +447,9 @@ export async function processUserMessage(
         void evaluateMemoryRelevance(surfacedMemoryIds, surfacedMemorySummaries, message, rawResponse).catch(() => {});
       }
     }
+
+    // Settle the mirrored kanban card with the agent's response.
+    finishChatTask(chatTaskPromise, 'completed', rawResponse);
 
     // Emit assistant response to SSE clients
     emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: rawResponse, source: cb.source });
@@ -538,6 +551,7 @@ export async function processUserMessage(
     clearInterval(typingInterval);
     setActiveAbort(chatIdStr, null);
     setProcessing(chatIdStr, false);
+    finishChatTask(chatTaskPromise, 'failed', null, err instanceof Error ? err.message : String(err));
 
     if (err instanceof AgentError) {
       logger.error(

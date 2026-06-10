@@ -31,6 +31,7 @@ const envConfig = readEnvFile([
   'MODEL_FALLBACK_CHAIN',
   'SMART_ROUTING_ENABLED',
   'SMART_ROUTING_CHEAP_MODEL',
+  'CHAT_TO_KANBAN_ENABLED',
   'SHOW_COST_FOOTER',
   'DAILY_COST_BUDGET',
   'HOURLY_TOKEN_BUDGET',
@@ -255,6 +256,15 @@ export const SMART_ROUTING_ENABLED =
   (process.env.SMART_ROUTING_ENABLED || envConfig.SMART_ROUTING_ENABLED || 'false').toLowerCase() === 'true';
 export const SMART_ROUTING_CHEAP_MODEL =
   process.env.SMART_ROUTING_CHEAP_MODEL || envConfig.SMART_ROUTING_CHEAP_MODEL || 'claude-haiku-4-5';
+
+// Chat -> Mission Control bridge: mirror explicit task requests from chat
+// onto the kanban as live cards. A lightweight classifier (Haiku, with a
+// Gemini fallback) decides whether a message is an actionable task. A local
+// complexity check runs first, so acknowledgments and small talk never reach
+// the classifier. Cards are inserted as 'running' (never 'queued') so the
+// scheduler never re-executes work the chat handler is already doing.
+export const CHAT_TO_KANBAN_ENABLED =
+  (process.env.CHAT_TO_KANBAN_ENABLED || envConfig.CHAT_TO_KANBAN_ENABLED || 'true').toLowerCase() === 'true';
 
 // Cost footer on every response.
 // compact = model only, verbose = model + tokens, cost = model + $, full = everything
