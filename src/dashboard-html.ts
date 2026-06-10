@@ -2108,9 +2108,9 @@ async function loadMissionControl() {
 
     // Split: unassigned go to inbox, assigned go to agent columns
     const unassigned = tasks.filter(t => !t.assigned_agent && t.status === 'queued');
-    // Only show completed tasks for 30 minutes, then they move to history only
+    // Keep completed tasks for 24h, then they move to history only
     const now = Math.floor(Date.now() / 1000);
-    const DONE_VISIBLE_SECS = 30 * 60;
+    const DONE_VISIBLE_SECS = 24 * 60 * 60;
     const assigned = tasks.filter(t => {
       if (!t.assigned_agent) return false;
       if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {

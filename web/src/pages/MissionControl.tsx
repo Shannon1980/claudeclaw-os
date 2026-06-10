@@ -32,7 +32,8 @@ interface MissionTask {
 interface Agent { id: string; name: string; description: string; running: boolean; delegationOnly?: boolean; }
 
 const TERMINAL: MissionTask['status'][] = ['completed', 'failed', 'cancelled'];
-const DONE_VISIBLE_SECS = 30 * 60;
+// Keep finished tasks in the Done column for 24h, then they drop to History.
+const DONE_VISIBLE_SECS = 24 * 60 * 60;
 
 type KanbanLane = 'pending' | 'in_progress' | 'done';
 
@@ -45,7 +46,7 @@ const KANBAN_COLUMNS: {
 }[] = [
   { id: 'pending', title: 'Pending', subtitle: 'Queued', icon: Clock, tone: 'queued' },
   { id: 'in_progress', title: 'In progress', subtitle: 'Running now', icon: PlayCircle, tone: 'running' },
-  { id: 'done', title: 'Done', subtitle: 'Last 30 min', icon: CheckCircle2, tone: 'done' },
+  { id: 'done', title: 'Done', subtitle: 'Last 24h', icon: CheckCircle2, tone: 'done' },
 ];
 
 export function MissionControl() {
