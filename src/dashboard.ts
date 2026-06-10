@@ -99,6 +99,7 @@ import {
 } from './agent-create.js';
 import { getMainModelOverride, processMessageFromDashboard } from './bot.js';
 import { UPLOADS_DIR } from './media.js';
+import { collectProjectFiles, collectTaskFiles, allowedProjectDownloadPaths } from './mission-files.js';
 import { getDashboardHtml } from './dashboard-html.js';
 import { getWarRoomHtml } from './warroom-html.js';
 import { getWarRoomPickerHtml } from './warroom-text-picker-html.js';
@@ -1726,7 +1727,32 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const id = c.req.param('id');
     const project = getProject(id);
     if (!project) return c.json({ error: 'Not found' }, 404);
-    return c.json({ project, tasks: getProjectTasks(id) });
+    const tasks = getProjectTasks(id);
+    const tasksWithFiles = tasks.map((t) => ({ ...t, ...collectTaskFiles(t) }));
+    return c.json({ project, tasks: tasksWithFiles, files: collectProjectFiles(tasks) });
+  });
+
+  app.get('/api/projects/:id/files/download', (c) => {
+    const id = c.req.param('id');
+    const project = getProject(id);
+    if (!project) return c.json({ error: 'Not found' }, 404);
+    const rawPath = c.req.query('path');
+    if (!rawPath) return c.json({ error: 'path required' }, 400);
+
+    const tasks = getProjectTasks(id);
+    const allowed = new Set(allowedProjectDownloadPaths(tasks));
+    const resolved = path.resolve(rawPath);
+    if (!allowed.has(resolved)) return c.json({ error: 'File not part of this project' }, 403);
+    if (!fs.existsSync(resolved)) return c.json({ error: 'File not found on disk' }, 404);
+
+    const data = fs.readFileSync(resolved);
+    const name = path.basename(resolved);
+    return new Response(data, {
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${name.replace(/"/g, '')}"`,
+      },
+    });
   });
 
   app.patch('/api/projects/:id', async (c) => {

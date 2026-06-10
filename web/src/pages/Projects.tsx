@@ -1,14 +1,14 @@
 import { useState } from 'preact/hooks';
-import { useLocation } from 'wouter-preact';
-import { Plus, FolderKanban, CheckCircle2, Archive, RotateCcw, Trash2, ChevronDown, ChevronRight, Link2, X } from 'lucide-preact';
+import { useLocation, useRoute, Link } from 'wouter-preact';
+import { Plus, FolderKanban, CheckCircle2, Archive, RotateCcw, Trash2, ChevronDown, ChevronRight, Link2, X, Download, FileText, Image as ImageIcon, ExternalLink, ArrowLeft, LayoutGrid } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
-import { Modal, Drawer } from '@/components/Modal';
+import { Modal } from '@/components/Modal';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { AddExistingTasksModal } from '@/components/ProjectTaskAttach';
 import { useFetch } from '@/lib/useFetch';
-import { apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { apiPost, apiPatch, apiDelete, dashboardToken } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { pushToast } from '@/lib/toasts';
 
@@ -40,6 +40,26 @@ interface ProjectTask {
   completed_at: number | null;
   result: string | null;
   error: string | null;
+  input?: MissionTaskFile[];
+  output?: MissionTaskFile[];
+  result_display?: string | null;
+}
+
+interface MissionTaskFile {
+  path: string;
+  name: string;
+  kind: string;
+  direction: 'input' | 'output';
+  caption?: string;
+  exists: boolean;
+  is_url: boolean;
+  task_id: string;
+  task_title: string;
+}
+
+function projectFileHref(projectId: string, file: MissionTaskFile): string {
+  if (file.is_url) return file.path;
+  return `/api/projects/${projectId}/files/download?path=${encodeURIComponent(file.path)}&token=${encodeURIComponent(dashboardToken)}`;
 }
 
 const STATUS_TONE: Record<Project['status'], 'done' | 'accent' | 'cancelled'> = {
@@ -49,14 +69,19 @@ const STATUS_TONE: Record<Project['status'], 'done' | 'accent' | 'cancelled'> = 
 };
 
 export function Projects() {
+  const [, params] = useRoute<{ id: string }>('/projects/:id');
+  if (params?.id) return <ProjectDetailPage projectId={params.id} />;
+  return <ProjectsList />;
+}
+
+function ProjectsList() {
+  const [, navigate] = useLocation();
   const { data, loading, error, refresh } = useFetch<{ projects: Project[] }>('/api/projects', 30_000);
   const projects = data?.projects ?? [];
   const [createOpen, setCreateOpen] = useState(false);
-  const [openedId, setOpenedId] = useState<string | null>(null);
 
   const active = projects.filter((p) => p.status === 'active');
   const finished = projects.filter((p) => p.status !== 'active');
-  const opened = projects.find((p) => p.id === openedId) ?? null;
 
   return (
     <div class="flex flex-col h-full">
@@ -90,21 +115,78 @@ export function Projects() {
 
       {!error && projects.length > 0 && (
         <div class="flex-1 overflow-y-auto p-4 space-y-6">
-          <ProjectGrid projects={active} onOpen={setOpenedId} />
+          <ProjectGrid projects={active} onOpen={(id) => navigate(`/projects/${id}`)} />
           {finished.length > 0 && (
             <div>
               <div class="section-label px-1 mb-2">Completed & closed</div>
-              <ProjectGrid projects={finished} onOpen={setOpenedId} />
+              <ProjectGrid projects={finished} onOpen={(id) => navigate(`/projects/${id}`)} />
             </div>
           )}
         </div>
       )}
 
-      <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={(id) => { refresh(); setOpenedId(id); }} />
+      <CreateProjectModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(id) => { refresh(); navigate(`/projects/${id}`); }}
+      />
+    </div>
+  );
+}
 
-      <Drawer open={opened !== null} onClose={() => setOpenedId(null)} title={opened?.name ?? 'Project'}>
-        {opened && <ProjectDetail project={opened} onChange={refresh} onDeleted={() => { setOpenedId(null); refresh(); }} />}
-      </Drawer>
+function ProjectDetailPage({ projectId }: { projectId: string }) {
+  const [, navigate] = useLocation();
+  const tasksFetch = useFetch<{ project: Project; tasks: ProjectTask[]; files: MissionTaskFile[] }>(
+    `/api/projects/${projectId}`,
+    15_000,
+  );
+  const project = tasksFetch.data?.project;
+  const loading = tasksFetch.loading && !tasksFetch.data;
+  const error = tasksFetch.error;
+
+  return (
+    <div class="flex flex-col h-full">
+      <PageHeader
+        title={project?.name ?? 'Project'}
+        breadcrumb="Projects"
+        tabs={
+          <button
+            type="button"
+            onClick={() => navigate('/projects')}
+            class="text-[12px] text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] inline-flex items-center gap-1"
+          >
+            <ArrowLeft size={12} /> Back to projects
+          </button>
+        }
+        actions={
+          project ? (
+            <Link
+              href="/mission"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] border border-[var(--color-border)] transition-colors"
+            >
+              <LayoutGrid size={13} /> Mission Control
+            </Link>
+          ) : null
+        }
+      />
+
+      {error && <PageState error={error} />}
+      {loading && <PageState loading />}
+      {!loading && !error && !project && (
+        <PageState empty emptyTitle="Project not found" emptyDescription="It may have been deleted." />
+      )}
+      {project && (
+        <div class="flex-1 overflow-y-auto px-6 py-4">
+          <ProjectDetail
+            project={project}
+            tasks={tasksFetch.data?.tasks ?? []}
+            files={tasksFetch.data?.files ?? []}
+            loading={tasksFetch.loading && !tasksFetch.data}
+            onRefresh={() => tasksFetch.refresh()}
+            onDeleted={() => navigate('/projects')}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -163,12 +245,19 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
   );
 }
 
-// ── Detail drawer ────────────────────────────────────────────────────
+// ── Detail view ──────────────────────────────────────────────────────
 
-function ProjectDetail({ project, onChange, onDeleted }: { project: Project; onChange: () => void; onDeleted: () => void }) {
+function ProjectDetail({
+  project, tasks, files, loading, onRefresh, onDeleted,
+}: {
+  project: Project;
+  tasks: ProjectTask[];
+  files: MissionTaskFile[];
+  loading: boolean;
+  onRefresh: () => void;
+  onDeleted: () => void;
+}) {
   const [, navigate] = useLocation();
-  const tasksFetch = useFetch<{ project: Project; tasks: ProjectTask[] }>(`/api/projects/${project.id}`, 15_000);
-  const tasks = tasksFetch.data?.tasks ?? [];
   const [busy, setBusy] = useState(false);
   const [addExistingOpen, setAddExistingOpen] = useState(false);
 
@@ -177,7 +266,7 @@ function ProjectDetail({ project, onChange, onDeleted }: { project: Project; onC
     try {
       await apiPatch(`/api/projects/${project.id}`, { status });
       pushToast({ tone: 'success', title: `Project ${status === 'active' ? 'reopened' : status}` });
-      onChange();
+      onRefresh();
     } catch (err: any) {
       pushToast({ tone: 'error', title: 'Update failed', description: err?.message || String(err), durationMs: 6000 });
     } finally { setBusy(false); }
@@ -249,10 +338,14 @@ function ProjectDetail({ project, onChange, onDeleted }: { project: Project; onC
         </button>
       </div>
 
+      {files.length > 0 && (
+        <ProjectFilesPanel projectId={project.id} files={files} />
+      )}
+
       <div>
         <div class="section-label mb-2">Tasks ({tasks.length})</div>
-        {tasksFetch.loading && !tasksFetch.data && <PageState loading />}
-        {tasks.length === 0 && !tasksFetch.loading && (
+        {loading && <PageState loading />}
+        {tasks.length === 0 && !loading && (
           <div class="text-[12px] text-[var(--color-text-faint)] py-4 text-center border border-dashed border-[var(--color-border)] rounded-md">
             No tasks yet. Use "Add task" to queue work into this project.
           </div>
@@ -261,8 +354,9 @@ function ProjectDetail({ project, onChange, onDeleted }: { project: Project; onC
           {tasks.map((t) => (
             <ProjectTaskRow
               key={t.id}
+              projectId={project.id}
               task={t}
-              onDetached={() => { tasksFetch.refresh(); onChange(); }}
+              onDetached={onRefresh}
             />
           ))}
         </div>
@@ -274,13 +368,88 @@ function ProjectDetail({ project, onChange, onDeleted }: { project: Project; onC
         projectId={project.id}
         projectName={project.name}
         excludeTaskIds={new Set(tasks.map((t) => t.id))}
-        onAdded={() => { tasksFetch.refresh(); onChange(); }}
+        onAdded={onRefresh}
       />
     </div>
   );
 }
 
-function ProjectTaskRow({ task, onDetached }: { task: ProjectTask; onDetached: () => void }) {
+function ProjectFilesPanel({ projectId, files }: { projectId: string; files: MissionTaskFile[] }) {
+  const inputs = files.filter((f) => f.direction === 'input');
+  const outputs = files.filter((f) => f.direction === 'output');
+  return (
+    <div>
+      <div class="section-label mb-2">Files ({files.length})</div>
+      <div class="space-y-3 rounded-md border border-[var(--color-border)] bg-[var(--color-elevated)] p-3">
+        {inputs.length > 0 && (
+          <FileGroup label="Inputs" projectId={projectId} files={inputs} />
+        )}
+        {outputs.length > 0 && (
+          <FileGroup label="Generated outputs" projectId={projectId} files={outputs} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FileGroup({ label, projectId, files }: { label: string; projectId: string; files: MissionTaskFile[] }) {
+  return (
+    <div>
+      <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1.5">{label}</div>
+      <div class="space-y-1">
+        {files.map((f) => (
+          <FileRow key={`${f.direction}:${f.path}:${f.task_id}`} projectId={projectId} file={f} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FileRow({ projectId, file, compact }: { projectId: string; file: MissionTaskFile; compact?: boolean }) {
+  const isImage = file.kind === 'image' || file.kind === 'photo';
+  const href = projectFileHref(projectId, file);
+  const missing = !file.is_url && !file.exists;
+
+  return (
+    <div class={`flex items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-1.5 ${compact ? '' : ''}`}>
+      {isImage
+        ? <ImageIcon size={13} class="text-[var(--color-accent)] shrink-0" />
+        : <FileText size={13} class="text-[var(--color-accent)] shrink-0" />}
+      <div class="flex-1 min-w-0">
+        <div class="text-[12px] text-[var(--color-text)] truncate">{file.name}</div>
+        {!compact && (
+          <div class="text-[10px] text-[var(--color-text-faint)] truncate">
+            {file.caption || file.task_title}
+            {missing ? ' · missing on disk' : ''}
+          </div>
+        )}
+      </div>
+      {!compact && <Pill tone={file.direction === 'input' ? 'queued' : 'done'}>{file.direction}</Pill>}
+      {file.is_url ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] transition-colors shrink-0"
+        >
+          <ExternalLink size={11} /> Open
+        </a>
+      ) : missing ? (
+        <span class="text-[10px] text-[var(--color-text-faint)] shrink-0">Unavailable</span>
+      ) : (
+        <a
+          href={href}
+          download={file.name}
+          class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] border border-[var(--color-border)] transition-colors shrink-0"
+        >
+          <Download size={11} /> Download
+        </a>
+      )}
+    </div>
+  );
+}
+
+function ProjectTaskRow({ projectId, task, onDetached }: { projectId: string; task: ProjectTask; onDetached: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -326,14 +495,36 @@ function ProjectTaskRow({ task, onDetached }: { task: ProjectTask; onDetached: (
       </button>
       {expanded && (
         <div class="px-3 pb-2.5 space-y-2 border-t border-[var(--color-border)] pt-2">
+          {(task.input?.length ?? 0) > 0 && (
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Input files</div>
+              <div class="space-y-1">
+                {task.input!.map((f) => (
+                  <FileRow key={`in:${f.path}`} projectId={projectId} file={f} compact />
+                ))}
+              </div>
+            </div>
+          )}
           <div>
             <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Input</div>
             <div class="text-[11px] text-[var(--color-text-muted)] whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">{task.prompt}</div>
           </div>
-          {task.result && (
+          {(task.output?.length ?? 0) > 0 && (
+            <div>
+              <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Output files</div>
+              <div class="space-y-1">
+                {task.output!.map((f) => (
+                  <FileRow key={`out:${f.path}`} projectId={projectId} file={f} compact />
+                ))}
+              </div>
+            </div>
+          )}
+          {(task.result_display || task.result) && (
             <div>
               <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Output</div>
-              <div class="text-[11.5px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">{task.result}</div>
+              <div class="text-[11.5px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">
+                {task.result_display || task.result}
+              </div>
             </div>
           )}
           {task.error && (

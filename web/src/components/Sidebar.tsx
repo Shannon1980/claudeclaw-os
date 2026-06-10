@@ -77,7 +77,9 @@ export function Sidebar() {
                 <span>{SECTION_LABEL[section]}</span>
               </button>
               {!isCollapsed && items.map((r) => {
-                const active = pathname === r.path || (pathname === '/' && r.path === '/mission');
+                const active = pathname === r.path
+                  || pathname.startsWith(r.path + '/')
+                  || (pathname === '/' && r.path === '/mission');
                 const Icon = r.icon;
                 const unread = r.path === '/chat' ? chatUnread.value : 0;
                 return (
