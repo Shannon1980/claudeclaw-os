@@ -22,6 +22,7 @@ interface Agent {
   description: string;
   model: string;
   running: boolean;
+  delegationOnly?: boolean;
   todayTurns: number;
   todayCost: number;
 }
@@ -260,6 +261,10 @@ function AgentCard({ agent, onChange, onOpen, suggestions, onOpenSuggestion }: {
   }
 
   const isMain = agent.id === 'main';
+  // No bot token = no standalone process to start/stop/restart. The agent is
+  // reached via @<id>: / /delegate through the main bot, and mission tasks
+  // assigned to it run on the main process.
+  const isDelegationOnly = !isMain && agent.delegationOnly === true;
 
   return (
     <div
@@ -270,7 +275,7 @@ function AgentCard({ agent, onChange, onOpen, suggestions, onOpenSuggestion }: {
         <AgentAvatar agentId={agent.id} name={agent.name} running={agent.running} size={36} />
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-1.5 mb-0.5">
-            <StatusDot tone={agent.running ? 'done' : 'cancelled'} />
+            <StatusDot tone={agent.running ? 'done' : isDelegationOnly ? 'accent' : 'cancelled'} />
             <span class="text-[13px] font-medium text-[var(--color-text)] truncate">
               {agent.name || agent.id}
             </span>
@@ -290,7 +295,11 @@ function AgentCard({ agent, onChange, onOpen, suggestions, onOpenSuggestion }: {
 
       <div class="flex items-center gap-2 mb-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
         <ModelPicker value={agent.model} onSelect={setModel} disabled={busy === 'model'} />
-        {agent.running ? <Pill tone="done">running</Pill> : <Pill tone="cancelled">offline</Pill>}
+        {agent.running
+          ? <Pill tone="done">running</Pill>
+          : isDelegationOnly
+            ? <Pill tone="accent">delegation-only</Pill>
+            : <Pill tone="cancelled">offline</Pill>}
       </div>
 
       <div
@@ -309,7 +318,14 @@ function AgentCard({ agent, onChange, onOpen, suggestions, onOpenSuggestion }: {
       </div>
 
       <div class="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        {agent.running ? (
+        {isDelegationOnly ? (
+          <div
+            class="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded text-[11px] bg-[var(--color-elevated)] text-[var(--color-text-muted)] border border-[var(--color-border)] truncate"
+            title={'This agent has no bot token, so there is no standalone service to start. Reach it via @' + agent.id + ': or /delegate from the main bot. Mission tasks assigned to it run on the main process.'}
+          >
+            via @{agent.id}:
+          </div>
+        ) : agent.running ? (
           <button
             type="button"
             onClick={() => run('stop')}
@@ -336,15 +352,17 @@ function AgentCard({ agent, onChange, onOpen, suggestions, onOpenSuggestion }: {
         >
           <FileText size={11} />
         </Link>
-        <button
-          type="button"
-          onClick={() => run('restart')}
-          disabled={busy !== null || isMain}
-          class="inline-flex items-center justify-center px-2 py-1.5 rounded text-[11px] bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          title="Restart"
-        >
-          <RotateCcw size={11} class={busy === 'restart' ? 'animate-spin' : ''} />
-        </button>
+        {!isDelegationOnly && (
+          <button
+            type="button"
+            onClick={() => run('restart')}
+            disabled={busy !== null || isMain}
+            class="inline-flex items-center justify-center px-2 py-1.5 rounded text-[11px] bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Restart"
+          >
+            <RotateCcw size={11} class={busy === 'restart' ? 'animate-spin' : ''} />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => run('delete')}

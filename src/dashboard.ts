@@ -1936,6 +1936,9 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           description: config.description,
           model: mainOverride ?? config.model ?? 'claude-opus-4-6',
           running,
+          // No bot token = no standalone process; reachable only via
+          // delegation through the main bot (@agent: / mission tasks).
+          delegationOnly: !config.botToken,
           todayTurns: stats.todayTurns,
           todayCost: stats.todayCost,
           // Cache-bust token for <img> URLs across all surfaces. Derived
@@ -1944,7 +1947,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           avatar_etag: avatarEtagForId(id),
         };
       } catch {
-        return { id, name: id, description: '', model: 'unknown', running: false, todayTurns: 0, todayCost: 0, avatar_etag: avatarEtagForId(id) };
+        return { id, name: id, description: '', model: 'unknown', running: false, delegationOnly: false, todayTurns: 0, todayCost: 0, avatar_etag: avatarEtagForId(id) };
       }
     });
 
@@ -1959,7 +1962,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     }
     const mainStats = getAgentTokenStats('main');
     const allAgents = [
-      { id: 'main', name: 'Main', description: 'Primary ClaudeClaw bot', model: getMainModelOverride() ?? 'claude-opus-4-6', running: mainRunning, todayTurns: mainStats.todayTurns, todayCost: mainStats.todayCost, avatar_etag: avatarEtagForId('main') },
+      { id: 'main', name: 'Main', description: 'Primary ClaudeClaw bot', model: getMainModelOverride() ?? 'claude-opus-4-6', running: mainRunning, delegationOnly: false, todayTurns: mainStats.todayTurns, todayCost: mainStats.todayCost, avatar_etag: avatarEtagForId('main') },
       ...agents,
     ];
 

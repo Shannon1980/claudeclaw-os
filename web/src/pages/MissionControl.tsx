@@ -34,7 +34,7 @@ interface MissionTask {
   error: string | null;
 }
 
-interface Agent { id: string; name: string; description: string; running: boolean; }
+interface Agent { id: string; name: string; description: string; running: boolean; delegationOnly?: boolean; }
 
 const TERMINAL: MissionTask['status'][] = ['completed', 'failed', 'cancelled'];
 const DONE_VISIBLE_SECS = 30 * 60;
@@ -343,8 +343,8 @@ function AgentColumn({
         <div class="flex-1 min-w-0">
           <div class="text-[13.5px] font-medium text-[var(--color-text)] truncate">{agent.name || agent.id}</div>
           <div class="text-[10.5px] text-[var(--color-text-faint)] uppercase tracking-wider flex items-center gap-1">
-            <StatusDot tone={agent.running ? 'done' : 'cancelled'} />
-            {agent.running ? 'Live' : 'Offline'}
+            <StatusDot tone={agent.running ? 'done' : agent.delegationOnly ? 'accent' : 'cancelled'} />
+            {agent.running ? 'Live' : agent.delegationOnly ? 'Delegated' : 'Offline'}
           </div>
         </div>
         <span class="text-[11.5px] text-[var(--color-text-muted)] tabular-nums">{tasks.length}</span>
