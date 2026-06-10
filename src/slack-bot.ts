@@ -23,7 +23,7 @@ import { buildPhotoMessage, buildDocumentMessage, buildVideoMessage, UPLOADS_DIR
 import { messageQueue } from './message-queue.js';
 import { processUserMessage, clearSessionBaseline, type TransportCallbacks, type ProcessOptions } from './message-core.js';
 import { getAvailableAgents } from './orchestrator.js';
-import { isLocked, lock, isSecurityEnabled, getSecurityStatus, audit, touchActivity } from './security.js';
+import { getSecurityStatus, audit } from './security.js';
 import { abortActiveQuery } from './state.js';
 import { transcribeAudio, voiceCapabilities } from './voice.js';
 
@@ -269,7 +269,6 @@ const SLACK_HELP_TEXT =
   '/stop — Stop current processing\n' +
   '/agents — List available agents\n' +
   '/delegate — Delegate task to agent\n' +
-  '/lock — Lock session (PIN required to unlock)\n' +
   '/status — Security status\n' +
   '/whoami — Show your Slack user ID\n\n' +
   'Delegation: @agentId: prompt or /delegate agentId prompt\n\n' +
@@ -334,13 +333,7 @@ function registerSlackCommands(app: InstanceType<typeof App>, ctx: SlackCommandC
     return true;
   };
   const ackAuthLock = async (command: any, ack: any, respond: any): Promise<boolean> => {
-    if (!(await ackAuth(command, ack, respond))) return false;
-    if (isLocked()) {
-      await respond({ response_type: 'ephemeral', text: 'Session locked. Send your PIN to unlock.' });
-      return false;
-    }
-    touchActivity();
-    return true;
+    return ackAuth(command, ack, respond);
   };
   const eph = (text: string) => ({ response_type: 'ephemeral' as const, text });
 
@@ -503,28 +496,10 @@ function registerSlackCommands(app: InstanceType<typeof App>, ctx: SlackCommandC
     messageQueue.enqueue(chatId, () => processUserMessage(`/delegate ${args}`, cb, coreOpts(chatId)));
   });
 
-  app.command('/lock', async ({ command, ack, respond }) => {
-    if (!(await ackAuth(command, ack, respond))) return;
-    if (!isSecurityEnabled()) { await respond(eph('PIN lock not configured. Set SECURITY_PIN_HASH in .env to enable.')); return; }
-    lock();
-    audit({ agentId: AGENT_ID, chatId: slackChatId(command.user_id), action: 'lock', detail: 'Manual lock via /lock', blocked: false });
-    await respond(eph('Session locked. Send your PIN to unlock.'));
-  });
-
   app.command('/status', async ({ command, ack, respond }) => {
     if (!(await ackAuth(command, ack, respond))) return;
     const s = getSecurityStatus();
-    const lines = [
-      `PIN lock: ${s.pinEnabled ? 'enabled' : 'disabled'}`,
-      `Session: ${s.locked ? 'LOCKED' : 'unlocked'}`,
-      s.idleLockMinutes > 0 ? `Idle lock: ${s.idleLockMinutes}m` : 'Idle lock: disabled',
-      `Kill phrase: ${s.killPhraseEnabled ? 'configured' : 'disabled'}`,
-    ];
-    if (!s.locked && s.pinEnabled) {
-      const idleSec = Math.round((Date.now() - s.lastActivity) / 1000);
-      lines.push(`Last activity: ${idleSec < 60 ? idleSec + 's ago' : Math.round(idleSec / 60) + 'm ago'}`);
-    }
-    await respond(eph(lines.join('\n')));
+    await respond(eph(`Kill phrase: ${s.killPhraseEnabled ? 'configured' : 'disabled'}`));
   });
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */

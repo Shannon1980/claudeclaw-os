@@ -46,13 +46,8 @@ import { messageQueue } from './message-queue.js';
 import { parseDelegation, delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { emitChatEvent, setProcessing, setActiveAbort, abortActiveQuery } from './state.js';
 import {
-  isLocked,
-  lock,
-  unlock,
-  touchActivity,
   checkKillPhrase,
   executeEmergencyKill,
-  isSecurityEnabled,
   getSecurityStatus,
   audit,
 } from './security.js';
@@ -221,26 +216,9 @@ function isAuthorised(chatId: number): boolean {
   return chatId.toString() === ALLOWED_CHAT_ID;
 }
 
-/**
- * Check auth + lock. Returns an error message if the command should be blocked, or null if OK.
- * Used by command handlers that should be gated behind both auth and PIN lock.
- */
-function securityGate(ctx: Context): string | null {
-  if (!isAuthorised(ctx.chat!.id)) return 'unauthorized';
-  if (isLocked()) return 'locked';
-  touchActivity();
-  return null;
-}
-
-/** Reply with lock message and return true if locked, false if OK. */
+/** Reject unauthorized chats. Returns true (and silently rejects) if blocked, false if OK. */
 async function replyIfLocked(ctx: Context): Promise<boolean> {
-  const gate = securityGate(ctx);
-  if (gate === 'unauthorized') return true; // silently reject
-  if (gate === 'locked') {
-    await ctx.reply('Session locked. Send your PIN to unlock.');
-    return true;
-  }
-  return false;
+  return !isAuthorised(ctx.chat!.id);
 }
 
 /**
@@ -411,7 +389,6 @@ export function createBot(): Bot {
     { command: 'stop', description: 'Stop current processing' },
     { command: 'agents', description: 'List available agents' },
     { command: 'delegate', description: 'Delegate task to agent' },
-    { command: 'lock', description: 'Lock session (requires PIN to unlock)' },
     { command: 'status', description: 'Show security status' },
   ];
   const skillCommands = discoverSkillCommands();
@@ -437,7 +414,6 @@ export function createBot(): Bot {
       '/stop — Stop current processing\n' +
       '/agents — List available agents\n' +
       '/delegate — Delegate task to agent\n' +
-      '/lock — Lock session (PIN required to unlock)\n' +
       '/status — Security status\n\n' +
       'Delegation: @agentId: prompt or /delegate agentId prompt\n\n' +
       'You can also send voice notes, photos, files, and videos.'
@@ -767,33 +743,11 @@ export function createBot(): Bot {
     );
   });
 
-  // /lock — manually lock the session
-  bot.command('lock', async (ctx) => {
-    if (!isAuthorised(ctx.chat!.id)) return;
-    if (!isSecurityEnabled()) {
-      await ctx.reply('PIN lock not configured. Set SECURITY_PIN_HASH in .env to enable.');
-      return;
-    }
-    lock();
-    audit({ agentId: AGENT_ID, chatId: ctx.chat!.id.toString(), action: 'lock', detail: 'Manual lock via /lock', blocked: false });
-    await ctx.reply('Session locked. Send your PIN to unlock.');
-  });
-
   // /status — show security status
   bot.command('status', async (ctx) => {
     if (!isAuthorised(ctx.chat!.id)) return;
     const s = getSecurityStatus();
-    const lines = [
-      `PIN lock: ${s.pinEnabled ? 'enabled' : 'disabled'}`,
-      `Session: ${s.locked ? 'LOCKED' : 'unlocked'}`,
-      s.idleLockMinutes > 0 ? `Idle lock: ${s.idleLockMinutes}m` : 'Idle lock: disabled',
-      `Kill phrase: ${s.killPhraseEnabled ? 'configured' : 'disabled'}`,
-    ];
-    if (!s.locked && s.pinEnabled) {
-      const idleSec = Math.round((Date.now() - s.lastActivity) / 1000);
-      lines.push(`Last activity: ${idleSec < 60 ? idleSec + 's ago' : Math.round(idleSec / 60) + 'm ago'}`);
-    }
-    await ctx.reply(lines.join('\n'));
+    await ctx.reply(`Kill phrase: ${s.killPhraseEnabled ? 'configured' : 'disabled'}`);
   });
 
   // /delegate — delegate task to an agent (handled via handleMessage delegation detection)
@@ -816,7 +770,7 @@ export function createBot(): Bot {
   });
 
   // Text messages — and any slash commands not owned by this bot (skills, e.g. /todo /gmail)
-  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/pin', '/unpin', '/chatid', '/wa', '/slack', '/dashboard', '/stop', '/agents', '/delegate', '/lock', '/status']);
+  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/pin', '/unpin', '/chatid', '/wa', '/slack', '/dashboard', '/stop', '/agents', '/delegate', '/status']);
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text;
     const chatIdStr = ctx.chat!.id.toString();
@@ -826,24 +780,13 @@ export function createBot(): Bot {
       if (OWN_COMMANDS.has(cmd)) return; // already handled by bot.command() above
     }
 
-    // ── Security: kill phrase + lock check (before any state machines) ──
+    // ── Security: kill phrase check (before any state machines) ──
     if (checkKillPhrase(text)) {
       audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'kill', detail: 'Emergency kill via text handler', blocked: false });
       await ctx.reply('EMERGENCY KILL activated. All agents stopping.');
       executeEmergencyKill();
       return;
     }
-    if (isLocked()) {
-      if (unlock(text)) {
-        audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'unlock', detail: 'PIN accepted', blocked: false });
-        await ctx.reply('Unlocked. Session active.');
-      } else {
-        audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'blocked', detail: 'Session locked, wrong PIN or message rejected', blocked: true });
-        await ctx.reply('Session locked. Send your PIN to unlock.');
-      }
-      return;
-    }
-    touchActivity();
 
     // ── WhatsApp state machine ──────────────────────────────────────
     const state = waState.get(chatIdStr);

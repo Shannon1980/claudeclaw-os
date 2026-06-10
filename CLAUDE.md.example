@@ -144,10 +144,8 @@ You don't need to re-introduce yourself each time.
 ## Security
 
 Optional layers (configure in .env):
-- **PIN lock**: bot starts locked, requires PIN to accept commands
-- **Idle auto-lock**: re-locks after N minutes of inactivity
 - **Emergency kill**: a phrase that immediately stops all agents
-- Commands: `/lock`, `/status`, send PIN to unlock
+- Commands: `/status`
 
 ---
 

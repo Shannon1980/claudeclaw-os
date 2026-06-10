@@ -30,9 +30,6 @@ vi.mock('./cost-footer.js', () => ({ buildCostFooter: vi.fn(() => '') }));
 vi.mock('./orchestrator.js', () => ({ parseDelegation: vi.fn(() => null), delegateToAgent: vi.fn() }));
 vi.mock('./state.js', () => ({ emitChatEvent: vi.fn(), setProcessing: vi.fn(), setActiveAbort: vi.fn() }));
 vi.mock('./security.js', () => ({
-  isLocked: vi.fn(() => false),
-  unlock: vi.fn(() => false),
-  touchActivity: vi.fn(),
   checkKillPhrase: vi.fn(() => false),
   executeEmergencyKill: vi.fn(),
   audit: vi.fn(),
