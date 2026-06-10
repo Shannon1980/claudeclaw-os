@@ -169,6 +169,43 @@ const CLIENT_MSG_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3
  * without standing up a real server. Production callers should use
  * `startDashboard` instead, which builds the app then serves it.
  */
+/** Validate attachment references coming from the dashboard. Only files
+ *  that came through /api/chat/upload (i.e. live inside UPLOADS_DIR) are
+ *  accepted, so a token holder can't point Claude at arbitrary filesystem
+ *  paths via the attachments field. */
+function resolveUploadAttachments(
+  raw?: { path?: string; name?: string }[],
+): { atts: { path: string; name: string }[]; error?: string } {
+  const atts: { path: string; name: string }[] = [];
+  for (const att of raw ?? []) {
+    if (!att?.path) continue;
+    const resolved = path.resolve(att.path);
+    if (!resolved.startsWith(UPLOADS_DIR + path.sep) || !fs.existsSync(resolved)) {
+      return { atts: [], error: `Invalid attachment path: ${att.path}` };
+    }
+    atts.push({ path: resolved, name: att.name || path.basename(resolved) });
+  }
+  return { atts };
+}
+
+/** Build the prompt block that tells Claude where attached files live and
+ *  what to do with each kind (read documents, analyze images, gemini for
+ *  videos). Appended to chat messages and mission task prompts. */
+function attachmentPromptBlock(atts: { path: string; name: string }[]): string {
+  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.heic'];
+  const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
+  const lines = atts.map((a) => {
+    const ext = path.extname(a.path).toLowerCase();
+    const kind = imageExts.includes(ext) ? 'image' : videoExts.includes(ext) ? 'video' : 'document';
+    return `- ${kind}: ${a.name} — saved at ${a.path}`;
+  });
+  const hasVideo = lines.some((l) => l.startsWith('- video'));
+  return (
+    `[Attached file${atts.length > 1 ? 's' : ''}]\n${lines.join('\n')}\n` +
+    `Read and process the attached file(s) as appropriate (analyze images${hasVideo ? '; for videos use the gemini-api-dev skill with GOOGLE_API_KEY from .env' : ''}).`
+  );
+}
+
 export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>): Hono {
   const app = new Hono();
 
@@ -1539,15 +1576,24 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       prompt?: string;
       assigned_agent?: string;
       priority?: number;
+      attachments?: { path?: string; name?: string }[];
     }>();
 
     const title = body?.title?.trim();
-    const prompt = body?.prompt?.trim();
+    let prompt = body?.prompt?.trim();
     const assignedAgent = body?.assigned_agent?.trim() || null;
     const priority = Math.max(0, Math.min(10, body?.priority ?? 0));
 
     if (!title || title.length > 200) return c.json({ error: 'title required (max 200 chars)' }, 400);
     if (!prompt || prompt.length > 10000) return c.json({ error: 'prompt required (max 10000 chars)' }, 400);
+
+    // Optional file/image attachments uploaded via /api/chat/upload.
+    // Appended to the prompt so the target agent knows where they live.
+    const resolved = resolveUploadAttachments(body?.attachments);
+    if (resolved.error) return c.json({ error: resolved.error }, 400);
+    if (resolved.atts.length > 0) {
+      prompt = `${prompt}\n\n${attachmentPromptBlock(resolved.atts)}`;
+    }
 
     // Validate agent if provided
     if (assignedAgent) {
@@ -2937,10 +2983,11 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return c.json({ turns });
   });
 
-  // Upload chat attachments (documents, spreadsheets, images, etc.).
-  // Files land in workspace/uploads/ — the same directory Telegram media
-  // uses, so the 24h cleanup sweep applies to them too. The client then
-  // references the returned paths in /api/chat/send.
+  // Upload attachments (documents, spreadsheets, images, etc.) for chat
+  // messages and mission tasks. Files land in workspace/uploads/ — the same
+  // directory Telegram media uses, so the 24h cleanup sweep applies to them
+  // too. The client then references the returned paths in /api/chat/send or
+  // /api/mission/tasks.
   app.post('/api/chat/upload', async (c) => {
     const body = await c.req.parseBody({ all: true });
     const raw = body['files'] ?? body['file'];
@@ -2971,35 +3018,16 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const body = await c.req.json<{ message?: string; attachments?: { path?: string; name?: string }[] }>();
     let message = body?.message?.trim() || '';
 
-    // Attachments must be files that came through /api/chat/upload —
-    // anything outside UPLOADS_DIR is rejected so a token holder can't
-    // point Claude at arbitrary filesystem paths via this field.
-    const attachments: { path: string; name: string }[] = [];
-    for (const att of body?.attachments ?? []) {
-      if (!att?.path) continue;
-      const resolved = path.resolve(att.path);
-      if (!resolved.startsWith(UPLOADS_DIR + path.sep) || !fs.existsSync(resolved)) {
-        return c.json({ error: `Invalid attachment path: ${att.path}` }, 400);
-      }
-      attachments.push({ path: resolved, name: att.name || path.basename(resolved) });
-    }
+    const resolved = resolveUploadAttachments(body?.attachments);
+    if (resolved.error) return c.json({ error: resolved.error }, 400);
+    const attachments = resolved.atts;
 
     if (!message && attachments.length === 0) {
       return c.json({ error: 'message required' }, 400);
     }
 
     if (attachments.length > 0) {
-      const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.heic'];
-      const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
-      const lines = attachments.map((a) => {
-        const ext = path.extname(a.path).toLowerCase();
-        const kind = imageExts.includes(ext) ? 'image' : videoExts.includes(ext) ? 'video' : 'document';
-        return `- ${kind}: ${a.name} — saved at ${a.path}`;
-      });
-      const hasVideo = lines.some((l) => l.startsWith('- video'));
-      const block =
-        `[Attached file${attachments.length > 1 ? 's' : ''}]\n${lines.join('\n')}\n` +
-        `Read and process the attached file(s) as appropriate (analyze images${hasVideo ? '; for videos use the gemini-api-dev skill with GOOGLE_API_KEY from .env' : ''}).`;
+      const block = attachmentPromptBlock(attachments);
       message = message ? `${message}\n\n${block}` : block;
     }
 

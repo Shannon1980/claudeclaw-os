@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'wouter-preact';
-import { Plus, Wand2, Trash2, X, History, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check } from 'lucide-preact';
+import { Plus, Wand2, Trash2, X, History, Inbox, GripVertical, Maximize2, Minimize2, LayoutGrid as LayoutIcon, Check, Paperclip, FileText, Image as ImageIcon } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
 import { Modal, Drawer } from '@/components/Modal';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { useFetch } from '@/lib/useFetch';
-import { apiPost, apiPatch, apiDelete, apiGet } from '@/lib/api';
+import { apiPost, apiPatch, apiDelete, apiGet, apiUpload } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { pushToast } from '@/lib/toasts';
 import {
@@ -876,6 +876,22 @@ function TaskCard({ task, onChange }: { task: MissionTask; onChange: () => void 
 
 // ── Create modal ───────────────────────────────────────────────────
 
+const MAX_TASK_ATTACHMENTS = 5;
+const MAX_TASK_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+const TASK_ATTACH_ACCEPT = [
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.csv',
+  '.md', '.txt', '.json', '.yaml', '.yml',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp',
+  '.mp4', '.mov',
+].join(',');
+const TASK_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'heic'];
+
+function taskFormatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function CreateTaskModal({
   open, onClose, agents, onCreated,
 }: {
@@ -888,17 +904,53 @@ function CreateTaskModal({
   const [autoAssign, setAutoAssign] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function close() {
     setTitle(''); setPrompt(''); setAgent(''); setPriority(5); setAutoAssign(true); setErr(null);
+    setAttachments([]); setDragging(false); dragDepth.current = 0;
     onClose();
+  }
+
+  function addFiles(files: FileList | File[] | null | undefined) {
+    if (!files) return;
+    setErr(null);
+    const incoming = Array.from(files);
+    const rejected = incoming.find((f) => f.size > MAX_TASK_ATTACHMENT_BYTES);
+    if (rejected) {
+      setErr(`"${rejected.name}" is too large (max 50MB)`);
+      return;
+    }
+    setAttachments((prev) => {
+      const merged = [...prev];
+      for (const f of incoming) {
+        if (merged.length >= MAX_TASK_ATTACHMENTS) {
+          setErr(`Max ${MAX_TASK_ATTACHMENTS} files per task`);
+          break;
+        }
+        if (!merged.some((m) => m.name === f.name && m.size === f.size)) merged.push(f);
+      }
+      return merged;
+    });
   }
 
   async function submit() {
     setBusy(true); setErr(null);
     try {
+      // Upload attachments first; the task references the saved paths.
+      let uploaded: { name: string; path: string }[] = [];
+      if (attachments.length > 0) {
+        const form = new FormData();
+        for (const f of attachments) form.append('files', f, f.name);
+        const up = await apiUpload<{ files: { name: string; path: string }[] }>('/api/chat/upload', form);
+        uploaded = up.files || [];
+      }
       const body: any = { title: title.trim(), prompt: prompt.trim(), priority };
       if (!autoAssign && agent) body.assigned_agent = agent;
+      if (uploaded.length > 0) body.attachments = uploaded;
       const created = await apiPost<{ task: MissionTask }>('/api/mission/tasks', body);
       if (autoAssign && !agent) {
         // Fire auto-assign in background; don't block the modal close.
@@ -955,6 +1007,76 @@ function CreateTaskModal({
             class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)] resize-none font-mono"
           />
           <div class="text-[10px] text-[var(--color-text-faint)] mt-0.5 tabular-nums">{prompt.length} / 10000</div>
+        </div>
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Files & pictures (optional)</label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={TASK_ATTACH_ACCEPT}
+            class="hidden"
+            onChange={(e) => {
+              const input = e.target as HTMLInputElement;
+              addFiles(input.files);
+              input.value = '';
+            }}
+          />
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragEnter={(e) => {
+              if (!e.dataTransfer?.types?.includes('Files')) return;
+              e.preventDefault();
+              dragDepth.current++;
+              setDragging(true);
+            }}
+            onDragOver={(e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              dragDepth.current = Math.max(0, dragDepth.current - 1);
+              if (dragDepth.current === 0) setDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              dragDepth.current = 0;
+              setDragging(false);
+              addFiles(e.dataTransfer?.files);
+            }}
+            class={`flex items-center justify-center gap-1.5 rounded border border-dashed px-3 py-2.5 text-[11px] cursor-pointer transition-colors ${
+              dragging
+                ? 'border-[var(--color-accent)] text-[var(--color-accent)] bg-[var(--color-elevated)]'
+                : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]'
+            }`}
+          >
+            <Paperclip size={12} />
+            {dragging ? 'Drop to attach' : 'Click to browse or drag & drop (docs, spreadsheets, images, video — max 5 × 50MB)'}
+          </div>
+          {attachments.length > 0 && (
+            <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+              {attachments.map((f, i) => {
+                const ext = f.name.split('.').pop()?.toLowerCase() || '';
+                const isImage = TASK_IMAGE_EXTS.includes(ext);
+                return (
+                  <span
+                    key={`${f.name}-${f.size}-${i}`}
+                    class="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-md text-[11px] bg-[var(--color-elevated)] border border-[var(--color-border)] text-[var(--color-text)]"
+                  >
+                    {isImage ? <ImageIcon size={11} class="text-[var(--color-accent)]" /> : <FileText size={11} class="text-[var(--color-accent)]" />}
+                    <span class="max-w-[180px] truncate">{f.name}</span>
+                    <span class="text-[var(--color-text-faint)]">{taskFormatBytes(f.size)}</span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setAttachments((prev) => prev.filter((_, j) => j !== i)); }}
+                      class="p-0.5 rounded hover:bg-[var(--color-card)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+                      aria-label={`Remove ${f.name}`}
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
