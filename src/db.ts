@@ -2201,6 +2201,28 @@ export function createMissionTask(
   ).run(id, title, prompt, assignedAgent, createdBy, priority, now, projectId);
 }
 
+/**
+ * Insert a mission task that is ALREADY running — work the chat handler is
+ * doing live, mirrored onto the Mission Control board. Inserted as 'running'
+ * with `started_at` set so `claimNextMissionTask` (which only claims 'queued')
+ * never picks it up and double-executes it. Settled later via
+ * `completeMissionTask` / `cancelMissionTask` when the chat turn finishes.
+ */
+export function createRunningMissionTask(
+  id: string,
+  title: string,
+  prompt: string,
+  assignedAgent: string | null,
+  createdBy: string,
+  priority = 0,
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, created_at, started_at)
+     VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
+  ).run(id, title, prompt, assignedAgent, createdBy, priority, now, now);
+}
+
 export function getUnassignedMissionTasks(): MissionTask[] {
   return db
     .prepare(
