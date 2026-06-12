@@ -28,6 +28,7 @@ import {
   loadAgentConfig,
   getSlackChannelMap,
   resolveAgentRuntime,
+  resolveAgentModel,
 } from './agent-config.js';
 
 function writeAgent(id: string, yamlBody: string, claudeMd?: string): void {
@@ -48,6 +49,11 @@ beforeAll(() => {
   // Duplicate channel claim — the alphabetically-first agent (research) keeps
   // the channel; this later one ("z…") must not override it.
   writeAgent('zdupe', 'name: Dupe\ndescription: Dup channel\nslack_channel: C0RESEARCH\n');
+  // Model alias (`opus`) instead of a full id — resolved at runtime.
+  writeAgent('aliased', 'name: Aliased\ndescription: Alias model\nmodel: opus\n', '# Aliased\n');
+  // project_dir points at a directory that exists (FIXTURE_ROOT) so the
+  // runtime uses it as cwd instead of the agent's own dir.
+  writeAgent('projdir', `name: ProjDir\ndescription: Project dir\nproject_dir: ${FIXTURE_ROOT}\n`, '# ProjDir\n');
 });
 
 afterAll(() => {
@@ -95,5 +101,41 @@ describe('resolveAgentRuntime', () => {
 
   it('throws for an unknown agent', () => {
     expect(() => resolveAgentRuntime('ghost')).toThrow();
+  });
+
+  it('resolves a model alias to a canonical id', () => {
+    expect(resolveAgentRuntime('aliased').model).toBe('claude-opus-4-8');
+  });
+
+  it('uses project_dir as cwd when it exists', () => {
+    expect(resolveAgentRuntime('projdir').cwd).toBe(FIXTURE_ROOT);
+  });
+});
+
+describe('loadAgentConfig project_dir', () => {
+  it('parses project_dir when present', () => {
+    expect(loadAgentConfig('projdir').projectDir).toBe(FIXTURE_ROOT);
+  });
+
+  it('leaves projectDir undefined when absent', () => {
+    expect(loadAgentConfig('research').projectDir).toBeUndefined();
+  });
+});
+
+describe('resolveAgentModel', () => {
+  it('resolves chat aliases to canonical ids', () => {
+    expect(resolveAgentModel('opus')).toBe('claude-opus-4-8');
+    expect(resolveAgentModel('sonnet')).toBe('claude-sonnet-4-6');
+    expect(resolveAgentModel('haiku')).toBe('claude-haiku-4-5');
+  });
+
+  it('passes a valid full model id through unchanged', () => {
+    expect(resolveAgentModel('claude-sonnet-4-6')).toBe('claude-sonnet-4-6');
+  });
+
+  it('returns undefined for unknown or missing values', () => {
+    expect(resolveAgentModel('gpt-5')).toBeUndefined();
+    expect(resolveAgentModel(undefined)).toBeUndefined();
+    expect(resolveAgentModel('')).toBeUndefined();
   });
 });

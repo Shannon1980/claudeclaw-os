@@ -4,6 +4,7 @@ import yaml from 'js-yaml';
 
 import { CLAUDECLAW_CONFIG, PROJECT_ROOT } from './config.js';
 import { readEnvFile } from './env.js';
+import { isValidClaudeModel, resolveClaudeModelAlias } from './models.js';
 
 // Shared roster path. Written by Node on startup and any time the agent
 // roster changes (new agent, deleted agent). Read by the Python Pipecat
@@ -39,6 +40,11 @@ export interface AgentConfig {
   botTokenEnv: string;
   botToken: string;
   model?: string;
+  /** Working directory the agent runs in (`project_dir`). When set, a
+   *  routed/delegated run uses this as its SDK cwd so the agent loads that
+   *  project's CLAUDE.md / .claude settings and operates on those files.
+   *  Unset = the agent's own directory under agents/<id>. */
+  projectDir?: string;
   mcpServers?: string[];
   /** Per-agent war-room tool allowlist. Tokens are SDK tool names
    *  ("Bash", "Write") or "mcp:<name>" entries to opt an MCP server in.
@@ -157,6 +163,12 @@ export function loadAgentConfig(agentId: string): AgentConfig {
     typeof raw['slack_channel'] === 'string' && (raw['slack_channel'] as string).trim()
       ? (raw['slack_channel'] as string).trim()
       : undefined;
+  const projectDir = typeof raw['project_dir'] === 'string' ? (raw['project_dir'] as string) : undefined;
+  if (projectDir && !fs.existsSync(projectDir)) {
+    // eslint-disable-next-line no-console
+    console.warn(`[${agentId}] WARNING: project_dir does not exist: ${projectDir}`);
+    console.warn(`[${agentId}] Runs will fall back to the agent's own directory.`);
+  }
 
   return {
     name,
@@ -164,6 +176,7 @@ export function loadAgentConfig(agentId: string): AgentConfig {
     botTokenEnv,
     botToken,
     model,
+    projectDir,
     mcpServers,
     warroomTools,
     obsidian,
@@ -194,7 +207,12 @@ export interface AgentRuntime {
  */
 export function resolveAgentRuntime(agentId: string): AgentRuntime {
   const config = loadAgentConfig(agentId);
-  const cwd = resolveAgentDir(agentId);
+  // An explicit, existing project_dir wins so the agent runs against that
+  // project's files; otherwise fall back to the agent's own directory.
+  const cwd =
+    config.projectDir && fs.existsSync(config.projectDir)
+      ? config.projectDir
+      : resolveAgentDir(agentId);
   let systemPrompt: string | undefined;
   const claudeMdPath = resolveAgentClaudeMd(agentId);
   if (claudeMdPath) {
@@ -204,7 +222,19 @@ export function resolveAgentRuntime(agentId: string): AgentRuntime {
       /* no CLAUDE.md — fine */
     }
   }
-  return { agentId, cwd, model: config.model, systemPrompt, mcpAllowlist: config.mcpServers };
+  return { agentId, cwd, model: resolveAgentModel(config.model), systemPrompt, mcpAllowlist: config.mcpServers };
+}
+
+/**
+ * Resolve an agent.yaml `model` value to a canonical Claude model id.
+ * Accepts a full id ("claude-sonnet-4-6") or a chat alias ("opus",
+ * "sonnet", "haiku"). Returns undefined when unset or unrecognized so the
+ * caller can fall back to the default model.
+ */
+export function resolveAgentModel(model: string | undefined): string | undefined {
+  if (!model) return undefined;
+  if (isValidClaudeModel(model)) return model;
+  return resolveClaudeModelAlias(model);
 }
 
 /**
