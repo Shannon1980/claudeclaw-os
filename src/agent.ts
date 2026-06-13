@@ -213,6 +213,8 @@ export async function runAgent(
   let lastCallCacheRead = 0;
   let lastCallInputTokens = 0;
   let streamedText = '';
+  let resultIsError = false;
+  let apiErrorStatus: string | undefined;
 
   // Refresh typing indicator on an interval while Claude works.
   // Telegram's "typing..." action expires after ~5s.
@@ -354,6 +356,8 @@ export async function runAgent(
 
       if (ev['type'] === 'result') {
         resultText = (ev['result'] as string | null | undefined) ?? null;
+        resultIsError = ev['is_error'] === true;
+        apiErrorStatus = (ev['api_error_status'] as string | undefined) ?? undefined;
 
         // Extract usage info from result event
         const evUsage = ev['usage'] as Record<string, number> | undefined;
@@ -382,7 +386,7 @@ export async function runAgent(
         }
 
         logger.info(
-          { hasResult: !!resultText, subtype: ev['subtype'] },
+          { hasResult: !!resultText, subtype: ev['subtype'], isError: resultIsError },
           'Agent result received',
         );
       }
@@ -393,9 +397,15 @@ export async function runAgent(
       return { text: null, newSessionId, usage, aborted: true };
     }
 
-    // Classify the error and attach context-aware metadata
+    // Classify the error and attach context-aware metadata. Pass any
+    // result-level API error so an auth/billing rejection that also exits
+    // non-zero is surfaced correctly instead of as a retryable crash.
     const contextTokens = lastCallInputTokens || lastCallCacheRead || 0;
-    const classified = classifyError(err, contextTokens || undefined);
+    const classified = classifyError(err, contextTokens || undefined, {
+      isError: resultIsError,
+      apiErrorStatus,
+      resultText,
+    });
     logger.error(
       { category: classified.category, recovery: classified.recovery, originalMsg: (err as Error)?.message },
       'Agent query failed (classified)',
@@ -403,6 +413,23 @@ export async function runAgent(
     throw classified;
   } finally {
     clearInterval(typingInterval);
+  }
+
+  // The stream completed without throwing but the result reported an API
+  // error (e.g. subprocess exited 0 yet auth was rejected). Surface it rather
+  // than returning the error envelope as if it were a normal reply.
+  if (resultIsError) {
+    const contextTokens = lastCallInputTokens || lastCallCacheRead || 0;
+    const classified = classifyError(
+      new Error(`Claude Code result reported is_error (api_error_status=${apiErrorStatus ?? 'unknown'})`),
+      contextTokens || undefined,
+      { isError: true, apiErrorStatus, resultText },
+    );
+    logger.error(
+      { category: classified.category, recovery: classified.recovery, apiErrorStatus },
+      'Agent result reported error',
+    );
+    throw classified;
   }
 
   return { text: resultText, newSessionId, usage };
