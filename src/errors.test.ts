@@ -187,4 +187,40 @@ describe('classifyError', () => {
     expect(classifyError(new Error('Unauthorized')).category).toBe('auth');
     expect(classifyError(new Error('OVERLOADED')).category).toBe('overloaded');
   });
+
+  // ── Result-level API errors (is_error) ──────────────────────────────
+
+  it('classifies an exit-1 with is_error result as non-retryable auth', () => {
+    // The exact production signature: a stale ANTHROPIC_API_KEY yields a
+    // zero-cost result with is_error:true, then the subprocess exits 1.
+    const classified = classifyError(
+      new Error('Claude Code process exited with code 1'),
+      undefined,
+      { isError: true },
+    );
+    expect(classified.category).toBe('auth');
+    expect(classified.recovery.shouldRetry).toBe(false);
+    expect(classified.recovery.userMessage).toContain('claude login');
+  });
+
+  it('does NOT classify a plain exit-1 (no result error) as auth', () => {
+    // Without an is_error result, a bare exit-1 is still a subprocess crash.
+    const classified = classifyError(new Error('exited with code 1'));
+    expect(classified.category).toBe('subprocess_crash');
+    expect(classified.recovery.shouldRetry).toBe(true);
+  });
+
+  it('prefers a specific API error signal over the auth default', () => {
+    const billing = classifyError(new Error('exited with code 1'), undefined, {
+      isError: true,
+      apiErrorStatus: 'insufficient credits',
+    });
+    expect(billing.category).toBe('billing');
+
+    const rate = classifyError(new Error('exited with code 1'), undefined, {
+      isError: true,
+      resultText: 'too many requests',
+    });
+    expect(rate.category).toBe('rate_limit');
+  });
 });

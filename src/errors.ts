@@ -122,12 +122,67 @@ function matchesAny(text: string, patterns: string[]): boolean {
  * Parses the error message and any stderr output for known patterns.
  * If the error is already an AgentError, returns it unchanged.
  */
-export function classifyError(err: unknown, contextTokens?: number): AgentError {
+export function classifyError(
+  err: unknown,
+  contextTokens?: number,
+  resultError?: { isError?: boolean; apiErrorStatus?: string; resultText?: string | null },
+): AgentError {
   // Pass through already-classified errors
   if (err instanceof AgentError) return err;
 
   const raw = err instanceof Error ? err : new Error(String(err));
   const text = raw.message;
+
+  // A `result` event arrived with is_error:true *before* the subprocess
+  // exited non-zero. The exit code alone looks like a crash (handled below),
+  // but the real cause is an API-level rejection — most often auth: a
+  // stale/expired ANTHROPIC_API_KEY in .env overriding `claude login`,
+  // which yields a zero-cost "success"-subtype result with is_error:true and
+  // then exit code 1. Classify from the API error detail so the user gets an
+  // actionable message instead of an endless "subprocess crashed. Retrying...".
+  if (resultError?.isError) {
+    const apiText = `${resultError.apiErrorStatus ?? ''} ${resultError.resultText ?? ''}`.trim();
+    if (matchesAny(apiText, RATE_LIMIT_PATTERNS)) {
+      return new AgentError('rate_limit', {
+        shouldRetry: true,
+        shouldNewChat: false,
+        shouldSwitchModel: false,
+        retryAfterMs: 30000,
+        userMessage: 'Rate limited. Retrying in 30s...',
+      }, raw);
+    }
+    if (matchesAny(apiText, OVERLOADED_PATTERNS)) {
+      return new AgentError('overloaded', {
+        shouldRetry: true,
+        shouldNewChat: false,
+        shouldSwitchModel: true,
+        retryAfterMs: 5000,
+        userMessage: 'Model is overloaded. Retrying...',
+      }, raw);
+    }
+    if (matchesAny(apiText, BILLING_PATTERNS)) {
+      return new AgentError('billing', {
+        shouldRetry: false,
+        shouldNewChat: false,
+        shouldSwitchModel: true,
+        retryAfterMs: 0,
+        userMessage: 'API credits exhausted or billing issue. Check your Anthropic account, or try a different model.',
+      }, raw);
+    }
+    // No more specific signal: a request that errored with zero cost is
+    // overwhelmingly a credentials problem. Don't retry — retrying re-sends
+    // the same bad credential. Point at the most common fix.
+    return new AgentError('auth', {
+      shouldRetry: false,
+      shouldNewChat: false,
+      shouldSwitchModel: false,
+      retryAfterMs: 0,
+      userMessage:
+        'Claude Code rejected the request (likely invalid or expired credentials). '
+        + 'If ANTHROPIC_API_KEY is set in .env, remove or refresh it so the bot falls '
+        + 'back to `claude login`, then restart.',
+    }, raw);
+  }
 
   // Context exhaustion: process exits with code 1 when context is full
   if (text.includes('exited with code 1') && contextTokens && contextTokens > 0) {
