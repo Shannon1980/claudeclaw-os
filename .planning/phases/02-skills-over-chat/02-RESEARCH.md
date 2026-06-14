@@ -258,7 +258,12 @@ cd "/Users/shannongueringer/App Repo/agentic-os/.claude/skills/viz-excalidraw-di
 | A3 | The agent will reliably emit a bracketed marker when instructed via the agent role | Pitfall 2/3 | LLM compliance is probabilistic. Mitigated by an explicit, short instruction ("after any skill saves a file, emit `[SEND_FILE:<absolute path>]` in brackets") and a live transcript as proof. A deterministic fallback (skill emits a structured "saved at <path>" line that ClaudeClaw converts) is heavier; defer unless flaky. |
 | A4 | First-run `uv sync` is not blocked by the agentic-os deny list | Pitfall 4 | Deny list blocks `pip install`/`curl`/`wget`, not `uv`/`npx` (verified in settings.json). If a future settings change adds `Bash(uv *)` to deny, pre-warming becomes mandatory (which we already recommend). |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> Resolved 2026-06-14 at plan time via user decisions, locked into 02-01/02-02-PLAN.md:
+> 1. **Both** — fix the delegation branch (fleet-wide code fix, mirrors `mission-files.ts`) AND give `aos` a `slack_channel` (belt-and-suspenders).
+> 2. **Agent-role instruction** emits the bracketed marker; deterministic converter deferred to SK-04 (Phase 3).
+> 3. **One fresh SK-02 transcript** suffices; Phase 1 already proved `mkt-copywriting`.
 
 1. **Delegation-branch marker fix vs. routed Slack channel for `aos`?**
    - What we know: The delegation branch lacks `extractFileMarkers`; the main (channel-routed) path has it. `aos` currently has no `slack_channel`.
