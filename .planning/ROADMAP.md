@@ -12,7 +12,7 @@ This consolidation makes a terminal Claude Code session in the agentic-os worksp
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Afternoon Win — Point Agent at Workspace** - Configure an agent's project_dir at agentic-os, auto-load its context, document the setup
+- [x] **Phase 1: Afternoon Win — Point Agent at Workspace** - Configure an agent's project_dir at agentic-os, auto-load its context, document the setup (completed 2026-06-14)
 - [ ] **Phase 2: Skills Over Chat** - Agentic-os methodology skills discoverable and invocable over Slack/Telegram, file outputs delivered via markers
 - [ ] **Phase 3: Skill Hardening** - Command-Centre/hook/download-dependent skills degrade gracefully headless; skill self-improvement keeps working
 - [ ] **Phase 4: Memory Source of Record** - ClaudeClaw SQLite is the single memory store; bot exchanges persist and recall across sessions
@@ -39,7 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 Plans:
 - [x] 01-01-PLAN.md — Workspace agent config + WS-01 test gap + live WS-02/WS-03 verification
-- [ ] 01-02-PLAN.md — Reproducible workspace-agent setup doc (WS-04)
+- [x] 01-02-PLAN.md — Reproducible workspace-agent setup doc (WS-04)
 
 ### Phase 2: Skills Over Chat
 **Goal**: The agentic-os methodology skills are discoverable and invocable by the workspace agent, and a real brand/marketing skill runs end-to-end over chat including delivering any file output.
@@ -159,7 +159,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Afternoon Win | 1/2 | In Progress|  |
+| 1. Afternoon Win | 2/2 | Complete   | 2026-06-14 |
 | 2. Skills Over Chat | 0/TBD | Not started | - |
 | 3. Skill Hardening | 0/TBD | Not started | - |
 | 4. Memory Source of Record | 0/TBD | Not started | - |
