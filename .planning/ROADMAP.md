@@ -51,8 +51,12 @@ Plans:
   2. At least one representative brand/marketing skill triggered over Slack/Telegram produces a correct, on-brand result end-to-end
   3. A skill that produces a file (image, PDF, doc) delivers it as a chat attachment via `[SEND_FILE:]`/`[SEND_PHOTO:]` markers
   4. The existing default-fleet agents (not pointed at the workspace) behave exactly as before
-**Plans**: TBD
+**Plans**: 2 plans
 **UI hint**: yes
+
+Plans:
+- [ ] 02-01-PLAN.md — Delegation-path file-marker fix (mirror mission-files.ts) + Wave 0 unit tests (space-in-path, delegation extraction)
+- [ ] 02-02-PLAN.md — Pre-warm excalidraw venv, aos slack_channel config (human-action), live SK-01/SK-02/SK-03 transcripts
 
 ### Phase 3: Skill Hardening
 **Goal**: Skills that assume the Command Centre, agentic-os hooks, or auto-download-to-Downloads no longer hard-fail headless, and skill self-improvement feedback keeps flowing.
@@ -160,7 +164,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Afternoon Win | 2/2 | Complete   | 2026-06-14 |
-| 2. Skills Over Chat | 0/TBD | Not started | - |
+| 2. Skills Over Chat | 0/2 | Not started | - |
 | 3. Skill Hardening | 0/TBD | Not started | - |
 | 4. Memory Source of Record | 0/TBD | Not started | - |
 | 5. Memory Projection & Capture | 0/TBD | Not started | - |
