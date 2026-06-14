@@ -75,6 +75,9 @@ A terminal Claude Code session in the agentic-os workspace and the ClaudeClaw ch
 | ClaudeClaw scheduler is the single runner, reads `cron/jobs/*.md`; disable agentic-os cron | One scheduler avoids double-firing and double memory writes | — Pending |
 | Keep Command Centre as desktop cockpit, repointed at ClaudeClaw SQLite | Already uses better-sqlite3; gives terminal-first desktop UI without duplication | — Pending |
 | Ship the "afternoon win" as the first milestone | Validates skills-over-chat before committing to bridge work | — Pending |
+| Every named agent gets its own `SOUL.md` (voice), separate from role `CLAUDE.md` | The fleet is named characters (Bertha, Forge, Samantha, Sentinel, Skylar); soul ≠ role. agentic-os SOUL.md is the workspace agent's soul, not a fleet-wide override | — Pending |
+
+**Fleet location:** the real fleet lives in `CLAUDECLAW_CONFIG/agents/<id>/` (default `~/.claudeclaw/agents/`): Bertha, Forge, Samantha, Sentinel, Skylar — each with `agent.yaml` + `CLAUDE.md`. The repo's `agents/` (comms, content, ops, research, _template) are examples/templates. `agent-config.ts` resolves `CLAUDECLAW_CONFIG` first, repo as fallback. Skylar's `agent.yaml` already has an inline `persona:` field to migrate into `SOUL.md`.
 
 ## Evolution
 

@@ -40,8 +40,9 @@ Requirements for this consolidation milestone. Each maps to roadmap phases.
 
 ### Identity
 
-- [ ] **IDENT-01**: The bot's persona is driven by the agentic-os SOUL.md identity rather than a separate ClaudeClaw persona, giving a single consistent voice across modes
-- [ ] **IDENT-02**: Personality rules from SOUL.md (tone, no-em-dash, etc.) are observably applied in bot responses
+- [ ] **IDENT-01**: Each named fleet agent (Bertha, Forge, Samantha, Sentinel, Skylar, + future) has its own `SOUL.md` (personality/voice) loaded into its system prompt from `CLAUDECLAW_CONFIG/agents/<id>/SOUL.md`, separate from its role definition (`CLAUDE.md`); the workspace agent's `SOUL.md` is sourced from / aligned with the agentic-os `SOUL.md`
+- [ ] **IDENT-02**: Personality rules from an agent's `SOUL.md` (tone, no-em-dash, etc.) are observably applied in that agent's responses, and are consistent between terminal and chat for the workspace agent
+- [ ] **IDENT-03**: Soul is decoupled from role and resolved like role files (CLAUDECLAW_CONFIG first, repo fallback): `agents/_template/SOUL.md` scaffolds new agents, each existing named agent gains a distinct `SOUL.md`, and Skylar's existing inline `persona:` field is migrated into its `SOUL.md`
 
 ### Cockpit (Command Centre)
 
@@ -81,23 +82,44 @@ Deferred — acknowledged but not in this milestone.
 
 ## Traceability
 
-Populated during roadmap creation.
+Mapped during roadmap creation (2026-06-14). COMPAT-* are cross-cutting and woven as success criteria into every phase; Phase 10 owns them explicitly for end-to-end verification.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| WS-01 .. WS-04 | TBD | Pending |
-| SK-01 .. SK-05 | TBD | Pending |
-| MEM-01 .. MEM-06 | TBD | Pending |
-| SCH-01 .. SCH-04 | TBD | Pending |
-| IDENT-01 .. IDENT-02 | TBD | Pending |
-| CKPT-01 .. CKPT-03 | TBD | Pending |
-| COMPAT-01 .. COMPAT-03 | TBD | Pending |
+| WS-01 | Phase 1 | Pending |
+| WS-02 | Phase 1 | Pending |
+| WS-03 | Phase 1 | Pending |
+| WS-04 | Phase 1 | Pending |
+| SK-01 | Phase 2 | Pending |
+| SK-02 | Phase 2 | Pending |
+| SK-03 | Phase 2 | Pending |
+| SK-04 | Phase 3 | Pending |
+| SK-05 | Phase 3 | Pending |
+| MEM-01 | Phase 4 | Pending |
+| MEM-02 | Phase 4 | Pending |
+| MEM-03 | Phase 5 | Pending |
+| MEM-04 | Phase 5 | Pending |
+| MEM-06 | Phase 5 | Pending |
+| MEM-05 | Phase 6 | Pending |
+| SCH-01 | Phase 7 | Pending |
+| SCH-02 | Phase 7 | Pending |
+| SCH-03 | Phase 7 | Pending |
+| SCH-04 | Phase 7 | Pending |
+| IDENT-01 | Phase 8 | Pending |
+| IDENT-02 | Phase 8 | Pending |
+| IDENT-03 | Phase 8 | Pending |
+| CKPT-01 | Phase 9 | Pending |
+| CKPT-02 | Phase 9 | Pending |
+| CKPT-03 | Phase 9 | Pending |
+| COMPAT-01 | Phase 10 (woven into all) | Pending |
+| COMPAT-02 | Phase 10 (woven into all) | Pending |
+| COMPAT-03 | Phase 10 (woven into all) | Pending |
 
 **Coverage:**
-- v1 requirements: 27 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 27 ⚠️
+- v1 requirements: 28 total
+- Mapped to phases: 28 ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-14*
-*Last updated: 2026-06-14 after initial definition*
+*Last updated: 2026-06-14 after roadmap creation (traceability populated)*
