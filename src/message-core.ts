@@ -212,14 +212,40 @@ export async function processUserMessage(
       const response = delegationResult.text?.trim() || 'Agent completed with no output.';
       const header = `[${delegationResult.agentId} — ${Math.round(delegationResult.durationMs / 1000)}s]`;
 
+      // Extract file markers so a delegated agent (reached via @id:) can
+      // deliver attachments. Without this the delegation branch posted the
+      // raw text and any [SEND_FILE:]/[SEND_PHOTO:] marker leaked into chat
+      // as literal text. Mirrors the main-path loop below and mission-files.ts.
+      const { text: delegatedText, files: delegatedFiles } = extractFileMarkers(response);
+
       if (!skipLog) {
         // Attribute to the delegated agent, not the caller, so memories
         // created from this conversation are tagged with the correct agent.
+        // Log the raw response (with marker) to match the main path's
+        // rawResponse semantics; the marker is stripped only for display.
         saveConversationTurn(chatIdStr, delegation.prompt, response, undefined, delegation.agentId);
       }
-      emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: response, source: cb.source });
+      emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: delegatedText, source: cb.source });
 
-      for (const part of splitMessage(cb.format(`${header}\n\n${response}`), cb.maxLen)) {
+      // Send any attached files first (guarded), mirroring the main path.
+      for (const file of delegatedFiles) {
+        try {
+          if (!fs.existsSync(file.filePath)) {
+            await cb.sendPlain(`Could not send file: ${file.filePath} (not found)`);
+            continue;
+          }
+          if (file.type === 'photo') {
+            await cb.sendPhoto(file.filePath, file.caption);
+          } else {
+            await cb.sendFile(file.filePath, file.caption);
+          }
+        } catch (fileErr) {
+          logger.error({ err: fileErr, filePath: file.filePath }, 'Failed to send file');
+          await cb.sendPlain(`Failed to send file: ${file.filePath}`);
+        }
+      }
+
+      for (const part of splitMessage(cb.format(`${header}\n\n${delegatedText}`), cb.maxLen)) {
         await cb.sendFormatted(part);
       }
     } catch (err) {
