@@ -35,7 +35,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. The agent's responses reflect agentic-os CLAUDE.md/AGENTS.md context (it knows the workspace's instructions without being told)
   3. A skill that requests `brand_context/` (voice, positioning, ICP) produces observably on-brand output over chat
   4. A setup doc exists that lets the user repoint an agent at any workspace without reading source
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Workspace agent config + WS-01 test gap + live WS-02/WS-03 verification
+- [ ] 01-02-PLAN.md — Reproducible workspace-agent setup doc (WS-04)
 
 ### Phase 2: Skills Over Chat
 **Goal**: The agentic-os methodology skills are discoverable and invocable by the workspace agent, and a real brand/marketing skill runs end-to-end over chat including delivering any file output.
