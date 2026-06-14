@@ -54,6 +54,13 @@ beforeAll(() => {
   // project_dir points at a directory that exists (FIXTURE_ROOT) so the
   // runtime uses it as cwd instead of the agent's own dir.
   writeAgent('projdir', `name: ProjDir\ndescription: Project dir\nproject_dir: ${FIXTURE_ROOT}\n`, '# ProjDir\n');
+  // project_dir points at a path that does NOT exist; the runtime must fall
+  // back to the agent's own dir (non-fatal) rather than the missing path.
+  writeAgent(
+    'projdirmissing',
+    `name: ProjDirMissing\ndescription: Missing project dir\nproject_dir: ${path.join(FIXTURE_ROOT, 'does-not-exist-xyz')}\n`,
+    '# ProjDirMissing\n',
+  );
 });
 
 afterAll(() => {
@@ -109,6 +116,14 @@ describe('resolveAgentRuntime', () => {
 
   it('uses project_dir as cwd when it exists', () => {
     expect(resolveAgentRuntime('projdir').cwd).toBe(FIXTURE_ROOT);
+  });
+
+  it('falls back to the agent dir when project_dir does not exist', () => {
+    // Non-fatal fallback: a missing project_dir must not throw and must not
+    // be used as cwd; the agent's own dir is used instead.
+    expect(resolveAgentRuntime('projdirmissing').cwd).toBe(
+      path.join(FIXTURE_ROOT, 'agents', 'projdirmissing'),
+    );
   });
 });
 
