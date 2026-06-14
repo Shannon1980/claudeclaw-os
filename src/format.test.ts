@@ -91,4 +91,22 @@ describe('extractFileMarkers', () => {
     const { files } = extractFileMarkers('[SEND_PHOTO:/tmp/pic.png]');
     expect(files).toEqual([{ type: 'photo', filePath: '/tmp/pic.png', caption: undefined }]);
   });
+
+  it('preserves spaces in a bracketed path (App Repo)', () => {
+    // The bracketed form must keep a space-containing absolute path intact;
+    // the bare form would truncate at the first space. Workspace agents run
+    // under a cwd like "/Users/x/App Repo/agentic-os", so this is load-bearing.
+    const { text, files } = extractFileMarkers(
+      'Done. [SEND_PHOTO:/Users/x/App Repo/agentic-os/projects/d/2026-06-14_d.png|Auth flow diagram]',
+    );
+    expect(files).toEqual([
+      {
+        type: 'photo',
+        filePath: '/Users/x/App Repo/agentic-os/projects/d/2026-06-14_d.png',
+        caption: 'Auth flow diagram',
+      },
+    ]);
+    expect(text).not.toContain('SEND_PHOTO');
+    expect(text).toBe('Done.');
+  });
 });
