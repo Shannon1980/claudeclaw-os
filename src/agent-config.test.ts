@@ -29,6 +29,8 @@ import {
   getSlackChannelMap,
   resolveAgentRuntime,
   resolveAgentModel,
+  workspaceMemoryKey,
+  isWorkspaceAgent,
 } from './agent-config.js';
 
 function writeAgent(id: string, yamlBody: string, claudeMd?: string): void {
@@ -145,6 +147,38 @@ describe('loadAgentConfig project_dir', () => {
 
   it('leaves projectDir undefined when absent', () => {
     expect(loadAgentConfig('research').projectDir).toBeUndefined();
+  });
+});
+
+describe('workspaceMemoryKey', () => {
+  it('derives a stable ws:<agentId> pool key', () => {
+    // The single pool key both modes (terminal capture + bot delegation) key
+    // on so they share one memory pool. Deterministic from the agent id.
+    expect(workspaceMemoryKey('aos')).toBe('ws:aos');
+    expect(workspaceMemoryKey('research')).toBe('ws:research');
+  });
+});
+
+describe('isWorkspaceAgent', () => {
+  it('is true for an agent whose project_dir exists on disk', () => {
+    // projdir's project_dir = FIXTURE_ROOT (exists) — same predicate
+    // resolveAgentRuntime uses to pick the cwd.
+    expect(isWorkspaceAgent('projdir')).toBe(true);
+  });
+
+  it('is false for an agent with no project_dir', () => {
+    // COMPAT-02: a non-workspace agent is never rerouted onto the shared pool.
+    expect(isWorkspaceAgent('research')).toBe(false);
+  });
+
+  it('is false when project_dir is set but the directory does not exist', () => {
+    // Matches resolveAgentRuntime's fs.existsSync guard: a configured but
+    // missing project_dir is NOT a workspace.
+    expect(isWorkspaceAgent('projdirmissing')).toBe(false);
+  });
+
+  it('is false (no throw) for an unknown agent', () => {
+    expect(isWorkspaceAgent('ghost')).toBe(false);
   });
 });
 

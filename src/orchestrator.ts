@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { runAgentWithRetry, UsageInfo } from './agent.js';
-import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd, resolveAgentRuntime } from './agent-config.js';
+import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd, resolveAgentRuntime, isWorkspaceAgent, workspaceMemoryKey } from './agent-config.js';
 import { MODEL_FALLBACK_CHAIN, PROJECT_ROOT, DELEGATION_TIMEOUT_MS } from './config.js';
 import { logToHiveMind, createInterAgentTask, completeInterAgentTask } from './db.js';
 import { logger } from './logger.js';
@@ -197,7 +197,14 @@ export async function delegateToAgent(
     // memories, not other agents' memories sharing the chat_id (no
     // cross-agent leakage). The main/non-delegated path is left unscoped on
     // purpose to preserve default-fleet behavior (COMPAT-02).
-    const { contextText: memCtx } = await buildMemoryContext(chatId, prompt, agentId, { strictAgentId: agentId });
+    //
+    // For a workspace agent, recall the SHARED workspace pool (`ws:<agentId>`)
+    // instead of the caller's chat_id so the bot surfaces what a terminal
+    // session captured under the same pool (unified-pool decision). Keep
+    // strictAgentId = agentId exactly as Phase 4 left it. Non-workspace agents
+    // recall under the caller chatId unchanged (COMPAT-02).
+    const recallChatId = isWorkspaceAgent(agentId) ? workspaceMemoryKey(agentId) : chatId;
+    const { contextText: memCtx } = await buildMemoryContext(recallChatId, prompt, agentId, { strictAgentId: agentId });
 
     // Build the delegated prompt with agent role context + memory
     const contextParts: string[] = [];
