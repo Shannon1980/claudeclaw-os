@@ -46,6 +46,9 @@ beforeAll(() => {
   );
   writeAgent('comms', 'name: Comms\ndescription: Comms\nslack_channel: C0COMMS\n');
   writeAgent('nochan', 'name: NoChannel\ndescription: No Slack channel\n');
+  // Malformed config (no `name` → loadAgentConfig throws). It must be skipped
+  // without aborting the map build or dropping the valid agents.
+  writeAgent('zbroken', 'description: no name here\nslack_channel: C0BROKEN\n');
   // Duplicate channel claim — the alphabetically-first agent (research) keeps
   // the channel; this later one ("z…") must not override it.
   writeAgent('zdupe', 'name: Dupe\ndescription: Dup channel\nslack_channel: C0RESEARCH\n');
@@ -94,6 +97,14 @@ describe('getSlackChannelMap', () => {
     // research and zdupe both claim C0RESEARCH; the alphabetically-first
     // agent wins deterministically (never silently swapped by scan order).
     expect(map.get('C0RESEARCH')).toBe('research');
+  });
+
+  it('skips an agent whose config fails to load without dropping the valid ones', () => {
+    const map = getSlackChannelMap();
+    // zbroken (no `name`) is skipped, but the valid channels still map.
+    expect(map.has('C0BROKEN')).toBe(false);
+    expect(map.get('C0RESEARCH')).toBe('research');
+    expect(map.get('C0COMMS')).toBe('comms');
   });
 });
 

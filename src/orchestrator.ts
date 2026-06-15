@@ -2,9 +2,9 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { runAgent, UsageInfo } from './agent.js';
+import { runAgentWithRetry, UsageInfo } from './agent.js';
 import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd, resolveAgentRuntime } from './agent-config.js';
-import { PROJECT_ROOT, DELEGATION_TIMEOUT_MS } from './config.js';
+import { MODEL_FALLBACK_CHAIN, PROJECT_ROOT, DELEGATION_TIMEOUT_MS } from './config.js';
 import { logToHiveMind, createInterAgentTask, completeInterAgentTask } from './db.js';
 import { logger } from './logger.js';
 import { buildMemoryContext } from './memory.js';
@@ -215,7 +215,7 @@ export async function delegateToAgent(
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
     try {
-      const result = await runAgent(
+      const result = await runAgentWithRetry(
         fullPrompt,
         undefined, // fresh session for each delegation
         () => {}, // no typing indicator needed for sub-delegation
@@ -223,6 +223,8 @@ export async function delegateToAgent(
         undefined, // use default model
         ctrl,
         undefined, // no streaming for delegation
+        undefined, // no onRetry — the wrapper logs retries; there's no user channel here
+        MODEL_FALLBACK_CHAIN.length > 0 ? MODEL_FALLBACK_CHAIN : undefined, // recover from overloaded/billing like the main path
         agentConfig.mcpServers,
         delegateCwd, // run in the agent's project_dir so writes land in the workspace
       );
