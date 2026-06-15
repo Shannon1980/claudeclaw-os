@@ -21,7 +21,7 @@ vi.mock('./db.js', () => ({
 }));
 
 vi.mock('./memory.js', () => ({
-  saveConversationTurn: vi.fn((chatId: string, user: string, assistant: string, sessionId?: string, agentId = 'main') => {
+  saveConversationTurnAwaited: vi.fn(async (chatId: string, user: string, assistant: string, sessionId?: string, agentId = 'main') => {
     saveCalls.push({ chatId, user, assistant, sessionId, agentId });
     conversationLog.push({ role: 'user', content: user, session_id: sessionId ?? null });
     conversationLog.push({ role: 'assistant', content: assistant, session_id: sessionId ?? null });
@@ -41,8 +41,8 @@ beforeEach(() => {
 });
 
 describe('captureFromStop', () => {
-  it('writes one turn under (ws:aos, aos) for a Stop payload with assistant text', () => {
-    const res = captureFromStop({ session_id: 'sess-1', last_assistant_message: 'Wired the unified pool.' });
+  it('writes one turn under (ws:aos, aos) for a Stop payload with assistant text', async () => {
+    const res = await captureFromStop({ session_id: 'sess-1', last_assistant_message: 'Wired the unified pool.' });
 
     expect(res).toEqual({ captured: true, chatId: 'ws:aos' });
     expect(saveCalls).toHaveLength(1);
@@ -54,41 +54,41 @@ describe('captureFromStop', () => {
     expect(saveCalls[0].user).toContain('sess-1');
   });
 
-  it('is idempotent: a re-fire with the same session_id + content adds no second turn', () => {
-    captureFromStop({ session_id: 'sess-1', last_assistant_message: 'Same content.' });
-    const second = captureFromStop({ session_id: 'sess-1', last_assistant_message: 'Same content.' });
+  it('is idempotent: a re-fire with the same session_id + content adds no second turn', async () => {
+    await captureFromStop({ session_id: 'sess-1', last_assistant_message: 'Same content.' });
+    const second = await captureFromStop({ session_id: 'sess-1', last_assistant_message: 'Same content.' });
 
     expect(second).toEqual({ captured: false, reason: 'duplicate' });
     expect(saveCalls).toHaveLength(1);
   });
 
-  it('captures distinct content for the same session', () => {
-    captureFromStop({ session_id: 'sess-1', last_assistant_message: 'First turn.' });
-    const second = captureFromStop({ session_id: 'sess-1', last_assistant_message: 'Second, different turn.' });
+  it('captures distinct content for the same session', async () => {
+    await captureFromStop({ session_id: 'sess-1', last_assistant_message: 'First turn.' });
+    const second = await captureFromStop({ session_id: 'sess-1', last_assistant_message: 'Second, different turn.' });
 
     expect(second).toEqual({ captured: true, chatId: 'ws:aos' });
     expect(saveCalls).toHaveLength(2);
   });
 
-  it('is a no-op for empty / whitespace assistant text', () => {
-    expect(captureFromStop({ session_id: 's', last_assistant_message: '' })).toEqual({ captured: false, reason: 'empty' });
-    expect(captureFromStop({ session_id: 's', last_assistant_message: '   \n  ' })).toEqual({ captured: false, reason: 'empty' });
-    expect(captureFromStop({ session_id: 's' })).toEqual({ captured: false, reason: 'empty' });
+  it('is a no-op for empty / whitespace assistant text', async () => {
+    expect(await captureFromStop({ session_id: 's', last_assistant_message: '' })).toEqual({ captured: false, reason: 'empty' });
+    expect(await captureFromStop({ session_id: 's', last_assistant_message: '   \n  ' })).toEqual({ captured: false, reason: 'empty' });
+    expect(await captureFromStop({ session_id: 's' })).toEqual({ captured: false, reason: 'empty' });
     expect(saveCalls).toHaveLength(0);
   });
 
-  it('length-caps the captured text at 4000 chars', () => {
+  it('length-caps the captured text at 4000 chars', async () => {
     const huge = 'x'.repeat(5000);
-    captureFromStop({ session_id: 'sess-big', last_assistant_message: huge });
+    await captureFromStop({ session_id: 'sess-big', last_assistant_message: huge });
 
     expect(saveCalls[0].assistant.length).toBe(4000);
     expect(saveCalls[0].assistant.endsWith('...')).toBe(true);
   });
 
-  it('dedups the feedback loop: a projected memory re-captured does not double-write', () => {
+  it('dedups the feedback loop: a projected memory re-captured does not double-write', async () => {
     // Simulate the terminal echoing previously-captured content (Pitfall 6).
-    captureFromStop({ session_id: 'sess-loop', last_assistant_message: 'Projected memory echoed back.' });
-    const echo = captureFromStop({ session_id: 'sess-loop', last_assistant_message: 'Projected memory echoed back.' });
+    await captureFromStop({ session_id: 'sess-loop', last_assistant_message: 'Projected memory echoed back.' });
+    const echo = await captureFromStop({ session_id: 'sess-loop', last_assistant_message: 'Projected memory echoed back.' });
 
     expect(echo.captured).toBe(false);
     expect(saveCalls).toHaveLength(1);

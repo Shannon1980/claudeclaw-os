@@ -28,7 +28,7 @@
  */
 
 import { initDatabase, getRecentConversation } from './db.js';
-import { saveConversationTurn } from './memory.js';
+import { saveConversationTurnAwaited } from './memory.js';
 import { workspaceMemoryKey } from './agent-config.js';
 
 /** Mirror session-sync-stop.js:41 cap so a runaway response cannot flood the DB. */
@@ -53,7 +53,7 @@ export type CaptureResult =
  * Idempotent: a re-fire with the same session_id + assistant content is a
  * no-op. Pure of process concerns (no stdin / exit) so it is unit-testable.
  */
-export function captureFromStop(input: StopHookInput): CaptureResult {
+export async function captureFromStop(input: StopHookInput): Promise<CaptureResult> {
   const assistant = (input.last_assistant_message || '').trim();
   if (!assistant) return { captured: false, reason: 'empty' };
 
@@ -83,7 +83,9 @@ export function captureFromStop(input: StopHookInput): CaptureResult {
   // Feed a meaningful user label so importance gating does not silently drop
   // the turn (Pitfall 3). Attribution is fixed server-side (T-05-06).
   const userLabel = `[terminal session ${sessionId ?? 'unknown'}]`;
-  saveConversationTurn(chatId, userLabel, capped, sessionId, CAPTURE_AGENT_ID);
+  // Await ingestion: this is a short-lived process; a fire-and-forget save
+  // would exit before the memories row (what the bot recalls) is written.
+  await saveConversationTurnAwaited(chatId, userLabel, capped, sessionId, CAPTURE_AGENT_ID);
 
   return { captured: true, chatId };
 }
@@ -103,17 +105,20 @@ export function runCaptureCli(): void {
       parsed = JSON.parse(raw) as StopHookInput;
     } catch {
       process.exit(0); // untrusted/malformed stdin is a silent no-op (V5)
+      return;
     }
-    try {
-      captureFromStop(parsed);
-    } catch {
-      // Never let a capture failure surface to the terminal session.
-    }
-    process.exit(0);
+    // Await ingestion before exiting, then exit promptly. Without the await
+    // the process would die before the memories row is written.
+    captureFromStop(parsed)
+      .catch(() => {
+        // Never let a capture failure surface to the terminal session.
+      })
+      .finally(() => process.exit(0));
   });
 
-  // stdin safety net, matching load-memory-snapshot.js:127.
-  setTimeout(() => process.exit(0), 4000);
+  // Hard safety net: exit even if stdin never ends or ingestion hangs. Set well
+  // above a normal LLM ingestion latency so a legit capture is not cut short.
+  setTimeout(() => process.exit(0), 30000);
 }
 
 // Only run the CLI glue when invoked directly (not when imported by tests).

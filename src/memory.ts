@@ -267,6 +267,34 @@ export function saveConversationTurn(
 }
 
 /**
+ * Awaitable variant of saveConversationTurn: logs the turn AND awaits memory
+ * ingestion before resolving. Use this from short-lived entrypoints (e.g.
+ * capture-cli) that exit as soon as the call returns and would otherwise kill
+ * the fire-and-forget ingestion before the `memories` row is written. The bot
+ * recalls from `memories`, so without awaiting, the captured turn lands in
+ * conversation_log but is never recallable.
+ */
+export async function saveConversationTurnAwaited(
+  chatId: string,
+  userMessage: string,
+  claudeResponse: string,
+  sessionId?: string,
+  agentId = 'main',
+): Promise<void> {
+  try {
+    logConversationTurn(chatId, 'user', userMessage, sessionId, agentId);
+    logConversationTurn(chatId, 'assistant', claudeResponse, sessionId, agentId);
+  } catch (err) {
+    logger.error({ err }, 'Failed to log conversation turn');
+  }
+  try {
+    await ingestConversationTurn(chatId, userMessage, claudeResponse, agentId);
+  } catch (err) {
+    logger.error({ err }, 'Memory ingestion failed');
+  }
+}
+
+/**
  * Run the daily decay sweep. Call once on startup and every 24h.
  * Also prunes old conversation_log entries to prevent unbounded growth.
  *
