@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Afternoon Win — Point Agent at Workspace** - Configure an agent's project_dir at agentic-os, auto-load its context, document the setup (completed 2026-06-14)
 - [x] **Phase 2: Skills Over Chat** - Agentic-os methodology skills discoverable and invocable over Slack/Telegram, file outputs delivered via markers (completed 2026-06-15)
-- [ ] **Phase 3: Skill Hardening** - Command-Centre/hook/download-dependent skills degrade gracefully headless; skill self-improvement keeps working
+- [x] **Phase 3: Skill Hardening** - Command-Centre/hook/download-dependent skills degrade gracefully headless; skill self-improvement keeps working (completed 2026-06-15)
 - [ ] **Phase 4: Memory Source of Record** - ClaudeClaw SQLite is the single memory store; bot exchanges persist and recall across sessions
 - [ ] **Phase 5: Memory Projection & Capture** - SQLite memories render to agentic-os daily markdown; terminal-session work captured back via hooks
 - [ ] **Phase 6: memsearch Retirement** - Second semantic index disabled; recall runs entirely through ClaudeClaw embeddings
@@ -71,7 +71,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 03-01-PLAN.md — aos agent-role overlay (SEND_FILE marker + inline learnings write) + live SK-04/SK-05 verification
+- [x] 03-01-PLAN.md — aos agent-role overlay (SEND_FILE marker + inline learnings write) + live SK-04/SK-05 verification
 
 ### Phase 4: Memory Source of Record
 **Goal**: ClaudeClaw's SQLite store is the single source of record for memory across both modes, and a bot exchange is durably written and recallable later.
@@ -168,7 +168,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 |-------|----------------|--------|-----------|
 | 1. Afternoon Win | 2/2 | Complete   | 2026-06-14 |
 | 2. Skills Over Chat | 2/2 | Complete   | 2026-06-15 |
-| 3. Skill Hardening | 0/1 | Not started | - |
+| 3. Skill Hardening | 1/1 | Complete   | 2026-06-15 |
 | 4. Memory Source of Record | 0/TBD | Not started | - |
 | 5. Memory Projection & Capture | 0/TBD | Not started | - |
 | 6. memsearch Retirement | 0/TBD | Not started | - |
