@@ -13,7 +13,7 @@ This consolidation makes a terminal Claude Code session in the agentic-os worksp
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Afternoon Win — Point Agent at Workspace** - Configure an agent's project_dir at agentic-os, auto-load its context, document the setup (completed 2026-06-14)
-- [ ] **Phase 2: Skills Over Chat** - Agentic-os methodology skills discoverable and invocable over Slack/Telegram, file outputs delivered via markers
+- [x] **Phase 2: Skills Over Chat** - Agentic-os methodology skills discoverable and invocable over Slack/Telegram, file outputs delivered via markers (completed 2026-06-15)
 - [ ] **Phase 3: Skill Hardening** - Command-Centre/hook/download-dependent skills degrade gracefully headless; skill self-improvement keeps working
 - [ ] **Phase 4: Memory Source of Record** - ClaudeClaw SQLite is the single memory store; bot exchanges persist and recall across sessions
 - [ ] **Phase 5: Memory Projection & Capture** - SQLite memories render to agentic-os daily markdown; terminal-session work captured back via hooks
@@ -56,7 +56,7 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md — Delegation-path file-marker fix (mirror mission-files.ts) + Wave 0 unit tests (space-in-path, delegation extraction)
-- [ ] 02-02-PLAN.md — Pre-warm excalidraw venv, aos slack_channel config (human-action), live SK-01/SK-02/SK-03 transcripts
+- [x] 02-02-PLAN.md — Pre-warm excalidraw venv, aos slack_channel config (human-action), live SK-01/SK-02/SK-03 transcripts
 
 ### Phase 3: Skill Hardening
 **Goal**: Skills that assume the Command Centre, agentic-os hooks, or auto-download-to-Downloads no longer hard-fail headless, and skill self-improvement feedback keeps flowing.
@@ -164,7 +164,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Afternoon Win | 2/2 | Complete   | 2026-06-14 |
-| 2. Skills Over Chat | 1/2 | In Progress|  |
+| 2. Skills Over Chat | 2/2 | Complete   | 2026-06-15 |
 | 3. Skill Hardening | 0/TBD | Not started | - |
 | 4. Memory Source of Record | 0/TBD | Not started | - |
 | 5. Memory Projection & Capture | 0/TBD | Not started | - |
