@@ -400,9 +400,15 @@ describe('GET /api/security/status', () => {
 });
 
 describe('GET /api/chat/history', () => {
-  it('rejects missing chatId with 400', async () => {
+  it('returns { turns: [] } without chatId (defaults to ALLOWED_CHAT_ID)', async () => {
+    // The route intentionally falls back to ALLOWED_CHAT_ID when ?chatId is
+    // omitted, matching the other /api/* routes. When neither is present
+    // (as in tests, where ALLOWED_CHAT_ID is empty) it returns an empty page
+    // rather than a 400, so the dashboard never surfaces an error on open.
     const res = await get('/api/chat/history');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ turns: [] });
   });
 
   it('returns { turns: [] } with chatId', async () => {
