@@ -68,7 +68,10 @@ Plans:
   2. File outputs that would have hit the Downloads folder are instead delivered through ClaudeClaw `[SEND_FILE:]` markers
   3. Skill self-improvement feedback written to agentic-os `learnings.md` is produced when a skill is invoked via the bot
   4. No regression to the default fleet and the test suite stays green
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 03-01-PLAN.md — aos agent-role overlay (SEND_FILE marker + inline learnings write) + live SK-04/SK-05 verification
 
 ### Phase 4: Memory Source of Record
 **Goal**: ClaudeClaw's SQLite store is the single source of record for memory across both modes, and a bot exchange is durably written and recallable later.
@@ -165,7 +168,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 |-------|----------------|--------|-----------|
 | 1. Afternoon Win | 2/2 | Complete   | 2026-06-14 |
 | 2. Skills Over Chat | 2/2 | Complete   | 2026-06-15 |
-| 3. Skill Hardening | 0/TBD | Not started | - |
+| 3. Skill Hardening | 0/1 | Not started | - |
 | 4. Memory Source of Record | 0/TBD | Not started | - |
 | 5. Memory Projection & Capture | 0/TBD | Not started | - |
 | 6. memsearch Retirement | 0/TBD | Not started | - |
