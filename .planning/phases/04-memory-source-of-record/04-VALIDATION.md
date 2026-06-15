@@ -60,7 +60,7 @@ created: 2026-06-15
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| A bot exchange is recallable in a later session | MEM-02 | Requires two live sessions + /newchat across a real bot restart/session boundary | Session A: `@aos: remember that I prefer taglines under 5 words`. Session B (new chat / later): `@aos: draft a tagline for X` and confirm it recalls the under-5-words preference. Capture transcript. |
+| A bot exchange is recallable in a later session ✅ | MEM-02 | Requires two live sessions + /newchat across a real bot restart/session boundary | Session A: `@aos: remember that I prefer taglines under 5 words`. Session B (new chat / later): `@aos: draft a tagline for X` and confirm it recalls the under-5-words preference. Capture transcript. **Closed:** coffee-brand variant live (04-02-SUMMARY); Sidelines variant via deterministic recall proof (04-02-SUMMARY addendum). `/newchat` is a no-op for the workspace-agent path. |
 | No cross-agent leakage into workspace recall | MEM-02 | Behavioral over chat | Confirm the workspace agent's recall does not surface another agent's chat memories for the same chat_id |
 
 ---
