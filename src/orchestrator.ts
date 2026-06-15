@@ -4,7 +4,7 @@ import path from 'path';
 
 import { runAgent, UsageInfo } from './agent.js';
 import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd } from './agent-config.js';
-import { PROJECT_ROOT } from './config.js';
+import { PROJECT_ROOT, DELEGATION_TIMEOUT_MS } from './config.js';
 import { logToHiveMind, createInterAgentTask, completeInterAgentTask } from './db.js';
 import { logger } from './logger.js';
 import { buildMemoryContext } from './memory.js';
@@ -30,8 +30,10 @@ export interface AgentInfo {
 /** Cache of available agents loaded at startup. */
 let agentRegistry: AgentInfo[] = [];
 
-/** Default timeout for a delegated task (5 minutes). */
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+/** Default timeout for a delegated task. Configurable via DELEGATION_TIMEOUT_MS
+ *  (default 15 minutes) so file-producing workspace skills that build + render
+ *  can finish instead of aborting with "completed with no output". */
+const DEFAULT_TIMEOUT_MS = DELEGATION_TIMEOUT_MS;
 
 /**
  * Initialize the orchestrator by scanning `agents/` for valid configs.

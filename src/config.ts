@@ -24,6 +24,7 @@ const envConfig = readEnvFile([
   'DB_ENCRYPTION_KEY',
   'GOOGLE_API_KEY',
   'AGENT_TIMEOUT_MS',
+  'DELEGATION_TIMEOUT_MS',
   'AGENT_MAX_TURNS',
   'EMERGENCY_KILL_PHRASE',
   'MODEL_FALLBACK_CHAIN',
@@ -178,6 +179,15 @@ export const TYPING_REFRESH_MS = 4000;
 // (posting YouTube comments, sending multiple messages) leading to duplicate posts.
 export const AGENT_TIMEOUT_MS = parseInt(
   process.env.AGENT_TIMEOUT_MS || envConfig.AGENT_TIMEOUT_MS || '900000',
+  10,
+);
+
+// Maximum wall-clock for a delegated task (@id: / /delegate). File-producing
+// workspace skills (e.g. viz-excalidraw-diagram, which builds JSON then renders
+// via Playwright) can legitimately exceed the old hardcoded 5 minutes. Default
+// 15 minutes; raise via env for heavier skills.
+export const DELEGATION_TIMEOUT_MS = parseInt(
+  process.env.DELEGATION_TIMEOUT_MS || envConfig.DELEGATION_TIMEOUT_MS || '900000',
   10,
 );
 
