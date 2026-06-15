@@ -27,9 +27,52 @@
  * this from the agentic-os cwd.
  */
 
+import fs from 'fs';
+
 import { initDatabase, getRecentConversation } from './db.js';
 import { saveConversationTurnAwaited } from './memory.js';
 import { workspaceMemoryKey } from './agent-config.js';
+
+/**
+ * Extract the last assistant message text from a Claude Code transcript JSONL.
+ * Claude Code's Stop hook provides `transcript_path` (not `last_assistant_message`),
+ * so this is the reliable source. Each line is a record; assistant turns have
+ * `type:'assistant'` and `message.content` (string or an array of text blocks).
+ * Returns '' on any problem (unreadable file, no assistant turn) so capture is a
+ * safe no-op rather than throwing into the terminal session.
+ */
+export function lastAssistantFromTranscript(transcriptPath?: string): string {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return '';
+  try {
+    const lines = fs.readFileSync(transcriptPath, 'utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      let o: { type?: string; message?: { content?: unknown } };
+      try {
+        o = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (o.type !== 'assistant') continue;
+      const content = o.message?.content;
+      if (typeof content === 'string') return content.trim();
+      if (Array.isArray(content)) {
+        const text = content
+          .filter((b): b is { type: string; text: string } =>
+            !!b && typeof b === 'object' && (b as { type?: string }).type === 'text' && typeof (b as { text?: unknown }).text === 'string',
+          )
+          .map((b) => b.text)
+          .join('\n')
+          .trim();
+        if (text) return text;
+      }
+    }
+  } catch {
+    /* unreadable transcript is a safe no-op */
+  }
+  return '';
+}
 
 /** Mirror session-sync-stop.js:41 cap so a runaway response cannot flood the DB. */
 const MAX_CAPTURE_CHARS = 4000;
@@ -54,7 +97,12 @@ export type CaptureResult =
  * no-op. Pure of process concerns (no stdin / exit) so it is unit-testable.
  */
 export async function captureFromStop(input: StopHookInput): Promise<CaptureResult> {
-  const assistant = (input.last_assistant_message || '').trim();
+  // Prefer an explicit stdin field if present; otherwise read the last assistant
+  // turn from the transcript (Claude Code's Stop hook provides transcript_path,
+  // not last_assistant_message).
+  const assistant = (
+    (input.last_assistant_message || '').trim() || lastAssistantFromTranscript(input.transcript_path)
+  ).trim();
   if (!assistant) return { captured: false, reason: 'empty' };
 
   // Length-cap the captured text (T-05-01).
