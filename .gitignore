@@ -120,3 +120,7 @@ agents/*/agent.yaml.backup
 # CWDs (sub-agents start with cwd=agents/<id>).
 .claude/claudex/
 agents/*/.claude/claudex/
+
+# memsearch index cache — per-machine memory index (pid + indexed files).
+# Regenerated on demand; never belongs in the shared repo.
+.memsearch/
