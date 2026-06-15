@@ -15,6 +15,14 @@ fires; recall in both modes returns relevant results from ClaudeClaw embeddings
 only; a terminal session that previously relied on memsearch gets equivalent
 recall from the SQLite-backed path; no default-fleet regression; tests pass.
 
+**Also folds in MEM-04 (re-opened 2026-06-15):** Phase 5's capture Stop-hook
+(`dist/capture-cli.js`) was never committed to agentic-os `.claude/settings.json`
+— `git grep` confirms `capture-cli` appears in no agentic-os revision; the
+committed Stop hook runs only `session-sync-stop.js`. MEM-03 (projection read via
+the committed `load-memory-snapshot.js`, which loads `context/memory/*.claudeclaw.md`)
+and MEM-06 stand. This phase must wire `dist/capture-cli.js` into the agentic-os
+Stop hook and **commit it**, so MEM-04 is durably satisfied before the D-05 proof.
+
 **In scope:** retiring the memsearch *semantic index* — the nightly index cron,
 the AGENTS.md Tier-1 recall wiring that points at memsearch, and the terminal's
 semantic-recall replacement.
@@ -64,15 +72,26 @@ semantic-recall replacement.
   overlaps with the Phase-5 `context/memory/` projection, so a fold-in would
   duplicate). No deletion.
 
+### MEM-04 Capture-Hook Re-wire (folded in 2026-06-15)
+- **D-07:** Add a task to wire `node "$HOME/.claudeclaw-app/dist/capture-cli.js"`
+  into the agentic-os `.claude/settings.json` **Stop** hook array (alongside the
+  existing `session-sync-stop.js`) and **commit it in the agentic-os repo** so it
+  persists. This is the durable MEM-04 fix. Sequence it before the D-05 live
+  proof. Note: agentic-os has its own `session-sync-stop.js` capture; the
+  ClaudeClaw `capture-cli.js` is additive (writes terminal work into the single
+  SQLite store under `(ws:aos, aos)`), not a replacement.
+
 ### Recall-Equivalence Proof
-- **D-05:** **Both** an automated test and a live round-trip:
+- **D-05:** **Both** an automated test and a live **bidirectional** round-trip:
   - **Automated:** a test asserting the single-index / single-store invariant
     (no second semantic index in the recall path) and that recall returns
     results through ClaudeClaw embeddings only. Folds into the existing suite —
     keeps it green (success criterion 4).
   - **Live round-trip (human-verify):** with the memsearch cron disabled, prove
-    one query is recalled correctly in **both** the bot and a terminal session
-    via the new recall-CLI (success criterion 2 + 3).
+    (a) **recall** — one query recalled correctly in both the bot and a terminal
+    session via the new recall-CLI (success criterion 2 + 3), AND (b) **capture**
+    — terminal-session work captured via the now-committed Stop hook and recalled
+    by a later bot `@aos:` turn (MEM-04).
 - **D-06 (execution gate — CLEARED 2026-06-15):** The sequencing gate was
   "plan now, do not execute until Phase 4 (04-02 live MEM-02 proof) and Phase 5
   (05-02 terminal/bot round-trip) are verified live." Both are now verified and

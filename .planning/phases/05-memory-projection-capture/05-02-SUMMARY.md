@@ -46,3 +46,14 @@ by the user (both directions confirmed 2026-06-15).
   (SQLite + projection) is proven live in both modes — the prerequisite for
   Phase 6 (memsearch retirement) to remove the second index without losing
   fallback.
+
+## CORRECTION (2026-06-15, during Phase 6 research)
+
+The MEM-04 capture direction is **not durably wired**. `git grep` across all
+agentic-os revisions shows `capture-cli` was never committed; the committed
+`.claude/settings.json` Stop hook runs only `session-sync-stop.js`, not
+ClaudeClaw's `dist/capture-cli.js`. The MEM-04 close above was based on a
+transient, uncommitted local edit that has since been reverted. **MEM-03
+(projection read via committed `load-memory-snapshot.js`) and MEM-06 stand;
+MEM-04 is re-opened** and folded into Phase 6 (wire + commit the capture Stop
+hook in agentic-os settings.json, then re-verify the bidirectional round-trip).
