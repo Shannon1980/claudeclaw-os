@@ -50,6 +50,7 @@ import { delegateToAgent } from './orchestrator.js';
 //  onStreamText, onRetry, fallbackModels, mcpAllowlist, cwd)
 const CWD_ARG = 10;
 const MCP_ARG = 9;
+const MODEL_ARG = 4;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -74,6 +75,28 @@ describe('delegateToAgent', () => {
     await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
 
     expect(vi.mocked(runAgentWithRetry).mock.calls[0][MCP_ARG]).toEqual(['firecrawl']);
+  });
+
+  it('forwards the agent-configured model resolved by resolveAgentRuntime', async () => {
+    // The per-agent model from agent.yaml (resolved by resolveAgentRuntime)
+    // must reach the SDK; otherwise delegation always runs the default model.
+    vi.mocked(resolveAgentRuntime).mockReturnValueOnce({
+      agentId: 'aos',
+      cwd: '/Users/test/agentic-os',
+      model: 'claude-haiku-4-5-20251001',
+      systemPrompt: undefined,
+      mcpAllowlist: ['firecrawl'],
+    });
+
+    await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
+
+    expect(vi.mocked(runAgentWithRetry).mock.calls[0][MODEL_ARG]).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('passes undefined model (default) when the agent sets none', async () => {
+    await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
+
+    expect(vi.mocked(runAgentWithRetry).mock.calls[0][MODEL_ARG]).toBeUndefined();
   });
 
   it('starts each delegation with a fresh session (no resume)', async () => {
