@@ -367,7 +367,12 @@ setTimeout(() => process.exit(0), 4000);
 
 **A3 and A4 are the two decisions worth confirming before/at planning.** A3 (which chat_id) is the only behavioral design choice; A4 (Stop stdin fields) is a doc-verification step.
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> Resolved 2026-06-15 at plan time (user decision: unified workspace pool), locked into 05-01/05-02-PLAN.md:
+> 1. **chat_id:** a single stable workspace memory key `workspaceMemoryKey('aos')` = `ws:aos`, used by delegation save+recall (workspace agents only), the projection, AND capture. This SUPERSEDES the `'aos-terminal'` chat_id shown in the code examples below — treat every `'aos-terminal'` in this doc as `workspaceMemoryKey('aos')`.
+> 2. **Projection file:** separate `{date}.claudeclaw.md` (no clobber); the agentic-os SessionStart loader edit IS in scope.
+> 3. **Schema:** no change; reuse `source` + `session_id` for dedup.
 
 1. **Which `chat_id` does the projection/capture use?**
    - What we know: `aos` memories are written under the caller's `chat_id` (the chat that sent `@aos:`), via `saveConversationTurn(chatIdStr, ...)` (`message-core.ts:226`). Live data: 1 `aos` memory under 1 chat_id. There is no fixed "the aos chat."
