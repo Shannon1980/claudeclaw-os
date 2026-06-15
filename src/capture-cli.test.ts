@@ -1,3 +1,5 @@
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -32,7 +34,7 @@ vi.mock('./agent-config.js', () => ({
   workspaceMemoryKey: vi.fn((id: string) => `ws:${id}`),
 }));
 
-import { captureFromStop } from './capture-cli.js';
+import { captureFromStop, lastAssistantFromTranscript } from './capture-cli.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -92,6 +94,37 @@ describe('captureFromStop', () => {
 
     expect(echo.captured).toBe(false);
     expect(saveCalls).toHaveLength(1);
+  });
+});
+
+describe('transcript fallback (real Claude Code Stop schema)', () => {
+  it('reads the last assistant turn from transcript_path when last_assistant_message is absent', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-capture-tx-'));
+    const tx = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(
+      tx,
+      [
+        JSON.stringify({ type: 'user', message: { content: 'do a thing' } }),
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'First assistant turn.' }] } }),
+        JSON.stringify({ type: 'user', message: { content: 'and another' } }),
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'The runbook lives at docs/deploy.md' }] } }),
+        '',
+      ].join('\n'),
+    );
+    try {
+      // No last_assistant_message — must fall back to the transcript's last assistant text.
+      const res = await captureFromStop({ session_id: 'tx-1', transcript_path: tx });
+      expect(res).toEqual({ captured: true, chatId: 'ws:aos' });
+      expect(saveCalls).toHaveLength(1);
+      expect(saveCalls[0].assistant).toBe('The runbook lives at docs/deploy.md');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('lastAssistantFromTranscript returns empty for a missing file (safe no-op)', () => {
+    expect(lastAssistantFromTranscript('/no/such/transcript.jsonl')).toBe('');
+    expect(lastAssistantFromTranscript(undefined)).toBe('');
   });
 });
 
