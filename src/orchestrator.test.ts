@@ -10,7 +10,9 @@ import path from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./agent.js', () => ({
-  runAgent: vi.fn(async () => ({ text: 'ok', usage: null })),
+  // Delegation routes through runAgentWithRetry so transient errors recover
+  // and the per-agent cwd/tools survive retries.
+  runAgentWithRetry: vi.fn(async () => ({ text: 'ok', usage: null })),
 }));
 
 vi.mock('./db.js', () => ({
@@ -40,11 +42,11 @@ vi.mock('./agent-config.js', async (importOriginal) => {
 });
 
 import { delegateToAgent } from './orchestrator.js';
-import { runAgent } from './agent.js';
+import { runAgentWithRetry } from './agent.js';
 import { loadAgentConfig } from './agent-config.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockRunAgent = runAgent as any;
+const mockRunAgent = runAgentWithRetry as any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockLoadAgentConfig = loadAgentConfig as any;
 
@@ -69,10 +71,11 @@ function cfg(overrides: CfgOverrides = {}) {
   };
 }
 
-/** The `extra` (9th) arg handed to runAgent: { cwd, allowedTools }. */
+// runAgentWithRetry positional args: 0 message, 4 model, 8 fallbackModels,
+// 9 mcpAllowlist, 10 extra ({ cwd, allowedTools }).
 function lastExtra(): { cwd?: string; allowedTools?: string[] } {
   const call = mockRunAgent.mock.calls.at(-1);
-  return call[8];
+  return call[10];
 }
 function lastModelArg(): string | undefined {
   return mockRunAgent.mock.calls.at(-1)[4];

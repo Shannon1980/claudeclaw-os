@@ -201,6 +201,24 @@ describe('runAgentWithRetry', () => {
     expect(capturedModels[0]).toBe('claude-opus-4-6');
     expect(capturedModels[1]).toBe('claude-sonnet-4-6');
   }, 15000);
+
+  it('forwards extra (cwd + allowedTools) through to runAgent', async () => {
+    // Regression: runAgentWithRetry used to drop the extra arg, so a delegated
+    // run routed through it would lose its project_dir / tool allowlist.
+    mockQuery.mockReturnValue(mockQueryEvents([
+      { type: 'system', subtype: 'init', session_id: 'sess-1' },
+      resultEvent('ok'),
+    ])() as any);
+
+    await runAgentWithRetry(
+      'hi', undefined, noop, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, { cwd: '/deleg/proj', allowedTools: ['Read'] },
+    );
+
+    const opts = (mockQuery.mock.calls.at(-1)![0] as Record<string, unknown>).options as Record<string, unknown>;
+    expect(opts.cwd).toBe('/deleg/proj');
+    expect(opts.allowedTools).toEqual(['Read']);
+  });
 });
 
 describe('runAgent — extra passthrough (cwd + allowedTools)', () => {

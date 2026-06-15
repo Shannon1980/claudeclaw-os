@@ -426,6 +426,8 @@ function sleep(ms: number): Promise<void> {
  * Run the agent with automatic retry for transient errors.
  * Only retries errors where recovery.shouldRetry is true.
  * Calls onRetry before each retry so the caller can notify the user.
+ * `extra` (per-agent cwd + tool allowlist) is forwarded to runAgent on every
+ * attempt, so delegated runs keep their project_dir / tools across retries.
  */
 export async function runAgentWithRetry(
   message: string,
@@ -438,6 +440,7 @@ export async function runAgentWithRetry(
   onRetry?: (attempt: number, error: AgentError) => void,
   fallbackModels?: string[],
   mcpAllowlist?: string[],
+  extra?: { cwd?: string; allowedTools?: string[] },
 ): Promise<AgentResult> {
   let lastError: AgentError | undefined;
 
@@ -452,7 +455,7 @@ export async function runAgentWithRetry(
       return await runAgent(
         message, sessionId, onTyping, onProgress,
         currentModel, abortController, onStreamText,
-        mcpAllowlist,
+        mcpAllowlist, extra,
       );
     } catch (err) {
       if (!(err instanceof AgentError)) throw err;
