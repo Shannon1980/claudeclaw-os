@@ -215,6 +215,10 @@ export async function runAgent(
   let streamedText = '';
   let resultIsError = false;
   let apiErrorStatus: string | undefined;
+  // Last assistant message's text content. Captured so a session/usage cap
+  // notice ("You've hit your session limit") that the CLI prints to the turn
+  // but never lands in the result envelope still reaches classifyError.
+  let lastAssistantText = '';
 
   // Refresh typing indicator on an interval while Claude works.
   // Telegram's "typing..." action expires after ~5s.
@@ -310,10 +314,21 @@ export async function runAgent(
           lastCallInputTokens = callInputTokens;
         }
 
-        // Extract tool_use blocks from assistant content for progress reporting
-        if (onProgress) {
-          const content = msg?.['content'] as Array<{ type: string; name?: string }> | undefined;
-          if (Array.isArray(content)) {
+        const content = msg?.['content'] as
+          | Array<{ type: string; name?: string; text?: string }>
+          | undefined;
+        if (Array.isArray(content)) {
+          // Capture text blocks so a session-limit notice printed to the turn
+          // reaches classifyError even when no result envelope carries it.
+          const texts = content
+            .filter((b) => b.type === 'text' && typeof b.text === 'string')
+            .map((b) => b.text as string);
+          if (texts.length > 0) {
+            lastAssistantText = texts.join('\n');
+          }
+
+          // Extract tool_use blocks from assistant content for progress reporting
+          if (onProgress) {
             for (const block of content) {
               if (block.type === 'tool_use' && block.name) {
                 onProgress({ type: 'tool_active', description: toolLabel(block.name) });
@@ -405,6 +420,7 @@ export async function runAgent(
       isError: resultIsError,
       apiErrorStatus,
       resultText,
+      assistantText: lastAssistantText || streamedText || null,
     });
     logger.error(
       { category: classified.category, recovery: classified.recovery, originalMsg: (err as Error)?.message },
@@ -423,7 +439,7 @@ export async function runAgent(
     const classified = classifyError(
       new Error(`Claude Code result reported is_error (api_error_status=${apiErrorStatus ?? 'unknown'})`),
       contextTokens || undefined,
-      { isError: true, apiErrorStatus, resultText },
+      { isError: true, apiErrorStatus, resultText, assistantText: lastAssistantText || streamedText || null },
     );
     logger.error(
       { category: classified.category, recovery: classified.recovery, apiErrorStatus },
