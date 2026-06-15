@@ -20,16 +20,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-14)
 
 **Core value:** A terminal Claude Code session in the agentic-os workspace and the ClaudeClaw chat bot behave as one assistant — same identity, skills, memory, and scheduled jobs, with no divergence between modes.
-**Current focus:** Phase 06 — memsearch-retirement (planning; execution gated on nothing now — 4 & 5 verified)
+**Current focus:** Phase 06 — memsearch-retirement (PLANNED, ready to execute)
 
 ## Current Position
 
-Phase: 06 (memsearch-retirement) — CONTEXT GATHERED, ready to plan
-Plan: 0 of TBD
-Status: Phases 4 & 5 closed (live-verified 2026-06-15); Phase 6 context captured
-Last activity: 2026-06-15 -- Phase 6 context gathered
+Phase: 06 (memsearch-retirement) — PLANNED (3 plans, checker-passed), ready to execute
+Plan: 0 of 3 executed
+Status: Phase 6 planned — research + patterns + validation + 3 plans, plan-checker blockers resolved
+Last activity: 2026-06-15 -- Phase 6 planning complete
 
 Progress: [█████░░░░░] 50%
+
+## Phase 6 Note
+
+MEM-04 was re-opened during Phase 6 research (capture Stop-hook was never committed to agentic-os settings.json) and folded into Phase 6 (D-07). Plan 06-02 wires + commits it; Plan 06-03 proves it. Execution sequencing: recall-CLI ships (06-01) → AGENTS.md rewrite + cron disable + capture hook (06-02) → regression gate + live bidirectional proof (06-03, blocking human-verify, LAST).
 
 ## Performance Metrics
 
