@@ -73,12 +73,15 @@ semantic-recall replacement.
   - **Live round-trip (human-verify):** with the memsearch cron disabled, prove
     one query is recalled correctly in **both** the bot and a terminal session
     via the new recall-CLI (success criterion 2 + 3).
-- **D-06 (execution gate):** Per the user's sequencing decision, **plan now but
-  do not execute the retirement** until Phase 4 (04-02 live MEM-02 proof) and
-  Phase 5 (05-02 terminal/bot round-trip) are verified live. memsearch is the
-  current fallback; it must not be disabled before the ClaudeClaw-only recall
-  path is proven working. The planner should structure the phase so the
-  reversible disable + the live proof are the final, gated steps.
+- **D-06 (execution gate — CLEARED 2026-06-15):** The sequencing gate was
+  "plan now, do not execute until Phase 4 (04-02 live MEM-02 proof) and Phase 5
+  (05-02 terminal/bot round-trip) are verified live." Both are now verified and
+  closed (04-02-SUMMARY, 05-02-SUMMARY, user-confirmed both directions on
+  2026-06-15), so the ClaudeClaw-only recall path is proven and the fallback can
+  be removed. Execution is unblocked. The planner should still structure the
+  phase so the reversible disable + the live recall proof are the **final**
+  steps, after the recall-CLI exists and AGENTS.md is rewritten — never disable
+  the index before its replacement is in place.
 
 ### Claude's Discretion
 - Exact name/flags of the recall-CLI (e.g., `recall-cli.js "<query>" [--top-k]`),

@@ -15,8 +15,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Afternoon Win — Point Agent at Workspace** - Configure an agent's project_dir at agentic-os, auto-load its context, document the setup (completed 2026-06-14)
 - [x] **Phase 2: Skills Over Chat** - Agentic-os methodology skills discoverable and invocable over Slack/Telegram, file outputs delivered via markers (completed 2026-06-15)
 - [x] **Phase 3: Skill Hardening** - Command-Centre/hook/download-dependent skills degrade gracefully headless; skill self-improvement keeps working (completed 2026-06-15)
-- [ ] **Phase 4: Memory Source of Record** - ClaudeClaw SQLite is the single memory store; bot exchanges persist and recall across sessions
-- [ ] **Phase 5: Memory Projection & Capture** - SQLite memories render to agentic-os daily markdown; terminal-session work captured back via hooks
+- [x] **Phase 4: Memory Source of Record** - ClaudeClaw SQLite is the single memory store; bot exchanges persist and recall across sessions (completed 2026-06-15)
+- [x] **Phase 5: Memory Projection & Capture** - SQLite memories render to agentic-os daily markdown; terminal-session work captured back via hooks (completed 2026-06-15)
 - [ ] **Phase 6: memsearch Retirement** - Second semantic index disabled; recall runs entirely through ClaudeClaw embeddings
 - [ ] **Phase 7: Single Scheduler** - ClaudeClaw scheduler reads agentic-os cron/jobs/*.md and is the only runner; agentic-os cron disabled, no double-fire
 - [ ] **Phase 8: Per-Agent Soul** - Every agent gets its own SOUL.md (voice) separate from its role CLAUDE.md; workspace agent's soul aligns with agentic-os SOUL.md
@@ -87,7 +87,7 @@ Plans:
 
 Plans:
 - [x] 04-01-PLAN.md — strictAgentId scoping on the delegated recall call + Wave 0 unit tests (strict per-agent recall, single-store path assertion, full suite)
-- [ ] 04-02-PLAN.md — deploy + restart, live two-session MEM-02 recall proof (human-verify)
+- [x] 04-02-PLAN.md — deploy + restart, live two-session MEM-02 recall proof (human-verify)
 
 ### Phase 5: Memory Projection & Capture
 **Goal**: Recent ClaudeClaw memories render into agentic-os daily `context/memory/*.md` as a derived projection (via the decryption-safe path), and terminal-session work is captured back into SQLite so the bot sees it.
@@ -103,7 +103,7 @@ Plans:
 
 Plans:
 - [x] 05-01-PLAN.md — workspace-memory-key helper + delegation save/recall wiring + memory-projection.ts + capture-cli.ts + Wave 0 unit tests (MEM-03, MEM-04, MEM-06)
-- [ ] 05-02-PLAN.md — build + symlink + agentic-os Stop hook + SessionStart loader edit + live terminal/bot round-trip (MEM-03, MEM-04 human-verify)
+- [x] 05-02-PLAN.md — build + symlink + agentic-os Stop hook + SessionStart loader edit + live terminal/bot round-trip (MEM-03, MEM-04 human-verify)
 
 ### Phase 6: memsearch Retirement
 **Goal**: The agentic-os memsearch semantic index is retired so only one semantic index runs, and memory recall still works entirely through ClaudeClaw's embeddings.
