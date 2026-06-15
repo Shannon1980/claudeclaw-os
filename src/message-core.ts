@@ -28,6 +28,7 @@ import { trackUsage, getRateStatus } from './rate-tracker.js';
 import { buildCostFooter } from './cost-footer.js';
 import { parseDelegation, delegateToAgent } from './orchestrator.js';
 import { isWorkspaceAgent, workspaceMemoryKey } from './agent-config.js';
+import { renderMemoryProjection } from './memory-projection.js';
 import { maybeStartChatTask, finishChatTask } from './chat-task-tracker.js';
 import { emitChatEvent, setProcessing, setActiveAbort, ChatEventSource } from './state.js';
 import { checkKillPhrase, executeEmergencyKill, audit } from './security.js';
@@ -234,6 +235,17 @@ export async function processUserMessage(
           ? workspaceMemoryKey(delegation.agentId)
           : chatIdStr;
         saveConversationTurn(saveChatId, delegation.prompt, response, undefined, delegation.agentId);
+
+        // Project the shared pool into the workspace's daily markdown so a
+        // terminal session sees what the bot produced (MEM-03). Fire-and-forget:
+        // only for workspace agents, never blocks the reply.
+        if (isWorkspaceAgent(delegation.agentId)) {
+          try {
+            renderMemoryProjection(delegation.agentId);
+          } catch (projErr) {
+            logger.warn({ err: projErr, agentId: delegation.agentId }, 'memory projection render failed');
+          }
+        }
       }
       emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: delegatedText, source: cb.source });
 
