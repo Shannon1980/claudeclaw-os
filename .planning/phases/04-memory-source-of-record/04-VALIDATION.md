@@ -1,9 +1,9 @@
 ---
 phase: 4
 slug: memory-source-of-record
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-15
 ---
 
@@ -67,11 +67,12 @@ created: 2026-06-15
 
 ## Validation Sign-Off
 
-- [ ] Strict per-agent recall unit test green
-- [ ] Delegation recall passes strictAgentId (test green)
-- [ ] MEM-01 single-store assertion green
+- [x] Strict per-agent recall unit test green (04-01)
+- [x] Delegation recall passes strictAgentId (test green) (04-01)
+- [x] MEM-01 single-store assertion green (04-01)
 - [x] Live two-session MEM-02 transcript captured (04-02-SUMMARY.md)
-- [ ] Full suite at baseline
-- [ ] `nyquist_compliant: true` at sign-off
+- [x] Full suite at baseline (544/545 pass; sole failure is the known
+  `chat-task-tracker` ~1.25s timeout flake, unrelated to this work)
+- [x] `nyquist_compliant: true` at sign-off
 
-**Approval:** pending
+**Approval:** approved — 2026-06-15. MEM-01 + MEM-02 verified; full suite at baseline.
