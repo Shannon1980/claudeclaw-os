@@ -21,13 +21,31 @@ import {
   getDashboardTopAccessedMemories,
   getDashboardMemoriesList,
   getDashboardMemoryTimeline,
+  logConversationTurn,
+  getConversationPage,
 } from './db.js';
 import path from 'path';
-import { STORE_DIR, PROJECT_ROOT } from './config.js';
+import { STORE_DIR, PROJECT_ROOT, TRANSPORT } from './config.js';
 
 describe('database', () => {
   beforeEach(() => {
     _initTestDatabase();
+  });
+
+  // ── Conversation log ────────────────────────────────────────────
+
+  describe('logConversationTurn source tagging', () => {
+    it('tags rows with the configured TRANSPORT, not a hardcoded telegram default', () => {
+      logConversationTurn('chat-src', 'user', 'hello', undefined, 'aos');
+      const [row] = getConversationPage('chat-src', 10) as unknown as Array<{ source: string }>;
+      expect(row.source).toBe(TRANSPORT);
+    });
+
+    it('honors an explicit source override', () => {
+      logConversationTurn('chat-src2', 'assistant', 'hi', undefined, 'aos', 'dashboard');
+      const [row] = getConversationPage('chat-src2', 10) as unknown as Array<{ source: string }>;
+      expect(row.source).toBe('dashboard');
+    });
   });
 
   // ── Sessions ────────────────────────────────────────────────────
