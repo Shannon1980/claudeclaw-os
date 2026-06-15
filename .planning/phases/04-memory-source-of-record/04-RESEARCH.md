@@ -302,7 +302,10 @@ const { contextText } = await buildMemoryContext('chat1', userMsg, 'aos', { stri
 
 **If A2 is the only open decision, confirm it during planning; it is the single behavioral choice in this phase.**
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> Resolved 2026-06-15 at plan time: scope strict per-agent recall on the delegated/aos path ONLY (main path unchanged for COMPAT-02); MEM-02 live proof = a two-session transcript.
+
 
 1. **Should the MAIN (non-delegated) path also become strict per-agent on recall, or only the `aos`/delegated path?**
    - What we know: The plumbing supports both. War-room already uses `strictAgentId`. Tightening only the delegated path satisfies the `aos`-no-leakage success criterion with minimal risk to the default fleet.
