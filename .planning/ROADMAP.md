@@ -99,7 +99,11 @@ Plans:
   2. Work done in a terminal session (captured via a Stop hook) appears in ClaudeClaw memory and surfaces in a later bot conversation
   3. The projection reads memory data through ClaudeClaw's own access/decryption path — never raw ciphertext reads of encrypted columns
   4. The hook wiring is connected into the message/session lifecycle (hooks actually fire, not dead code) and the test suite passes
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 05-01-PLAN.md — workspace-memory-key helper + delegation save/recall wiring + memory-projection.ts + capture-cli.ts + Wave 0 unit tests (MEM-03, MEM-04, MEM-06)
+- [ ] 05-02-PLAN.md — build + symlink + agentic-os Stop hook + SessionStart loader edit + live terminal/bot round-trip (MEM-03, MEM-04 human-verify)
 
 ### Phase 6: memsearch Retirement
 **Goal**: The agentic-os memsearch semantic index is retired so only one semantic index runs, and memory recall still works entirely through ClaudeClaw's embeddings.
@@ -174,7 +178,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. Skills Over Chat | 2/2 | Complete   | 2026-06-15 |
 | 3. Skill Hardening | 1/1 | Complete   | 2026-06-15 |
 | 4. Memory Source of Record | 1/2 | In Progress|  |
-| 5. Memory Projection & Capture | 0/TBD | Not started | - |
+| 5. Memory Projection & Capture | 0/2 | Not started | - |
 | 6. memsearch Retirement | 0/TBD | Not started | - |
 | 7. Single Scheduler | 0/TBD | Not started | - |
 | 8. Per-Agent Soul | 0/TBD | Not started | - |
