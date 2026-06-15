@@ -181,7 +181,7 @@ export async function delegateToAgent(
     // falls back to the parent bot's cwd, so a workspace agent would READ from
     // its project_dir but WRITE relative paths (projects/, context/learnings.md)
     // into the bot's repo instead of the workspace.
-    const { cwd: delegateCwd } = resolveAgentRuntime(agentId);
+    const { cwd: delegateCwd, model: delegateModel } = resolveAgentRuntime(agentId);
     const claudeMdPath = resolveAgentClaudeMd(agentId);
     let systemPrompt = '';
     if (claudeMdPath) {
@@ -220,7 +220,7 @@ export async function delegateToAgent(
         undefined, // fresh session for each delegation
         () => {}, // no typing indicator needed for sub-delegation
         undefined, // no progress callback for inner agent
-        undefined, // use default model
+        delegateModel, // honor the agent's configured model (agent.yaml), else default
         ctrl,
         undefined, // no streaming for delegation
         agentConfig.mcpServers,
