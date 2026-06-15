@@ -592,7 +592,7 @@ export function createSlackBot(): SlackBot {
       // Keep thread replies threaded; top-level channel messages stay top-level.
       const cb = buildSlackCallbacks(client, m.channel, chatId, m.thread_ts, targetAgent);
       // Strip a leading bot mention so "@bot do x" works inline in the channel.
-      const caption = (m.text || '').replace(/^\s*<@[A-Z0-9]+>\s*/, '').trim();
+      const caption = (m.text || '').replace(/^\s*<@[A-Z0-9]+(\|[^>]*)?>\s*/, '').trim();
 
       if (m.files && m.files.length) {
         await enqueueSlackFiles(client, m.channel, chatId, cb, m.files, caption, { agentRuntime: runtime });
@@ -644,7 +644,7 @@ export function createSlackBot(): SlackBot {
       return;
     }
     // Strip the leading "<@BOTID>" mention token.
-    const text = (e.text || '').replace(/^\s*<@[A-Z0-9]+>\s*/, '').trim();
+    const text = (e.text || '').replace(/^\s*<@[A-Z0-9]+(\|[^>]*)?>\s*/, '').trim();
     if (!text) return;
 
     const chatId = slackChatId(e.user!);

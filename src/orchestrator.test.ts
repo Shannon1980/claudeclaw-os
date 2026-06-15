@@ -6,7 +6,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // `project_dir` must run with that dir as its SDK cwd so relative-path
 // writes (projects/, context/learnings.md) land in the workspace, not the
 // bot's own repo root.
-vi.mock('./agent.js', () => ({ runAgent: vi.fn(async () => ({ text: 'ok', newSessionId: 's1', usage: null })) }));
+// Delegation routes through runAgentWithRetry so transient errors (rate
+// limits, subprocess crashes, overloaded/billing) recover the same way the
+// main message path does — the per-agent cwd survives across retries.
+vi.mock('./agent.js', () => ({ runAgentWithRetry: vi.fn(async () => ({ text: 'ok', newSessionId: 's1', usage: null })) }));
 vi.mock('./agent-config.js', () => ({
   listAgentIds: vi.fn(() => ['aos']),
   loadAgentConfig: vi.fn(() => ({
@@ -37,31 +40,33 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { runAgent } from './agent.js';
+import { runAgentWithRetry } from './agent.js';
 import { resolveAgentRuntime } from './agent-config.js';
 import { buildMemoryContext } from './memory.js';
 import { delegateToAgent } from './orchestrator.js';
 
-// runAgent positional signature:
+// runAgentWithRetry positional signature:
 // (message, sessionId, onTyping, onProgress, model, abortController,
-//  onStreamText, mcpAllowlist, cwd)
-const CWD_ARG = 8;
-const MCP_ARG = 7;
+//  onStreamText, onRetry, fallbackModels, mcpAllowlist, cwd)
+const CWD_ARG = 10;
+const MCP_ARG = 9;
 const MODEL_ARG = 4;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(runAgent).mockResolvedValue({ text: 'ok', newSessionId: 's1', usage: null });
+  vi.mocked(runAgentWithRetry).mockResolvedValue({ text: 'ok', newSessionId: 's1', usage: null });
 });
 
 describe('delegateToAgent', () => {
   it('runs the delegated agent in its resolved project_dir cwd', async () => {
     await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
 
-    expect(runAgent).toHaveBeenCalledTimes(1);
+    // Delegation must go through the retry wrapper, not runAgent directly, so
+    // a transient failure mid-delegation recovers instead of surfacing.
+    expect(runAgentWithRetry).toHaveBeenCalledTimes(1);
     // The resolved cwd (project_dir) must be passed through to the SDK so
     // the subprocess resolves relative writes against the workspace.
-    expect(vi.mocked(runAgent).mock.calls[0][CWD_ARG]).toBe('/Users/test/agentic-os');
+    expect(vi.mocked(runAgentWithRetry).mock.calls[0][CWD_ARG]).toBe('/Users/test/agentic-os');
     // It must come from resolveAgentRuntime, which honors project_dir.
     expect(resolveAgentRuntime).toHaveBeenCalledWith('aos');
   });
@@ -69,7 +74,7 @@ describe('delegateToAgent', () => {
   it('forwards the agent MCP allowlist alongside the cwd', async () => {
     await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
 
-    expect(vi.mocked(runAgent).mock.calls[0][MCP_ARG]).toEqual(['firecrawl']);
+    expect(vi.mocked(runAgentWithRetry).mock.calls[0][MCP_ARG]).toEqual(['firecrawl']);
   });
 
   it('forwards the agent-configured model resolved by resolveAgentRuntime', async () => {
@@ -85,20 +90,20 @@ describe('delegateToAgent', () => {
 
     await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
 
-    expect(vi.mocked(runAgent).mock.calls[0][MODEL_ARG]).toBe('claude-haiku-4-5-20251001');
+    expect(vi.mocked(runAgentWithRetry).mock.calls[0][MODEL_ARG]).toBe('claude-haiku-4-5-20251001');
   });
 
   it('passes undefined model (default) when the agent sets none', async () => {
     await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
 
-    expect(vi.mocked(runAgent).mock.calls[0][MODEL_ARG]).toBeUndefined();
+    expect(vi.mocked(runAgentWithRetry).mock.calls[0][MODEL_ARG]).toBeUndefined();
   });
 
   it('starts each delegation with a fresh session (no resume)', async () => {
     await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
 
     // sessionId is the 2nd positional arg — undefined means a fresh session.
-    expect(vi.mocked(runAgent).mock.calls[0][1]).toBeUndefined();
+    expect(vi.mocked(runAgentWithRetry).mock.calls[0][1]).toBeUndefined();
   });
 
   it('scopes delegated recall to the agent via strictAgentId (no cross-agent leakage)', async () => {

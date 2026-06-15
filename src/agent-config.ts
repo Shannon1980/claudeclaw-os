@@ -252,8 +252,12 @@ export function getSlackChannelMap(): Map<string, string> {
     let channel: string | undefined;
     try {
       channel = loadAgentConfig(id).slackChannel;
-    } catch {
-      continue; // broken config — skip
+    } catch (err) {
+      // Don't let a malformed agent.yaml silently vanish from routing — a user
+      // posting in that agent's channel would just get nothing, with no signal.
+      // eslint-disable-next-line no-console
+      console.warn(`[agent-config] skipping agent "${id}" for Slack channel routing: config failed to load:`, err instanceof Error ? err.message : err);
+      continue;
     }
     if (!channel) continue;
     if (map.has(channel)) {
