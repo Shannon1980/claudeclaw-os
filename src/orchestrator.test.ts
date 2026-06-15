@@ -39,6 +39,7 @@ vi.mock('./logger.js', () => ({
 
 import { runAgent } from './agent.js';
 import { resolveAgentRuntime } from './agent-config.js';
+import { buildMemoryContext } from './memory.js';
 import { delegateToAgent } from './orchestrator.js';
 
 // runAgent positional signature:
@@ -75,5 +76,13 @@ describe('delegateToAgent', () => {
 
     // sessionId is the 2nd positional arg — undefined means a fresh session.
     expect(vi.mocked(runAgent).mock.calls[0][1]).toBeUndefined();
+  });
+
+  it('scopes delegated recall to the agent via strictAgentId (no cross-agent leakage)', async () => {
+    await delegateToAgent('aos', 'do a thing', 'chat1', 'main');
+
+    // buildMemoryContext's 4th arg is the options object; strict scoping
+    // constrains recall to this agent's own memories.
+    expect(vi.mocked(buildMemoryContext).mock.calls[0][3]).toEqual({ strictAgentId: 'aos' });
   });
 });

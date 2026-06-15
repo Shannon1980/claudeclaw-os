@@ -192,8 +192,12 @@ export async function delegateToAgent(
       }
     }
 
-    // Build memory context for the delegated agent
-    const { contextText: memCtx } = await buildMemoryContext(chatId, prompt, agentId);
+    // Build memory context for the delegated agent. Scope recall to this
+    // agent so a delegated workspace agent (e.g. aos) only surfaces its own
+    // memories, not other agents' memories sharing the chat_id (no
+    // cross-agent leakage). The main/non-delegated path is left unscoped on
+    // purpose to preserve default-fleet behavior (COMPAT-02).
+    const { contextText: memCtx } = await buildMemoryContext(chatId, prompt, agentId, { strictAgentId: agentId });
 
     // Build the delegated prompt with agent role context + memory
     const contextParts: string[] = [];
