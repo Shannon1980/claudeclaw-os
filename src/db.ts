@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { DB_ENCRYPTION_KEY, STORE_DIR } from './config.js';
+import { DB_ENCRYPTION_KEY, STORE_DIR, TRANSPORT } from './config.js';
 import { cosineSimilarity } from './embeddings.js';
 import { logger } from './logger.js';
 
@@ -1497,12 +1497,18 @@ export function logConversationTurn(
   content: string,
   sessionId?: string,
   agentId = 'main',
+  // The transport the turn came in on. Defaults to the configured TRANSPORT
+  // (e.g. 'slack') rather than the column's legacy 'telegram' default so a
+  // Slack-only deployment doesn't mislabel every row. Stays out of the
+  // War Room partial unique indexes (those rows set source explicitly + carry
+  // meeting/turn ids; these rows leave both NULL, so NULLs stay distinct).
+  source: string = TRANSPORT,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO conversation_log (chat_id, session_id, role, content, created_at, agent_id)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(chatId, sessionId ?? null, role, content, now, agentId);
+    `INSERT INTO conversation_log (chat_id, session_id, role, content, created_at, agent_id, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(chatId, sessionId ?? null, role, content, now, agentId, source);
 }
 
 export function getRecentConversation(

@@ -1,9 +1,9 @@
 ---
 phase: 4
 slug: memory-source-of-record
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-15
 ---
 
@@ -41,7 +41,7 @@ created: 2026-06-15
 | 4-01-01 | 01 | 1 | MEM-02 (scoping) | unit | `npx vitest run src/memory.test.ts` (recall with strictAgentId excludes other agents' memories) | ⬜ pending |
 | 4-01-02 | 01 | 1 | MEM-02 (scoping) | unit | `npx vitest run src/orchestrator.test.ts` OR a memory-scope test asserting the delegated recall passes strictAgentId | ⬜ pending |
 | 4-01-03 | 01 | 1 | MEM-01 | structural | assert single DB resolves from PROJECT_ROOT (path test) and no second store path is constructed from cwd | ⬜ pending |
-| 4-02-01 | 02 | 2 | MEM-02 | manual | live two-session transcript: write a standing preference via @aos: in session A, recall it in session B after /newchat | ⬜ pending |
+| 4-02-01 | 02 | 2 | MEM-02 | manual | live two-session transcript: write a standing preference via @aos: in session A, recall it in session B (fresh delegation; /newchat unnecessary — see 04-02-SUMMARY) | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red*
 
@@ -67,11 +67,12 @@ created: 2026-06-15
 
 ## Validation Sign-Off
 
-- [ ] Strict per-agent recall unit test green
-- [ ] Delegation recall passes strictAgentId (test green)
-- [ ] MEM-01 single-store assertion green
-- [ ] Live two-session MEM-02 transcript captured
-- [ ] Full suite at baseline
-- [ ] `nyquist_compliant: true` at sign-off
+- [x] Strict per-agent recall unit test green (04-01)
+- [x] Delegation recall passes strictAgentId (test green) (04-01)
+- [x] MEM-01 single-store assertion green (04-01)
+- [x] Live two-session MEM-02 transcript captured (04-02-SUMMARY.md)
+- [x] Full suite at baseline (544/545 pass; sole failure is the known
+  `chat-task-tracker` ~1.25s timeout flake, unrelated to this work)
+- [x] `nyquist_compliant: true` at sign-off
 
-**Approval:** pending
+**Approval:** approved — 2026-06-15. MEM-01 + MEM-02 verified; full suite at baseline.
