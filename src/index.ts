@@ -31,6 +31,14 @@ process.env.CLAUDECLAW_AGENT_ID = AGENT_ID;
 if (AGENT_ID !== 'main') {
   const agentConfig = loadAgentConfig(AGENT_ID);
   const agentDir = resolveAgentDir(AGENT_ID);
+  // An explicit, existing project_dir wins so the agent's runs (scheduled
+  // tasks, missions, and the SDK cwd) operate on that project's files and
+  // resolve relative-path writes there — not into the agent's own dir. This
+  // mirrors resolveAgentRuntime() so the standalone and delegated paths agree.
+  const agentCwd =
+    agentConfig.projectDir && fs.existsSync(agentConfig.projectDir)
+      ? agentConfig.projectDir
+      : agentDir;
   const claudeMdPath = resolveAgentClaudeMd(AGENT_ID);
   let systemPrompt: string | undefined;
   if (claudeMdPath) {
@@ -41,7 +49,7 @@ if (AGENT_ID !== 'main') {
   setAgentOverrides({
     agentId: AGENT_ID,
     botToken: agentConfig.botToken,
-    cwd: agentDir,
+    cwd: agentCwd,
     model: agentConfig.model,
     obsidian: agentConfig.obsidian,
     systemPrompt,
