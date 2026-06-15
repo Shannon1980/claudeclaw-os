@@ -122,4 +122,28 @@ describe('getSlackChannelMap', () => {
     const map = getSlackChannelMap();
     expect([...map.values()]).not.toContain(id);
   });
+
+  it('resolves a duplicate channel deterministically (last in sorted-id order wins)', () => {
+    // Two agents claim the same channel. Resolution must not depend on
+    // filesystem readdir order, so the winner is the last sorted id.
+    const a = 'zztest_dup_a';
+    const b = 'zztest_dup_b';
+    writeAgent(a, 'name: DupA\nslack_channel: C0DUPECHAN\n');
+    writeAgent(b, 'name: DupB\nslack_channel: C0DUPECHAN\n');
+    const map = getSlackChannelMap();
+    // 'zztest_dup_b' sorts after 'zztest_dup_a', so it wins, every run.
+    expect(map.get('C0DUPECHAN')).toBe(b);
+  });
+
+  it('skips an agent whose config fails to load without dropping the valid one', () => {
+    const good = 'zztest_goodcfg';
+    const broken = 'zztest_brokencfg';
+    writeAgent(good, 'name: Good\nslack_channel: C0GOODCHAN\n');
+    // Missing required `name` makes loadAgentConfig throw — the map build must
+    // not abort, so the valid agent's channel still maps.
+    writeAgent(broken, 'description: no name here\nslack_channel: C0BROKENCHAN\n');
+    const map = getSlackChannelMap();
+    expect(map.get('C0GOODCHAN')).toBe(good);
+    expect(map.has('C0BROKENCHAN')).toBe(false);
+  });
 });

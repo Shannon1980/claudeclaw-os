@@ -215,6 +215,16 @@ export async function delegateToAgent(
       agentConfig.projectDir && fs.existsSync(agentConfig.projectDir)
         ? agentConfig.projectDir
         : undefined;
+    // loadAgentConfig warns once at load time, but the dir can also vanish
+    // between then and now (deleted/unmounted). Log at the delegation site so
+    // a run that silently falls back to the parent cwd — loading the wrong
+    // project's CLAUDE.md and touching the wrong files — leaves a signal.
+    if (agentConfig.projectDir && !cwd) {
+      logger.warn(
+        { agentId, projectDir: agentConfig.projectDir },
+        'project_dir missing at delegation; running in parent cwd',
+      );
+    }
     const allowedTools = agentConfig.tools?.length ? agentConfig.tools : undefined;
 
     // Create an AbortController with timeout (or reuse the caller's)

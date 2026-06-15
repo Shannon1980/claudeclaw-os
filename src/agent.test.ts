@@ -24,7 +24,7 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-import { runAgentWithRetry } from './agent.js';
+import { runAgent, runAgentWithRetry } from './agent.js';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -201,4 +201,54 @@ describe('runAgentWithRetry', () => {
     expect(capturedModels[0]).toBe('claude-opus-4-6');
     expect(capturedModels[1]).toBe('claude-sonnet-4-6');
   }, 15000);
+});
+
+describe('runAgent — extra passthrough (cwd + allowedTools)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mockOk() {
+    mockQuery.mockReturnValue(mockQueryEvents([
+      { type: 'system', subtype: 'init', session_id: 'sess-1' },
+      resultEvent('done'),
+    ])() as any);
+  }
+
+  /** The `options` object handed to the most recent query() call. */
+  function lastOptions(): Record<string, unknown> {
+    const call = mockQuery.mock.calls.at(-1) as unknown[];
+    return (call[0] as Record<string, unknown>).options as Record<string, unknown>;
+  }
+
+  it('uses extra.cwd as the SDK cwd', async () => {
+    mockOk();
+    await runAgent('hi', undefined, noop, undefined, undefined, undefined, undefined, undefined, { cwd: '/custom/proj' });
+    expect(lastOptions().cwd).toBe('/custom/proj');
+  });
+
+  it('falls back to PROJECT_ROOT when extra.cwd and agentCwd are unset', async () => {
+    mockOk();
+    await runAgent('hi', undefined, noop);
+    // PROJECT_ROOT is '/tmp/test' and agentCwd undefined in the config mock.
+    expect(lastOptions().cwd).toBe('/tmp/test');
+  });
+
+  it('passes extra.allowedTools through to the SDK', async () => {
+    mockOk();
+    await runAgent('hi', undefined, noop, undefined, undefined, undefined, undefined, undefined, { allowedTools: ['Read', 'Bash'] });
+    expect(lastOptions().allowedTools).toEqual(['Read', 'Bash']);
+  });
+
+  it('omits allowedTools entirely for an empty array (empty allowlist would block all tools)', async () => {
+    mockOk();
+    await runAgent('hi', undefined, noop, undefined, undefined, undefined, undefined, undefined, { allowedTools: [] });
+    expect('allowedTools' in lastOptions()).toBe(false);
+  });
+
+  it('omits allowedTools entirely when extra is undefined', async () => {
+    mockOk();
+    await runAgent('hi', undefined, noop);
+    expect('allowedTools' in lastOptions()).toBe(false);
+  });
 });

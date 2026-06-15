@@ -166,6 +166,64 @@ export function isAuthorisedSlack(userId: string | undefined): boolean {
 }
 
 /**
+ * Does `text` mention the bot? Slack renders a mention as `<@UID>` or
+ * `<@UID|displayname>`, so we must match both forms — checking only `<@UID>`
+ * misses the labelled variant and lets a mention fall through to the channel
+ * message handler, which then double-fires alongside app_mention.
+ *
+ * When `botUserId` is unknown (auth.test failed at startup), we can't single
+ * out the bot's own id, so we conservatively treat ANY mention token as a
+ * possible bot mention. app_mention fires on the real bot id regardless of
+ * this variable, so deferring here keeps it the sole handler and prevents a
+ * duplicate (double-billed) run — at the cost of skipping a non-bot mention
+ * in that degraded state, which is the safer failure.
+ */
+export function containsBotMention(text: string, botUserId: string): boolean {
+  if (botUserId) {
+    // botUserId is a Slack id (`U…`/`W…`, uppercase alphanumerics) so it needs
+    // no regex escaping, but guard anyway in case the shape ever changes.
+    const id = botUserId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`<@${id}(\\|[^>]*)?>`).test(text);
+  }
+  return /<@[A-Z0-9]+(\|[^>]*)?>/.test(text);
+}
+
+/** The decision for an inbound non-DM (channel) message. */
+export type ChannelRouteDecision =
+  | { action: 'route'; agentId: string; text: string }
+  | { action: 'skip' }
+  | { action: 'dm' };
+
+/**
+ * Pure routing decision for an inbound Slack message — extracted from the
+ * Bolt `app.message` closure so the truth table is unit-testable and the
+ * double-fire guard can't silently regress. Returns:
+ *  - `dm`    — a direct message; the caller runs the normal DM path.
+ *  - `route` — a channel mapped to an agent, addressed to that agent.
+ *  - `skip`  — ignore (unmapped channel, unauthorised user, empty text, or a
+ *              bot mention that app_mention will handle).
+ */
+export function decideChannelRoute(input: {
+  channelType: string | undefined;
+  channel: string;
+  text: string | undefined;
+  userId: string | undefined;
+  botUserId: string;
+  isAuthorised: (userId: string | undefined) => boolean;
+  channelMap: Map<string, string>;
+}): ChannelRouteDecision {
+  const { channelType, channel, text, userId, botUserId, isAuthorised, channelMap } = input;
+  if (channelType === 'im') return { action: 'dm' };
+  const agentId = channelMap.get(channel);
+  if (!agentId) return { action: 'skip' }; // channel not mapped to an agent
+  if (!isAuthorised(userId)) return { action: 'skip' }; // silent in channels
+  const trimmed = (text || '').trim();
+  if (!trimmed) return { action: 'skip' }; // nothing to act on (e.g. bare file share)
+  if (containsBotMention(trimmed, botUserId)) return { action: 'skip' }; // app_mention handles it
+  return { action: 'route', agentId, text: trimmed };
+}
+
+/**
  * Build the transport callbacks that bind the shared message core to a single
  * Slack conversation (a DM channel, or a channel thread for @mentions).
  */
@@ -539,18 +597,24 @@ export function createSlackBot(): SlackBot {
     if (m.subtype && m.subtype !== 'file_share') return;
     if (m.user && m.user === botUserId) return;
 
-    // Non-DM message in a channel mapped to an agent: route it there. Skip
-    // messages that @mention the bot — app_mention handles those (and would
-    // otherwise double-fire). Requires the bot to receive message.channels
-    // events and be a member of the channel.
+    // Non-DM message in a channel mapped to an agent: route it there. Bot
+    // mentions are skipped here so app_mention is the sole handler (otherwise
+    // the message double-fires — a duplicate, double-billed agent run).
+    // Requires the bot to receive message.channels events and be a member of
+    // the channel.
     if (m.channel_type !== 'im') {
-      const routedAgent = channelAgentMap.get(m.channel);
-      if (!routedAgent) return;
-      if (!isAuthorisedSlack(m.user)) return; // silent in channels
-      const text = (m.text || '').trim();
-      if (!text) return;
-      if (botUserId && text.includes(`<@${botUserId}>`)) return; // let app_mention handle
-      routeToChannelAgent(client, m.channel, m.ts, m.user!, routedAgent, text);
+      const decision = decideChannelRoute({
+        channelType: m.channel_type,
+        channel: m.channel,
+        text: m.text,
+        userId: m.user,
+        botUserId,
+        isAuthorised: isAuthorisedSlack,
+        channelMap: channelAgentMap,
+      });
+      if (decision.action === 'route') {
+        routeToChannelAgent(client, m.channel, m.ts, m.user!, decision.agentId, decision.text);
+      }
       return;
     }
 
@@ -589,8 +653,9 @@ export function createSlackBot(): SlackBot {
       // Stay silent in channels for unauthorised users to avoid noise.
       return;
     }
-    // Strip the leading "<@BOTID>" mention token.
-    const text = (e.text || '').replace(/^\s*<@[A-Z0-9]+>\s*/, '').trim();
+    // Strip the leading "<@BOTID>" mention token, including the
+    // "<@BOTID|displayname>" form Slack uses in some workspaces.
+    const text = (e.text || '').replace(/^\s*<@[A-Z0-9]+(\|[^>]*)?>\s*/, '').trim();
     if (!text) return;
 
     // If this channel is dedicated to an agent, route the mention there
@@ -634,15 +699,29 @@ export function createSlackBot(): SlackBot {
     app,
     start: async () => {
       await app.start();
-      try {
-        const auth = await app.client.auth.test();
-        botUserId = (auth.user_id as string) ?? '';
-        const botName = (auth.user as string) ?? 'ClaudeClaw';
-        return { botUserId, botName };
-      } catch (err) {
-        logger.warn({ err }, 'Slack auth.test failed (continuing)');
-        return { botUserId: '', botName: 'ClaudeClaw' };
+      // botUserId drives the channel-routing double-fire guard, so it's worth
+      // retrying: after a reboot the network may not be ready yet (the same
+      // ENOTFOUND window that crash-loops launchd agents). Back off briefly
+      // before giving up.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const auth = await app.client.auth.test();
+          botUserId = (auth.user_id as string) ?? '';
+          const botName = (auth.user as string) ?? 'ClaudeClaw';
+          return { botUserId, botName };
+        } catch (err) {
+          if (attempt < 3) {
+            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+            continue;
+          }
+          // Without botUserId, decideChannelRoute defers any mention to
+          // app_mention (still correct, just over-cautious for non-bot
+          // mentions). Log at error so the degraded state is visible.
+          logger.error({ err }, 'Slack auth.test failed after retries; botUserId unknown (channel routing degraded)');
+          return { botUserId: '', botName: 'ClaudeClaw' };
+        }
       }
+      return { botUserId: '', botName: 'ClaudeClaw' };
     },
     stop: async () => {
       await app.stop();

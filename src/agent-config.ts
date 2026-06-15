@@ -236,13 +236,16 @@ export function resolveAgentModel(model: string | undefined): string | undefined
 
 /**
  * Build the Slack channel → agent id routing map from every configured
- * agent's `slack_channel`. Last-writer-wins if two agents claim the same
- * channel (and we warn). Called once at createSlackBot startup; the bot
+ * agent's `slack_channel`. When two agents claim the same channel the winner
+ * is the last in sorted-id order (deterministic across machines — readdir
+ * order is not) and we warn. Called once at createSlackBot startup; the bot
  * must restart to pick up edits.
  */
 export function getSlackChannelMap(): Map<string, string> {
   const map = new Map<string, string>();
-  for (const id of listAgentIds()) {
+  // Sort ids so duplicate-channel resolution is stable regardless of the
+  // filesystem's readdir order (which varies dev vs prod).
+  for (const id of [...listAgentIds()].sort()) {
     try {
       const cfg = loadAgentConfig(id);
       const ch = cfg.slackChannel?.trim();
@@ -253,8 +256,12 @@ export function getSlackChannelMap(): Map<string, string> {
         console.warn(`[slack] channel ${ch} claimed by both "${existing}" and "${id}"; using "${id}"`);
       }
       map.set(ch, id);
-    } catch {
-      // Skip agents whose config fails to load.
+    } catch (err) {
+      // A malformed agent.yaml must not silently vanish from routing with no
+      // signal — a user posting in that agent's channel would just get
+      // nothing. Log the skip so the missing route is debuggable.
+      // eslint-disable-next-line no-console
+      console.warn(`[slack] skipping agent "${id}" for channel routing: config failed to load:`, err instanceof Error ? err.message : err);
     }
   }
   return map;
