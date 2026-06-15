@@ -21,12 +21,16 @@ CONFIG_DIR="${CLAUDECLAW_CONFIG:-$HOME/.claudeclaw}"
 
 find_agent_yaml() {
   local id="$1"
+  local id_lower
+  id_lower="$(echo "$id" | tr '[:upper:]' '[:lower:]')"
   # Check external config dir first (case-insensitive match)
   for d in "$CONFIG_DIR/agents"/*/; do
     local base
     base="$(basename "$d")"
-    if [[ "${base,,}" == "${id,,}" ]] && [[ -f "$d/agent.yaml" ]]; then
-      echo "$d/agent.yaml"
+    local base_lower
+    base_lower="$(echo "$base" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$base_lower" == "$id_lower" ]] && [[ -f "$d/agent.yaml" ]]; then
+      echo "${d}agent.yaml"
       return 0
     fi
   done

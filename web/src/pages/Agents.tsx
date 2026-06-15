@@ -6,7 +6,7 @@ import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
 import { Modal } from '@/components/Modal';
 import { ModelPicker } from '@/components/ModelPicker';
-import { CLAUDE_MODELS } from '@claudeclaw/models';
+import { claudeModelLabel } from '@claudeclaw/models';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { AgentDetail } from '@/components/AgentDetail';
 import { AgentSuggestionBadge, AgentSuggestionModal, useAgentSuggestions, type AgentSuggestion } from '@/components/AgentSuggestions';
@@ -412,28 +412,50 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
   const [creating, setCreating] = useState(false);
   const [activating, setActivating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tokenStatus, setTokenStatus] = useState<{ ok?: boolean; error?: string; username?: string } | null>(null);
+  const idInputRef = useRef<HTMLInputElement>(null);
 
   const debouncedId = useDebouncedValue(id, 350);
   const debouncedToken = useDebouncedValue(botToken, 600);
 
-  // Apply suggestion-driven prefill when the wizard opens with one.
-  // We watch on open transition to avoid clobbering user edits if they
-  // tweak the prefilled fields before clicking Next.
+  function resetFields(applyPrefill = false) {
+    setStep(1);
+    setId(applyPrefill && prefill ? prefill.id : '');
+    setName(applyPrefill && prefill ? prefill.name : '');
+    setNameTouched(applyPrefill && !!prefill);
+    setDescription(applyPrefill && prefill ? prefill.description : '');
+    setModel('claude-sonnet-4-6');
+    setTemplate('');
+    setBotToken('');
+    setCustomClaudeMd('');
+    setCustomAgentYaml('');
+    setCreatedId(null);
+    setCreatedSummary(null);
+    setError(null);
+    setTokenStatus(null);
+  }
+
+  // Fresh form every time the wizard opens (with optional suggestion prefill).
   useEffect(() => {
-    if (open && prefill) {
-      setId(prefill.id);
-      setName(prefill.name);
-      setNameTouched(true); // suppress the auto-generate-name effect
-      setDescription(prefill.description);
-    }
+    if (open) resetFields(true);
   }, [open, prefill?.id]);
 
-  // Reset on close.
+  // Focus the ID field when the wizard opens. Avoids the browser warning
+  // from the autofocus attribute when the trigger button still has focus.
+  useEffect(() => {
+    if (!open || step !== 1) return;
+    queueMicrotask(() => idInputRef.current?.focus());
+  }, [open, step]);
+
+  // Auto-generate display name from id until the user edits name manually.
+  useEffect(() => {
+    if (nameTouched || !id || name) return;
+    const auto = id.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    setName(auto);
+  }, [id, name, nameTouched]);
+
   function close() {
-    setStep(1); setId(''); setName(''); setNameTouched(false); setDescription('');
-    setModel('claude-sonnet-4-6'); setTemplate(''); setBotToken('');
-    setCustomClaudeMd(''); setCustomAgentYaml('');
-    setCreatedId(null); setCreatedSummary(null); setError(null);
+    resetFields(false);
     onClose();
   }
 
@@ -443,7 +465,6 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
   );
 
   // Live token validation.
-  const [tokenStatus, setTokenStatus] = useState<{ ok?: boolean; error?: string; username?: string } | null>(null);
   useEffect(() => {
     if (!debouncedToken || !debouncedToken.includes(':')) { setTokenStatus(null); return; }
     let cancelled = false;
@@ -455,12 +476,6 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
 
   // Templates list.
   const templates = useFetch<{ templates: Template[] }>('/api/agents/templates');
-
-  // Sync auto name from id when user hasn't edited name.
-  if (!nameTouched && id && !name) {
-    const auto = id.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-    if (name !== auto) setTimeout(() => setName(auto), 0);
-  }
 
   const idValid = !!debouncedId && idCheck.data?.ok === true;
   const tokenValid = tokenStatus?.ok === true;
@@ -577,11 +592,11 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
         <div class="space-y-3">
           <Field label="Agent ID" hint="Lowercase letters, numbers, dash/underscore. 30 chars max.">
             <input
+              ref={idInputRef}
               type="text"
               value={id}
               onInput={(e) => setId((e.target as HTMLInputElement).value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
               placeholder="research"
-              autoFocus
               class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
             />
             {debouncedId && idCheck.data && !idCheck.data.ok && (
@@ -614,15 +629,7 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
 
           <div class="grid grid-cols-2 gap-3">
             <Field label="Model">
-              <select
-                value={model}
-                onChange={(e) => setModel((e.target as HTMLSelectElement).value)}
-                class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-              >
-                {CLAUDE_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>{m.label}</option>
-                ))}
-              </select>
+              <ModelPicker value={model} onSelect={setModel} size="md" />
             </Field>
             <Field label="Template">
               <select
@@ -642,6 +649,11 @@ function CreateAgentWizard({ open, onClose, onCreated, prefill }: CreateAgentWiz
 
       {step === 2 && (
         <div class="space-y-3">
+          <div class="flex items-center justify-between gap-2 rounded border border-[var(--color-border)] bg-[var(--color-elevated)] px-3 py-2 text-[12px]">
+            <span class="text-[var(--color-text-muted)]">Model</span>
+            <span class="font-medium text-[var(--color-text)]">{claudeModelLabel(model)}</span>
+          </div>
+
           <Field
             label="Telegram bot token (optional)"
             hint="Leave empty for a delegation-only agent: it runs through the main bot via @agentId: or /delegate, no Telegram bot needed. Add a token only if you want this agent as its own standalone Telegram bot."

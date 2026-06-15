@@ -29,7 +29,9 @@ export function Modal({ open, onClose, title, width = 480, children, footer }: P
   return (
     <div
       class="fixed inset-0 z-[90] flex items-start justify-center pt-[10vh] bg-black/50"
-      onClick={onClose}
+      // mousedown — not click — so native <select> menus don't synthesize a
+      // backdrop click when the user picks an option and the menu closes.
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
         class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl shadow-2xl flex flex-col max-h-[80vh]"
@@ -78,7 +80,7 @@ export function Drawer({ open, onClose, title, children }: Props) {
           'fixed inset-0 z-[80] bg-black/50 transition-opacity',
           open ? 'opacity-100' : 'opacity-0 pointer-events-none',
         ].join(' ')}
-        onClick={onClose}
+        onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
       />
       <div
         class={[

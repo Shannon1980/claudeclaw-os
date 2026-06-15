@@ -101,6 +101,10 @@ warroom/music.mp3
 warroom/avatars/backup-*/
 warroom/avatars/photoreal-backup/
 
+# Brand context — per-brand voice profiles, positioning, ICP, samples.
+# Contains business-specific content that shouldn't be in a public repo.
+brand_context/
+
 # Personal config — lives in CLAUDECLAW_CONFIG (default ~/.claudeclaw)
 CLAUDE.md
 agents/*/agent.yaml
