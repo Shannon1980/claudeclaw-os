@@ -22,6 +22,8 @@ import {
   getDashboardMemoriesList,
   getDashboardMemoryTimeline,
 } from './db.js';
+import path from 'path';
+import { STORE_DIR, PROJECT_ROOT } from './config.js';
 
 describe('database', () => {
   beforeEach(() => {
@@ -408,6 +410,38 @@ describe('database', () => {
       expect(timeline.length).toBeGreaterThanOrEqual(1);
       expect(timeline[0]).toHaveProperty('date');
       expect(timeline[0]).toHaveProperty('count');
+    });
+  });
+
+  // ── Phase 4: memory agent scoping + single store ───────────────────
+  describe('memory agent scoping (MEM-02)', () => {
+    it('getRecentHighImportanceMemories scopes by agent_id (no cross-agent leakage)', () => {
+      saveStructuredMemory('chat1', 'raw a', 'aos shared topic note', [], ['shared'], 0.8, 'conversation', 'aos');
+      saveStructuredMemory('chat1', 'raw m', 'main shared topic note', [], ['shared'], 0.8, 'conversation', 'main');
+
+      const aos = getRecentHighImportanceMemories('chat1', 10, 'aos');
+      const main = getRecentHighImportanceMemories('chat1', 10, 'main');
+      const both = getRecentHighImportanceMemories('chat1', 10);
+
+      expect(aos.map((m) => m.summary)).toEqual(['aos shared topic note']);
+      expect(main.map((m) => m.summary)).toEqual(['main shared topic note']);
+      expect(both.length).toBe(2);
+    });
+
+    it('searchMemories scopes by agent_id for the same chat_id', () => {
+      saveStructuredMemory('chat1', 'raw a', 'aos likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'aos');
+      saveStructuredMemory('chat1', 'raw m', 'main likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'main');
+
+      const aos = searchMemories('chat1', 'TypeScript', 5, undefined, 'aos');
+      expect(aos.map((m) => m.summary)).toEqual(['aos likes TypeScript']);
+    });
+  });
+
+  describe('memory store path (MEM-01)', () => {
+    it('resolves a single store under PROJECT_ROOT, never under agentic-os', () => {
+      expect(path.isAbsolute(STORE_DIR)).toBe(true);
+      expect(STORE_DIR.startsWith(PROJECT_ROOT)).toBe(true);
+      expect(STORE_DIR.includes('agentic-os')).toBe(false);
     });
   });
 });

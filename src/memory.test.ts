@@ -134,6 +134,27 @@ describe('buildMemoryContext', () => {
     expect(surfacedMemoryIds).toContain(20);
     expect(surfacedMemorySummaries.get(10)).toBe('A test memory');
   });
+
+  it('forwards strictAgentId to searchMemories and getRecentHighImportanceMemories (per-agent scoping)', async () => {
+    mockSearchMemories.mockReturnValue([]);
+    mockGetRecentHighImportance.mockReturnValue([]);
+
+    await buildMemoryContext('chat1', 'q', 'aos', { strictAgentId: 'aos' });
+
+    // searchMemories agentId is the 5th positional arg; getRecentHighImportanceMemories the 3rd.
+    expect(mockSearchMemories.mock.calls[0][4]).toBe('aos');
+    expect(mockGetRecentHighImportance.mock.calls[0][2]).toBe('aos');
+  });
+
+  it('leaves recall unscoped (agentId undefined) when strictAgentId is not set (COMPAT-02)', async () => {
+    mockSearchMemories.mockReturnValue([]);
+    mockGetRecentHighImportance.mockReturnValue([]);
+
+    await buildMemoryContext('chat1', 'q', 'main');
+
+    expect(mockSearchMemories.mock.calls[0][4]).toBeUndefined();
+    expect(mockGetRecentHighImportance.mock.calls[0][2]).toBeUndefined();
+  });
 });
 
 describe('saveConversationTurn', () => {
