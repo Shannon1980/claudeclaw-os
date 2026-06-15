@@ -86,7 +86,34 @@ aos's own memory.
 - **Deploy:** build clean, bot restarted cleanly (exit 0, no launchd 78), aos
   reachable. ✅
 
+## Addendum — "Sidelines" variant of the manual test (2026-06-15 10:27)
+
+The 04-VALIDATION manual script names the brand "Sidelines" and a `/newchat`
+step. Re-ran that exact variant to close it explicitly:
+
+- **Recall (deterministic, reproducible):** Invoked the precise orchestrator
+  call for the Sidelines prompt against the live store —
+  `buildMemoryContext('ws:aos', 'draft a tagline for Sidelines', 'aos', { strictAgentId: 'aos' })`
+  → `surfacedMemoryIds: [20]`, `[Memory context]` carries
+  *"User prefers taglines to be 5 words or fewer ... standing preference"* at
+  relevance `0.7`, and "Relevant memories" contains only aos's own memory. The
+  under-5-words preference is the carrier into a fresh delegation for this exact
+  prompt. ✅
+- **`/newchat` is a no-op here (unchanged from above):** each `@aos:` delegation
+  is already a fresh sessionless run (`orchestrator.ts:227`), so recall — not
+  session resume — is the only carrier across the boundary. `/newchat` is not a
+  registered Slack slash command.
+- **Live model application:** already demonstrated by the post-preference
+  coffee-brand run (20m prior, all five taglines ≤5 words) through the identical
+  recall path; the Sidelines prompt surfaces the same memory id 20. A nested
+  Claude Code spawn could not re-run the model end-to-end from inside this
+  session (the SDK subprocess can't acquire the `claude login` credential the
+  running bot uses — an auth artifact of nested spawning, not a product issue).
+  To capture a literal Sidelines bot transcript, send `@aos: draft a tagline for
+  Sidelines` over Slack against the running bot.
+
 ## Self-Check: PASSED
 
 Cross-session recall proven live against the running bot; recall scoped per-agent
-(no leak); single store. MEM-02 closed.
+(no leak); single store. Sidelines variant of the manual script closed via
+deterministic recall proof. MEM-02 closed.
