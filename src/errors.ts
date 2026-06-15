@@ -168,13 +168,25 @@ function sessionLimitError(text: string, raw: Error): AgentError {
 export function classifyError(
   err: unknown,
   contextTokens?: number,
-  resultError?: { isError?: boolean; apiErrorStatus?: string; resultText?: string | null },
+  resultError?: {
+    isError?: boolean;
+    apiErrorStatus?: string;
+    resultText?: string | null;
+    assistantText?: string | null;
+  },
 ): AgentError {
   // Pass through already-classified errors
   if (err instanceof AgentError) return err;
 
   const raw = err instanceof Error ? err : new Error(String(err));
   const text = raw.message;
+
+  // A session/usage cap notice ("You've hit your session limit") is printed by
+  // the CLI to stdout / the last assistant message, not necessarily to
+  // err.message or the result envelope. Captured assistant text is threaded in
+  // here so the cap is recognised before it falls through to the crash or auth
+  // defaults below.
+  const assistantText = resultError?.assistantText ?? '';
 
   // A `result` event arrived with is_error:true *before* the subprocess
   // exited non-zero. The exit code alone looks like a crash (handled below),
@@ -184,7 +196,7 @@ export function classifyError(
   // then exit code 1. Classify from the API error detail so the user gets an
   // actionable message instead of an endless "subprocess crashed. Retrying...".
   if (resultError?.isError) {
-    const apiText = `${resultError.apiErrorStatus ?? ''} ${resultError.resultText ?? ''}`.trim();
+    const apiText = `${resultError.apiErrorStatus ?? ''} ${resultError.resultText ?? ''} ${assistantText}`.trim();
     // Check session/usage caps before rate_limit and the auth default: a
     // claude.ai cap can surface as a 429 but is an account cap, not credentials.
     if (matchesAny(apiText, SESSION_LIMIT_PATTERNS)) {
@@ -230,6 +242,13 @@ export function classifyError(
         + 'If ANTHROPIC_API_KEY is set in .env, remove or refresh it so the bot falls '
         + 'back to `claude login`, then restart.',
     }, raw);
+  }
+
+  // A usage cap can also surface as a bare exit-1 with no is_error result: the
+  // cap text lands only in the subprocess stdout / last assistant message. Check
+  // it before the exit-code branches so it isn't misread as a crash to retry.
+  if (assistantText && matchesAny(assistantText, SESSION_LIMIT_PATTERNS)) {
+    return sessionLimitError(assistantText, raw);
   }
 
   // Context exhaustion: process exits with code 1 when context is full
