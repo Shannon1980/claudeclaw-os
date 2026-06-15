@@ -48,7 +48,7 @@ vi.mock('./logger.js', () => ({
 import { runAgentWithRetry } from './agent.js';
 import { resolveAgentRuntime, isWorkspaceAgent } from './agent-config.js';
 import { buildMemoryContext } from './memory.js';
-import { delegateToAgent } from './orchestrator.js';
+import { delegateToAgent, parseDelegation, initOrchestrator } from './orchestrator.js';
 
 // runAgentWithRetry positional signature:
 // (message, sessionId, onTyping, onProgress, model, abortController,
@@ -138,5 +138,55 @@ describe('delegateToAgent', () => {
 
     expect(vi.mocked(buildMemoryContext).mock.calls[0][0]).toBe('caller-chat-99');
     expect(vi.mocked(buildMemoryContext).mock.calls[0][3]).toEqual({ strictAgentId: 'aos' });
+  });
+});
+
+describe('parseDelegation', () => {
+  // The no-colon form (`@aos prompt`) checks the module registry, so load it
+  // from the mocked agent-config (listAgentIds → ['aos']).
+  beforeEach(() => {
+    initOrchestrator();
+  });
+
+  it('parses the @agentId: colon form', () => {
+    expect(parseDelegation('@aos: remember the Q3 launch date is October 14')).toEqual({
+      agentId: 'aos',
+      prompt: 'remember the Q3 launch date is October 14',
+    });
+  });
+
+  it('parses the /delegate form', () => {
+    expect(parseDelegation('/delegate aos draw the architecture')).toEqual({
+      agentId: 'aos',
+      prompt: 'draw the architecture',
+    });
+  });
+
+  it('parses the bare @agentId form only for a known agent', () => {
+    expect(parseDelegation('@aos draw it')).toEqual({ agentId: 'aos', prompt: 'draw it' });
+    // Unknown agent must NOT be treated as a delegation (falls through to main).
+    expect(parseDelegation('@nope draw it')).toBeNull();
+  });
+
+  // Regression: a stray leading space/newline used to break `^@` and silently
+  // misroute "@aos: ..." to the main agent. Anchoring on trimmed text fixes it.
+  it('tolerates leading whitespace before @agentId: (misroute regression)', () => {
+    expect(parseDelegation('  @aos: remember the Q3 launch date is October 14')).toEqual({
+      agentId: 'aos',
+      prompt: 'remember the Q3 launch date is October 14',
+    });
+    expect(parseDelegation('\n@aos: hi')).toEqual({ agentId: 'aos', prompt: 'hi' });
+  });
+
+  it('tolerates leading whitespace before /delegate', () => {
+    expect(parseDelegation('  /delegate aos do a thing')).toEqual({
+      agentId: 'aos',
+      prompt: 'do a thing',
+    });
+  });
+
+  it('returns null for plain messages with no delegation syntax', () => {
+    expect(parseDelegation('remember the Q3 launch date is October 14')).toBeNull();
+    expect(parseDelegation('email aos@example.com about the launch')).toBeNull();
   });
 });
