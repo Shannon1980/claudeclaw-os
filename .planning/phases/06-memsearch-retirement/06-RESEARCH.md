@@ -336,14 +336,16 @@ it('the recall module references no memsearch / second-index path', () => {
 
 **A3 is the one to surface to the user** — it determines whether the "terminal work captured then recalled" half of D-05 is runnable as-is or needs the Stop hook re-wired first.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Is the capture/projection hook wiring currently live in agentic-os?**
+   - **RESOLVED — verified NOT committed** (`git grep capture-cli` across all agentic-os revisions is empty; the committed Stop hook runs only `session-sync-stop.js`). Folded into Plan 06-02 Task 2 (D-07): wire + commit `dist/capture-cli.js` into the agentic-os Stop hook before the capture half of the live proof.
    - What we know: 05-02 SUMMARY claims the Stop hook runs `capture-cli.js` and SessionStart loads the projection; the current on-disk settings.json does NOT (only `session-sync-stop.js` / `load-memory-snapshot.js`).
    - What's unclear: whether it was reverted, stashed, or never landed in this checkout.
    - Recommendation: Planner asks the user / inspects the deployed config. If unwired, either re-wire the Stop hook as a prerequisite task, or scope the live D-05 round-trip to: bot writes a fact (@aos:) → terminal recalls it via recall-CLI (recall direction only), which is the core MEM-05 claim anyway.
 
 2. **Does `scripts/lib/memory-meta.sh` (coverage helper, AGENTS.md line 228) depend on memsearch?**
+   - **RESOLVED — grep of `memory-meta.sh` shows it references the `.memsearch/memory/` directory only as file paths, NOT any `memsearch` command invocation.** Safe to keep its AGENTS.md line against the frozen archive.
    - What we know: it is invoked for "exact coverage" in partial/absent recall responses.
    - What's unclear: whether it shells out to `memsearch stats`/`index`.
    - Recommendation: Planner reads `scripts/lib/memory-meta.sh`; if it calls memsearch, drop it from the rewritten Tier-1/coverage instructions (it would otherwise hit a dormant index). If it only stats files, it can stay.
