@@ -41,7 +41,7 @@ created: 2026-06-15
 | 4-01-01 | 01 | 1 | MEM-02 (scoping) | unit | `npx vitest run src/memory.test.ts` (recall with strictAgentId excludes other agents' memories) | ⬜ pending |
 | 4-01-02 | 01 | 1 | MEM-02 (scoping) | unit | `npx vitest run src/orchestrator.test.ts` OR a memory-scope test asserting the delegated recall passes strictAgentId | ⬜ pending |
 | 4-01-03 | 01 | 1 | MEM-01 | structural | assert single DB resolves from PROJECT_ROOT (path test) and no second store path is constructed from cwd | ⬜ pending |
-| 4-02-01 | 02 | 2 | MEM-02 | manual | live two-session transcript: write a standing preference via @aos: in session A, recall it in session B after /newchat | ⬜ pending |
+| 4-02-01 | 02 | 2 | MEM-02 | manual | live two-session transcript: write a standing preference via @aos: in session A, recall it in session B (fresh delegation; /newchat unnecessary — see 04-02-SUMMARY) | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red*
 
@@ -70,7 +70,7 @@ created: 2026-06-15
 - [ ] Strict per-agent recall unit test green
 - [ ] Delegation recall passes strictAgentId (test green)
 - [ ] MEM-01 single-store assertion green
-- [ ] Live two-session MEM-02 transcript captured
+- [x] Live two-session MEM-02 transcript captured (04-02-SUMMARY.md)
 - [ ] Full suite at baseline
 - [ ] `nyquist_compliant: true` at sign-off
 
