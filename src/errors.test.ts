@@ -203,6 +203,51 @@ describe('classifyError', () => {
     expect(classified.recovery.userMessage).toContain('claude login');
   });
 
+  // ── Session / usage caps (account-level, not credentials) ──────────
+
+  it('classifies a claude.ai session limit message as session_limit', () => {
+    const classified = classifyError(new Error("You've hit your session limit · resets 9:50pm"));
+    expect(classified.category).toBe('session_limit');
+    expect(classified.recovery.shouldRetry).toBe(false);
+    expect(classified.recovery.userMessage).toContain('usage cap');
+    expect(classified.recovery.userMessage).not.toContain('claude login');
+    expect(classified.recovery.userMessage).not.toContain('ANTHROPIC_API_KEY');
+  });
+
+  it('includes the reset time when present', () => {
+    const classified = classifyError(new Error("You've hit your session limit · resets 9:50pm"));
+    expect(classified.recovery.userMessage).toContain('resets 9:50pm');
+  });
+
+  it('omits the reset clause when no time is present', () => {
+    const classified = classifyError(new Error('usage limit reached'));
+    expect(classified.category).toBe('session_limit');
+    expect(classified.recovery.userMessage).not.toContain('resets ');
+  });
+
+  it('classifies "usage limit" as session_limit, not billing', () => {
+    const classified = classifyError(new Error('Your usage limit has been reached'));
+    expect(classified.category).toBe('session_limit');
+  });
+
+  it('still classifies genuine credit/billing errors as billing', () => {
+    const classified = classifyError(new Error('insufficient credits remaining'));
+    expect(classified.category).toBe('billing');
+  });
+
+  it('classifies a session-limit result error as session_limit, not auth', () => {
+    // The discovered failure mode: a delegated run gets a session cap but was
+    // mislabeled a credentials problem. The cap must win over the auth default.
+    const classified = classifyError(
+      new Error('Claude Code process exited with code 1'),
+      undefined,
+      { isError: true, resultText: "You've hit your session limit · resets 9:50pm" },
+    );
+    expect(classified.category).toBe('session_limit');
+    expect(classified.recovery.userMessage).toContain('usage cap');
+    expect(classified.recovery.userMessage).not.toContain('claude login');
+  });
+
   it('does NOT classify a plain exit-1 (no result error) as auth', () => {
     // Without an is_error result, a bare exit-1 is still a subprocess crash.
     const classified = classifyError(new Error('exited with code 1'));

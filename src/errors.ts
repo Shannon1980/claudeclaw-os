@@ -9,6 +9,7 @@
 export type ErrorCategory =
   | 'auth'
   | 'rate_limit'
+  | 'session_limit'
   | 'context_exhausted'
   | 'timeout'
   | 'subprocess_crash'
@@ -70,8 +71,21 @@ const BILLING_PATTERNS = [
   'payment required',
   'billing',
   'quota exceeded',
-  'usage limit',
   '402',
+];
+
+// claude.ai account-level caps (Pro/Max plans). The CLI prints things like
+// "You've hit your session limit · resets 9:50pm" or "usage limit reached".
+// This is an account usage cap, NOT a credentials or billing problem, so it
+// gets its own category to avoid sending debugging down the wrong path.
+const SESSION_LIMIT_PATTERNS = [
+  'session limit',
+  'usage limit',
+  'hit your limit',
+  'reached your limit',
+  'limit reached',
+  'limit will reset',
+  'limit resets',
 ];
 
 const OVERLOADED_PATTERNS = [
@@ -115,6 +129,35 @@ function matchesAny(text: string, patterns: string[]): boolean {
   return patterns.some((p) => lower.includes(p));
 }
 
+/**
+ * Pull a reset time out of a session-limit message if the CLI included one,
+ * e.g. "resets 9:50pm" or "resets at 21:50". Returns null when absent.
+ */
+function extractResetTime(text: string): string | null {
+  const match = text.match(/reset[s]?\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * Build the AgentError for a claude.ai account usage cap. Account caps are not
+ * retryable here (the cap resets on the account's clock, not in seconds), and
+ * they are explicitly NOT a credentials problem.
+ */
+function sessionLimitError(text: string, raw: Error): AgentError {
+  const resetTime = extractResetTime(text);
+  const resetClause = resetTime ? ` (resets ${resetTime})` : '';
+  return new AgentError('session_limit', {
+    shouldRetry: false,
+    shouldNewChat: false,
+    shouldSwitchModel: false,
+    retryAfterMs: 0,
+    userMessage:
+      `Claude session/usage limit reached${resetClause}. `
+      + 'This is an account usage cap, not a credentials problem. '
+      + 'Wait for the limit to reset, or switch to an API key with available credits.',
+  }, raw);
+}
+
 // ── Classification ──────────────────────────────────────────────────
 
 /**
@@ -142,6 +185,11 @@ export function classifyError(
   // actionable message instead of an endless "subprocess crashed. Retrying...".
   if (resultError?.isError) {
     const apiText = `${resultError.apiErrorStatus ?? ''} ${resultError.resultText ?? ''}`.trim();
+    // Check session/usage caps before rate_limit and the auth default: a
+    // claude.ai cap can surface as a 429 but is an account cap, not credentials.
+    if (matchesAny(apiText, SESSION_LIMIT_PATTERNS)) {
+      return sessionLimitError(apiText, raw);
+    }
     if (matchesAny(apiText, RATE_LIMIT_PATTERNS)) {
       return new AgentError('rate_limit', {
         shouldRetry: true,
@@ -214,6 +262,14 @@ export function classifyError(
       retryAfterMs: 2000,
       userMessage: 'Claude Code subprocess exited unexpectedly. Retrying...',
     }, raw);
+  }
+
+  // Session/usage caps come before auth and rate_limit: the claude.ai CLI
+  // prints "You've hit your session limit" with no auth signal, and a cap can
+  // also arrive as a 429. Classifying it as auth would send the user chasing a
+  // credentials problem that doesn't exist.
+  if (matchesAny(text, SESSION_LIMIT_PATTERNS)) {
+    return sessionLimitError(text, raw);
   }
 
   if (matchesAny(text, AUTH_PATTERNS)) {
