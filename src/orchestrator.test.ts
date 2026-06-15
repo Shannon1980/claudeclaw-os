@@ -27,6 +27,11 @@ vi.mock('./agent-config.js', () => ({
     systemPrompt: undefined,
     mcpAllowlist: ['firecrawl'],
   })),
+  // Workspace-pool helpers (Phase 5). Default: aos IS a workspace agent so
+  // delegated recall keys on the shared ws:aos pool. Individual tests override
+  // isWorkspaceAgent to exercise the non-workspace (COMPAT-02) branch.
+  isWorkspaceAgent: vi.fn(() => true),
+  workspaceMemoryKey: vi.fn((id: string) => `ws:${id}`),
 }));
 vi.mock('./db.js', () => ({
   logToHiveMind: vi.fn(),
@@ -41,7 +46,7 @@ vi.mock('./logger.js', () => ({
 }));
 
 import { runAgentWithRetry } from './agent.js';
-import { resolveAgentRuntime } from './agent-config.js';
+import { resolveAgentRuntime, isWorkspaceAgent } from './agent-config.js';
 import { buildMemoryContext } from './memory.js';
 import { delegateToAgent } from './orchestrator.js';
 
@@ -111,6 +116,27 @@ describe('delegateToAgent', () => {
 
     // buildMemoryContext's 4th arg is the options object; strict scoping
     // constrains recall to this agent's own memories.
+    expect(vi.mocked(buildMemoryContext).mock.calls[0][3]).toEqual({ strictAgentId: 'aos' });
+  });
+
+  it('recalls a workspace agent from the shared ws:<agentId> pool, not the caller chat_id', async () => {
+    // Unified-pool decision: a workspace agent reads the shared pool so the
+    // bot surfaces what a terminal session captured. strictAgentId stays = the
+    // agent id exactly as Phase 4 left it.
+    vi.mocked(isWorkspaceAgent).mockReturnValue(true);
+
+    await delegateToAgent('aos', 'do a thing', 'caller-chat-99', 'main');
+
+    expect(vi.mocked(buildMemoryContext).mock.calls[0][0]).toBe('ws:aos');
+    expect(vi.mocked(buildMemoryContext).mock.calls[0][3]).toEqual({ strictAgentId: 'aos' });
+  });
+
+  it('recalls a non-workspace agent from the caller chat_id unchanged (COMPAT-02)', async () => {
+    vi.mocked(isWorkspaceAgent).mockReturnValue(false);
+
+    await delegateToAgent('aos', 'do a thing', 'caller-chat-99', 'main');
+
+    expect(vi.mocked(buildMemoryContext).mock.calls[0][0]).toBe('caller-chat-99');
     expect(vi.mocked(buildMemoryContext).mock.calls[0][3]).toEqual({ strictAgentId: 'aos' });
   });
 });

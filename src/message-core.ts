@@ -27,6 +27,7 @@ import { scanForSecrets, redactSecrets } from './exfiltration-guard.js';
 import { trackUsage, getRateStatus } from './rate-tracker.js';
 import { buildCostFooter } from './cost-footer.js';
 import { parseDelegation, delegateToAgent } from './orchestrator.js';
+import { isWorkspaceAgent, workspaceMemoryKey } from './agent-config.js';
 import { maybeStartChatTask, finishChatTask } from './chat-task-tracker.js';
 import { emitChatEvent, setProcessing, setActiveAbort, ChatEventSource } from './state.js';
 import { checkKillPhrase, executeEmergencyKill, audit } from './security.js';
@@ -223,7 +224,16 @@ export async function processUserMessage(
         // created from this conversation are tagged with the correct agent.
         // Log the raw response (with marker) to match the main path's
         // rawResponse semantics; the marker is stripped only for display.
-        saveConversationTurn(chatIdStr, delegation.prompt, response, undefined, delegation.agentId);
+        //
+        // For a workspace agent, save into the SHARED workspace pool
+        // (`ws:<agentId>`) instead of the caller's chat_id so the bot's
+        // delegated turns and a terminal session's captured turns land in one
+        // pool (unified-pool decision). Non-workspace agents and the main path
+        // keep the caller chatId unchanged (COMPAT-02).
+        const saveChatId = isWorkspaceAgent(delegation.agentId)
+          ? workspaceMemoryKey(delegation.agentId)
+          : chatIdStr;
+        saveConversationTurn(saveChatId, delegation.prompt, response, undefined, delegation.agentId);
       }
       emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: delegatedText, source: cb.source });
 

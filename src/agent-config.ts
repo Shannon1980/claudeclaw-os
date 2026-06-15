@@ -186,6 +186,44 @@ export function loadAgentConfig(agentId: string): AgentConfig {
   };
 }
 
+/**
+ * Stable, deterministic memory pool key for a workspace agent.
+ *
+ * Both modes (a terminal Claude Code session captured via the Stop hook AND
+ * the bot's delegated `@aos:` turns) must read/write ONE shared memory pool so
+ * they behave as one assistant (the locked unified-pool decision). Memories are
+ * normally keyed by the caller's chat_id, which differs per chat and never
+ * intersects the terminal. Keying both halves on this stable value
+ * (`ws:<agentId>`) collapses them onto a single pool.
+ *
+ * Used by delegation save (message-core), delegation recall (orchestrator),
+ * the memory projection, and the capture CLI — all four MUST resolve their
+ * chat_id through this helper so they agree on one pool.
+ */
+export function workspaceMemoryKey(agentId: string): string {
+  return `ws:${agentId}`;
+}
+
+/**
+ * True when the agent is a workspace agent: its config has a `project_dir`
+ * that exists on disk. Reuses the EXACT predicate `resolveAgentRuntime` uses
+ * to pick the cwd (`config.projectDir && fs.existsSync(config.projectDir)`) so
+ * the two never diverge. Returns false (never throws) when the config cannot
+ * be loaded — callers treat an unknown/broken agent as non-workspace.
+ *
+ * Only workspace agents are rerouted onto the shared pool; non-workspace agents
+ * and the main (non-delegated) path keep their caller chat_id unchanged
+ * (COMPAT-02).
+ */
+export function isWorkspaceAgent(agentId: string): boolean {
+  try {
+    const config = loadAgentConfig(agentId);
+    return Boolean(config.projectDir && fs.existsSync(config.projectDir));
+  } catch {
+    return false;
+  }
+}
+
 // ── Slack channel routing ────────────────────────────────────────────
 
 /** Resolved per-agent runtime used to run a sub-agent in-process for a
