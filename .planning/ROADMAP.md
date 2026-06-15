@@ -83,7 +83,11 @@ Plans:
   2. Memory writes/reads are scoped correctly to the workspace agent (no cross-agent leakage into the workspace agent's recall)
   3. The memory pipeline (ingest, embeddings, recall) runs against `store/claudeclaw.db` with no second store involved
   4. Any schema change required is delivered as a versioned migration under `migrations/<version>/` and the test suite passes
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — strictAgentId scoping on the delegated recall call + Wave 0 unit tests (strict per-agent recall, single-store path assertion, full suite)
+- [ ] 04-02-PLAN.md — deploy + restart, live two-session MEM-02 recall proof (human-verify)
 
 ### Phase 5: Memory Projection & Capture
 **Goal**: Recent ClaudeClaw memories render into agentic-os daily `context/memory/*.md` as a derived projection (via the decryption-safe path), and terminal-session work is captured back into SQLite so the bot sees it.
@@ -169,7 +173,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 1. Afternoon Win | 2/2 | Complete   | 2026-06-14 |
 | 2. Skills Over Chat | 2/2 | Complete   | 2026-06-15 |
 | 3. Skill Hardening | 1/1 | Complete   | 2026-06-15 |
-| 4. Memory Source of Record | 0/TBD | Not started | - |
+| 4. Memory Source of Record | 0/2 | Not started | - |
 | 5. Memory Projection & Capture | 0/TBD | Not started | - |
 | 6. memsearch Retirement | 0/TBD | Not started | - |
 | 7. Single Scheduler | 0/TBD | Not started | - |
