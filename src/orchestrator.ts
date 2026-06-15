@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { runAgent, UsageInfo } from './agent.js';
-import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd } from './agent-config.js';
+import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd, resolveAgentRuntime } from './agent-config.js';
 import { PROJECT_ROOT, DELEGATION_TIMEOUT_MS } from './config.js';
 import { logToHiveMind, createInterAgentTask, completeInterAgentTask } from './db.js';
 import { logger } from './logger.js';
@@ -176,6 +176,12 @@ export async function delegateToAgent(
   try {
     // Load agent config to get its system prompt and MCP allowlist
     const agentConfig = loadAgentConfig(agentId);
+    // Resolve the delegated agent's working directory (its project_dir when
+    // set and present, else its own dir). Without this the SDK subprocess
+    // falls back to the parent bot's cwd, so a workspace agent would READ from
+    // its project_dir but WRITE relative paths (projects/, context/learnings.md)
+    // into the bot's repo instead of the workspace.
+    const { cwd: delegateCwd } = resolveAgentRuntime(agentId);
     const claudeMdPath = resolveAgentClaudeMd(agentId);
     let systemPrompt = '';
     if (claudeMdPath) {
@@ -214,6 +220,7 @@ export async function delegateToAgent(
         ctrl,
         undefined, // no streaming for delegation
         agentConfig.mcpServers,
+        delegateCwd, // run in the agent's project_dir so writes land in the workspace
       );
 
       clearTimeout(timer);
