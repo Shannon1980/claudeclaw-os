@@ -262,7 +262,12 @@ const claudeMatch = normalized.match(/(?:^|\/)CLAUDE\.local\.md$/);
 | A3 | No agentic-os QoL behavior hard-fails the turn headless | SK-04 summary / Pitfalls 1,5,7 | Verified for CC Notify (try/except + clean log), auto-download (cp allowed), humanizer (no API key), session-sync (fire&forget, Phase 1). Residual risk: an untested file-producing skill could shell out to a denied tool — mitigated by running the SK-04 proof against a known-safe skill (`viz-interface-design` or `viz-stitch-design`, HTML/PNG, no network at save time) and capturing the transcript. |
 | A4 | The four README QoL features are the complete SK-04 surface | SK-04 | If a skill has another desktop assumption not surfaced in the README (e.g. opening a browser, an MCP that needs a GUI), it could misbehave. Mitigated: the README QoL list + the four enumerated mechanisms (hook / inline cp / skill / printed text) were each traced to source. Broaden the live test if a skill in scope uses an MCP (`tool-stitch` uses `mcp__stitch__*` — confirm that MCP is available headless or treat that skill as out-of-scope for the proof). |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> Resolved 2026-06-15 at plan time via user decisions, locked into 03-01-PLAN.md:
+> 1. Instructions live in an `aos` agent-role overlay (`~/.claudeclaw/agents/aos/CLAUDE.md`), minimal + operational.
+> 2. SK-04 proof skill = `viz-interface-design` (local, no MCP).
+> 3. Learnings write is on-disk only; no git auto-commit.
 
 1. **Where should the SK-04 marker + SK-05 inline-learnings instructions live — `aos` agent-role (`~/.claudeclaw/agents/aos/CLAUDE.md`) or per-skill `SKILL.local.md` overlays?**
    - What we know: Role text is one host-agnostic location applying to all skills (prepended as `[Agent role]` on the first message — Phase 1 Pattern 2). `SKILL.local.md` is the upstream-blessed, auto-committed, update-safe per-skill customization channel, but is per-skill and lives in the shared workspace.
