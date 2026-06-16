@@ -19,6 +19,7 @@ import {
   searchMemories,
 } from './db.js';
 import { cosineSimilarity, embedText } from './embeddings.js';
+import { workspaceMemoryKey } from './agent-config.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { logger } from './logger.js';
 import { ingestConversationTurn } from './memory-ingest.js';
@@ -235,6 +236,41 @@ export async function buildMemoryContext(
   if (obsidianBlock) parts.push(obsidianBlock);
 
   return { contextText: parts.join('\n\n'), surfacedMemoryIds: [...seen], surfacedMemorySummaries: summaryMap };
+}
+
+/**
+ * Terminal recall over the single SQLite embedding index (D-01).
+ *
+ * Shares the bot's exact embed + search path (embedText then searchMemories)
+ * so there is no second semantic index in the recall surface. Scoped to the
+ * workspace pool (chat_id = ws:<agentId>) AND strict agentId, so no other
+ * agent's or chat's memories leak (T-06-01).
+ *
+ * Deliberately does NOT call buildMemoryContext: that injects team-activity,
+ * consolidation, and Obsidian layers, and the consolidations table has no
+ * agent_id, which would be a cross-agent leak. Recall reads only the
+ * agent-scoped memories table via searchMemories.
+ */
+export async function recallForWorkspace(
+  query: string,
+  opts: { agentId?: string; topK?: number } = {},
+): Promise<string[]> {
+  const agentId = opts.agentId ?? 'aos';
+  const topK = opts.topK ?? 10;
+  const chatId = workspaceMemoryKey(agentId);
+
+  // Embed the query for vector search; failure is non-fatal (FTS5/LIKE fallback).
+  let queryEmbedding: number[] | undefined;
+  if (GOOGLE_API_KEY) {
+    try {
+      queryEmbedding = await embedText(query);
+    } catch {
+      // Embedding failure is non-fatal; searchMemories falls back to keyword search.
+    }
+  }
+
+  const hits = searchMemories(chatId, query, topK, queryEmbedding, agentId);
+  return hits.map((m) => m.summary);
 }
 
 /**

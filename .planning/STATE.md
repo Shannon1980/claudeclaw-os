@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-15T13:46:03.374Z"
-last_activity: 2026-06-15 -- Phase 05 execution started
+last_updated: "2026-06-16T02:31:34.080Z"
+last_activity: 2026-06-16
 progress:
   total_phases: 10
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 6
-  percent: 30
+  completed_phases: 5
+  total_plans: 12
+  completed_plans: 11
+  percent: 50
 ---
 
 # Project State
@@ -20,16 +20,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-14)
 
 **Core value:** A terminal Claude Code session in the agentic-os workspace and the ClaudeClaw chat bot behave as one assistant — same identity, skills, memory, and scheduled jobs, with no divergence between modes.
-**Current focus:** Phase 05 — memory-projection-capture
+**Current focus:** Phase 06 — memsearch-retirement
 
 ## Current Position
 
-Phase: 05 (memory-projection-capture) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 05
-Last activity: 2026-06-15 -- Phase 05 execution started
+Phase: 06 (memsearch-retirement) — EXECUTING
+Plan: 3 of 3
+Status: Ready to execute
+Last activity: 2026-06-16
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████████░] 92%
+
+## Phase 6 Note
+
+MEM-04 was re-opened during Phase 6 research (capture Stop-hook was never committed to agentic-os settings.json) and folded into Phase 6 (D-07). Plan 06-02 wires + commits it; Plan 06-03 proves it. Execution sequencing: recall-CLI ships (06-01) → AGENTS.md rewrite + cron disable + capture hook (06-02) → regression gate + live bidirectional proof (06-03, blocking human-verify, LAST).
 
 ## Performance Metrics
 
@@ -51,6 +55,8 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 06 P01 | 10m | 2 tasks | 3 files |
+| Phase 06 P02 | 2m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -62,6 +68,8 @@ Recent decisions affecting current work:
 - ClaudeClaw is the host; agentic-os is the consumed workspace (point an agent's `project_dir` at it; SDK `settingSources:['project','user']` auto-loads its context + skills)
 - SQLite = memory source of record; markdown = derived projection; memsearch is retired
 - Afternoon win (workspace + skills over chat) ships first to derisk before any bridge work
+- [Phase ?]: recallForWorkspace skips buildMemoryContext to avoid consolidation/team-activity cross-agent leak; recall-cli uses positional args not stdin to avoid hanging
+- [Phase ?]: Phase 6: agentic-os recall repointed at ClaudeClaw recall-cli.js over symlink; memsearch index cron disabled; capture-cli.js Stop hook wired+committed in agentic-os (MEM-04 durable)
 
 ### Pending Todos
 
@@ -87,6 +95,6 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-14
-Stopped at: ROADMAP.md and STATE.md created; REQUIREMENTS.md traceability updated; 27/27 requirements mapped
+Last session: 2026-06-16T02:31:19.614Z
+Stopped at: Phase 6 context gathered
 Resume file: None

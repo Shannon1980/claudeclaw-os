@@ -24,12 +24,12 @@ Requirements for this consolidation milestone. Each maps to roadmap phases.
 
 ### Memory
 
-- [ ] **MEM-01**: ClaudeClaw's SQLite store is the single source of record for memory across both modes
-- [ ] **MEM-02**: A chat exchange handled by the bot is written to ClaudeClaw memory and is retrievable in a later session
-- [ ] **MEM-03**: Recent ClaudeClaw memories are rendered into agentic-os daily `context/memory/*.md` files as a derived projection a terminal session reads on startup
-- [ ] **MEM-04**: Work done in a terminal Claude Code session is visible to the bot. (Re-scoped 2026-06-15: both modes run in the agentic-os workspace and share its native memory files (`context/MEMORY.md` + daily logs), so terminal work the agent records there is read by the bot's workspace agent on its next turn. Proven live. The earlier Stop-hook SQLite capture was dropped as fragile/redundant; the workspace files are the shared layer, and the projection (MEM-03) carries the bot->terminal direction.)
-- [ ] **MEM-05**: memsearch is retired — no second semantic index runs, and memory recall still works through ClaudeClaw's embeddings
-- [ ] **MEM-06**: The projection respects field-level encryption — markdown projections are produced through ClaudeClaw's decryption path, never raw ciphertext reads
+- [x] **MEM-01**: ClaudeClaw's SQLite store is the single source of record for memory across both modes
+- [x] **MEM-02**: A chat exchange handled by the bot is written to ClaudeClaw memory and is retrievable in a later session
+- [x] **MEM-03**: Recent ClaudeClaw memories are rendered into agentic-os daily `context/memory/*.md` files as a derived projection a terminal session reads on startup
+- [ ] **MEM-04**: Work done in a terminal Claude Code session is visible to the bot. (Re-scoped 2026-06-15: both modes run in the agentic-os workspace and share its native memory files (`context/MEMORY.md` + daily logs), so terminal work the agent records there is read by the bot's workspace agent on its next turn. Proven live. The earlier Stop-hook SQLite capture was dropped as fragile/redundant; the workspace files are the shared layer, and the projection (MEM-03) carries the bot->terminal direction. Phase 6's D-07 capture-hook re-wire is superseded by this rescope and abandoned.)
+- [ ] **MEM-05**: memsearch is retired — no second semantic index runs, and memory recall still works through ClaudeClaw's embeddings. (Phase 6 implementation landed: recall-cli.ts over the single SQLite index plus the memsearch index cron disabled; the live both-mode round-trip proof, 06-03, is still pending.)
+- [x] **MEM-06**: The projection respects field-level encryption — markdown projections are produced through ClaudeClaw's decryption path, never raw ciphertext reads
 
 ### Scheduler
 
@@ -95,12 +95,12 @@ Mapped during roadmap creation (2026-06-14). COMPAT-* are cross-cutting and wove
 | SK-03 | Phase 2 | Pending |
 | SK-04 | Phase 3 | Pending |
 | SK-05 | Phase 3 | Pending |
-| MEM-01 | Phase 4 | Pending |
-| MEM-02 | Phase 4 | Pending |
-| MEM-03 | Phase 5 | Pending |
-| MEM-04 | Phase 5 | Pending |
-| MEM-06 | Phase 5 | Pending |
-| MEM-05 | Phase 6 | Pending |
+| MEM-01 | Phase 4 | Done |
+| MEM-02 | Phase 4 | Done |
+| MEM-03 | Phase 5 | Done |
+| MEM-04 | Phase 5 | Rescoped (workspace files; D-07 capture-hook superseded) |
+| MEM-06 | Phase 5 | Done |
+| MEM-05 | Phase 6 | Impl landed; live proof (06-03) pending |
 | SCH-01 | Phase 7 | Pending |
 | SCH-02 | Phase 7 | Pending |
 | SCH-03 | Phase 7 | Pending |
