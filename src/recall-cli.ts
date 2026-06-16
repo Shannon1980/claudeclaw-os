@@ -16,8 +16,17 @@
  * symlink as `node dist/recall-cli.js "<query>" [--top-k N]`.
  */
 
-import { initDatabase } from './db.js';
-import { recallForWorkspace } from './memory.js';
+import { realpathSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+
+// Package root is one level up from dist/ (or src/), the same anchor config.ts
+// uses for PROJECT_ROOT. We chdir here before loading the config-dependent
+// modules so .env resolution (config.ts reads cwd/.env at import time) finds
+// the claudeclaw secrets even when this CLI is invoked from the agentic-os
+// workspace terminal. db.js + memory.js are therefore loaded dynamically,
+// after the chdir in runRecallCli.
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The fixed workspace agent this CLI recalls for. Server-side, never from argv. */
 const RECALL_AGENT_ID = 'aos';
@@ -64,8 +73,14 @@ export async function runRecallCli(): Promise<void> {
     process.exit(2);
   }
 
-  // Anchor the DB on PROJECT_ROOT before any query so the CLI hits the
-  // claudeclaw store even when spawned from the agentic-os cwd.
+  // Normalize cwd to the package root so config.ts (which reads cwd/.env at
+  // import time) resolves the claudeclaw .env, then load the DB + memory
+  // modules. Without this the CLI crashes on a missing DB_ENCRYPTION_KEY when
+  // run from the agentic-os workspace cwd (its actual AGENTS.md usage).
+  process.chdir(PACKAGE_ROOT);
+  const { initDatabase } = await import('./db.js');
+  const { recallForWorkspace } = await import('./memory.js');
+
   initDatabase();
 
   const results = await recallForWorkspace(query, { agentId: RECALL_AGENT_ID, topK });
@@ -81,10 +96,20 @@ export async function runRecallCli(): Promise<void> {
 }
 
 // Only run the CLI glue when invoked directly (not when imported by tests).
-// import.meta.url vs argv[1] is the ESM "run as main" idiom.
-const invokedDirectly =
-  typeof process.argv[1] === 'string' &&
-  import.meta.url === new URL(`file://${process.argv[1]}`).href;
+// ESM "run as main" idiom. process.argv[1] is the path the user invoked, which
+// is the ~/.claudeclaw-app SYMLINK in the live AGENTS.md command; import.meta.url
+// is always realpath-resolved by Node. A raw compare therefore never matches
+// through the symlink and the CLI silently no-ops. realpathSync canonicalizes
+// argv[1] so both sides agree, and pathToFileURL encodes the spaces in the repo
+// path correctly (a raw `file://${path}` would not).
+let invokedDirectly = false;
+if (typeof process.argv[1] === 'string') {
+  try {
+    invokedDirectly = import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    invokedDirectly = false;
+  }
+}
 if (invokedDirectly) {
   runRecallCli();
 }

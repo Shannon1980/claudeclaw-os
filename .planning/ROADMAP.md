@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Skill Hardening** - Command-Centre/hook/download-dependent skills degrade gracefully headless; skill self-improvement keeps working (completed 2026-06-15)
 - [x] **Phase 4: Memory Source of Record** - ClaudeClaw SQLite is the single memory store; bot exchanges persist and recall across sessions (completed 2026-06-15)
 - [x] **Phase 5: Memory Projection & Capture** - SQLite memories render to agentic-os daily markdown; terminal-session work captured back via hooks (completed 2026-06-15)
-- [ ] **Phase 6: memsearch Retirement** - Second semantic index disabled; recall runs entirely through ClaudeClaw embeddings
+- [x] **Phase 6: memsearch Retirement** - Second semantic index disabled; recall runs entirely through ClaudeClaw embeddings (completed 2026-06-16)
 - [ ] **Phase 7: Single Scheduler** - ClaudeClaw scheduler reads agentic-os cron/jobs/*.md and is the only runner; agentic-os cron disabled, no double-fire
 - [ ] **Phase 8: Per-Agent Soul** - Every agent gets its own SOUL.md (voice) separate from its role CLAUDE.md; workspace agent's soul aligns with agentic-os SOUL.md
 - [ ] **Phase 9: Command Centre Repoint** - Command Centre reads ClaudeClaw SQLite through the decryption path; its own cron/memory engines disabled
@@ -120,7 +120,7 @@ Plans:
 Plans:
 - [x] 06-01-PLAN.md — recall-cli.ts + recallForWorkspace wrapper + Wave 0 single-index test + build (MEM-05)
 - [x] 06-02-PLAN.md — AGENTS.md Tier-1 rewrite + nightly cron disable + committed capture Stop hook (MEM-05, MEM-04)
-- [ ] 06-03-PLAN.md — full-suite regression gate + live bidirectional round-trip proof (MEM-05, MEM-04, human-verify)
+- [x] 06-03-PLAN.md — full-suite regression gate + live bidirectional round-trip proof (MEM-05, MEM-04, human-verify)
 
 ### Phase 7: Single Scheduler
 **Goal**: ClaudeClaw's scheduler is the only job runner: it reads agentic-os `cron/jobs/*.md` definitions, fires them on schedule with status/log parity, and the agentic-os cron engine is disabled with no double-firing.
@@ -184,7 +184,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 3. Skill Hardening | 1/1 | Complete   | 2026-06-15 |
 | 4. Memory Source of Record | 1/2 | In Progress|  |
 | 5. Memory Projection & Capture | 1/2 | In Progress|  |
-| 6. memsearch Retirement | 2/3 | In Progress|  |
+| 6. memsearch Retirement | 3/3 | Complete   | 2026-06-16 |
 | 7. Single Scheduler | 0/TBD | Not started | - |
 | 8. Per-Agent Soul | 0/TBD | Not started | - |
 | 9. Command Centre Repoint | 0/TBD | Not started | - |
