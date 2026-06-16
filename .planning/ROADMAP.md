@@ -119,7 +119,7 @@ Plans:
 
 Plans:
 - [x] 06-01-PLAN.md — recall-cli.ts + recallForWorkspace wrapper + Wave 0 single-index test + build (MEM-05)
-- [ ] 06-02-PLAN.md — AGENTS.md Tier-1 rewrite + nightly cron disable + committed capture Stop hook (MEM-05, MEM-04)
+- [x] 06-02-PLAN.md — AGENTS.md Tier-1 rewrite + nightly cron disable + committed capture Stop hook (MEM-05, MEM-04)
 - [ ] 06-03-PLAN.md — full-suite regression gate + live bidirectional round-trip proof (MEM-05, MEM-04, human-verify)
 
 ### Phase 7: Single Scheduler
@@ -184,7 +184,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 3. Skill Hardening | 1/1 | Complete   | 2026-06-15 |
 | 4. Memory Source of Record | 1/2 | In Progress|  |
 | 5. Memory Projection & Capture | 1/2 | In Progress|  |
-| 6. memsearch Retirement | 1/3 | In Progress|  |
+| 6. memsearch Retirement | 2/3 | In Progress|  |
 | 7. Single Scheduler | 0/TBD | Not started | - |
 | 8. Per-Agent Soul | 0/TBD | Not started | - |
 | 9. Command Centre Repoint | 0/TBD | Not started | - |

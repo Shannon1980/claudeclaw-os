@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-16T02:27:14.234Z"
+last_updated: "2026-06-16T02:31:34.080Z"
 last_activity: 2026-06-16
 progress:
   total_phases: 10
   completed_phases: 5
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 50
 ---
 
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-06-14)
 ## Current Position
 
 Phase: 06 (memsearch-retirement) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-06-16
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 92%
 
 ## Phase 6 Note
 
@@ -56,6 +56,7 @@ MEM-04 was re-opened during Phase 6 research (capture Stop-hook was never commit
 
 *Updated after each plan completion*
 | Phase 06 P01 | 10m | 2 tasks | 3 files |
+| Phase 06 P02 | 2m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,7 @@ Recent decisions affecting current work:
 - SQLite = memory source of record; markdown = derived projection; memsearch is retired
 - Afternoon win (workspace + skills over chat) ships first to derisk before any bridge work
 - [Phase ?]: recallForWorkspace skips buildMemoryContext to avoid consolidation/team-activity cross-agent leak; recall-cli uses positional args not stdin to avoid hanging
+- [Phase ?]: Phase 6: agentic-os recall repointed at ClaudeClaw recall-cli.js over symlink; memsearch index cron disabled; capture-cli.js Stop hook wired+committed in agentic-os (MEM-04 durable)
 
 ### Pending Todos
 
@@ -93,6 +95,6 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-16T02:27:10.719Z
+Last session: 2026-06-16T02:31:19.614Z
 Stopped at: Phase 6 context gathered
 Resume file: None
