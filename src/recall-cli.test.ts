@@ -81,5 +81,11 @@ describe('recallForWorkspace', () => {
     expect(src).not.toContain('—');
     // Agent attribution is fixed server-side, never read from argv (T-06-02).
     expect(src).toContain('RECALL_AGENT_ID');
+    // Run-as-main guard must resolve symlinks: the live AGENTS.md command runs
+    // via the ~/.claudeclaw-app symlink, so a raw argv[1] vs import.meta.url
+    // compare silently no-ops (the CLI prints nothing). realpathSync
+    // canonicalizes argv[1] so both sides agree. Regression guard.
+    expect(src).toContain('realpathSync');
+    expect(src).not.toMatch(/new URL\(`file:\/\//);
   });
 });

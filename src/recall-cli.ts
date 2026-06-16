@@ -16,6 +16,8 @@
  * symlink as `node dist/recall-cli.js "<query>" [--top-k N]`.
  */
 
+import { realpathSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { initDatabase } from './db.js';
 import { recallForWorkspace } from './memory.js';
 
@@ -81,10 +83,20 @@ export async function runRecallCli(): Promise<void> {
 }
 
 // Only run the CLI glue when invoked directly (not when imported by tests).
-// import.meta.url vs argv[1] is the ESM "run as main" idiom.
-const invokedDirectly =
-  typeof process.argv[1] === 'string' &&
-  import.meta.url === new URL(`file://${process.argv[1]}`).href;
+// ESM "run as main" idiom. process.argv[1] is the path the user invoked, which
+// is the ~/.claudeclaw-app SYMLINK in the live AGENTS.md command; import.meta.url
+// is always realpath-resolved by Node. A raw compare therefore never matches
+// through the symlink and the CLI silently no-ops. realpathSync canonicalizes
+// argv[1] so both sides agree, and pathToFileURL encodes the spaces in the repo
+// path correctly (a raw `file://${path}` would not).
+let invokedDirectly = false;
+if (typeof process.argv[1] === 'string') {
+  try {
+    invokedDirectly = import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    invokedDirectly = false;
+  }
+}
 if (invokedDirectly) {
   runRecallCli();
 }
