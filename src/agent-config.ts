@@ -19,6 +19,13 @@ export const WARROOM_ROSTER_PATH = '/tmp/warroom-agents.json';
  *  kept for backwards compatibility with the historical regex. */
 export const AGENT_ID_RE = /^[a-z0-9_-]+$/i;
 
+/** Loose validity check for a Slack channel/group id. Slack channel ids
+ *  start with `C` (public/private channels) or `G` (legacy private groups)
+ *  followed by uppercase alphanumerics, e.g. `C0XXXX`. Validated loosely
+ *  (the exact length is not pinned) so future id shapes still pass. Used to
+ *  guard the dashboard `slack_channel` editor and the agent.yaml load path. */
+export const SLACK_CHANNEL_RE = /^[CG][A-Z0-9]+$/;
+
 /** Cheap "does this agent exist on disk?" check. `main` always exists
  *  (it's the root process); any other id needs an `agent.yaml` next to
  *  resolveAgentDir(id). Returns false for syntactically invalid ids so
@@ -159,10 +166,19 @@ export function loadAgentConfig(agentId: string): AgentConfig {
   const warroomTools = raw['warroom_tools'] as string[] | undefined;
   const meetVoiceId = typeof raw['meet_voice_id'] === 'string' ? (raw['meet_voice_id'] as string) : undefined;
   const meetBotName = typeof raw['meet_bot_name'] === 'string' ? (raw['meet_bot_name'] as string) : undefined;
-  const slackChannel =
+  let slackChannel =
     typeof raw['slack_channel'] === 'string' && (raw['slack_channel'] as string).trim()
       ? (raw['slack_channel'] as string).trim()
       : undefined;
+  // Validate the channel id shape on the read path too (not just the dashboard
+  // write path) so a hand-edited agent.yaml with a malformed value drops to
+  // undefined with a signal, rather than silently never matching a channel in
+  // getSlackChannelMap().
+  if (slackChannel && !SLACK_CHANNEL_RE.test(slackChannel)) {
+    // eslint-disable-next-line no-console
+    console.warn(`[${agentId}] WARNING: slack_channel "${slackChannel}" is not a valid channel id (expected e.g. C0XXXX); ignoring.`);
+    slackChannel = undefined;
+  }
   const projectDir = typeof raw['project_dir'] === 'string' ? (raw['project_dir'] as string) : undefined;
   if (projectDir && !fs.existsSync(projectDir)) {
     // eslint-disable-next-line no-console
@@ -316,6 +332,27 @@ export function setAgentModel(agentId: string, model: string): void {
 
   const raw = yaml.load(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
   raw['model'] = model;
+  fs.writeFileSync(configPath, yaml.dump(raw, { lineWidth: -1 }), 'utf-8');
+}
+
+/** Set or clear the `slack_channel` key in an agent's agent.yaml. Pass a
+ *  channel id to route that Slack channel to this agent; pass an empty string
+ *  to remove the key (channel routing off). Mirrors setAgentModel. The
+ *  channel→agent map is built once at createSlackBot startup, so a write here
+ *  only takes effect after the bot restarts. The caller is responsible for
+ *  validating the channel id shape (see SLACK_CHANNEL_RE). */
+export function setAgentSlackChannel(agentId: string, channel: string): void {
+  const agentDir = resolveAgentDir(agentId);
+  const configPath = path.join(agentDir, 'agent.yaml');
+  if (!fs.existsSync(configPath)) throw new Error(`Agent config not found: ${configPath}`);
+
+  const raw = yaml.load(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+  const trimmed = channel.trim();
+  if (trimmed) {
+    raw['slack_channel'] = trimmed;
+  } else {
+    delete raw['slack_channel'];
+  }
   fs.writeFileSync(configPath, yaml.dump(raw, { lineWidth: -1 }), 'utf-8');
 }
 
