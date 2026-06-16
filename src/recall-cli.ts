@@ -17,9 +17,16 @@
  */
 
 import { realpathSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
-import { initDatabase } from './db.js';
-import { recallForWorkspace } from './memory.js';
+import path from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+
+// Package root is one level up from dist/ (or src/), the same anchor config.ts
+// uses for PROJECT_ROOT. We chdir here before loading the config-dependent
+// modules so .env resolution (config.ts reads cwd/.env at import time) finds
+// the claudeclaw secrets even when this CLI is invoked from the agentic-os
+// workspace terminal. db.js + memory.js are therefore loaded dynamically,
+// after the chdir in runRecallCli.
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The fixed workspace agent this CLI recalls for. Server-side, never from argv. */
 const RECALL_AGENT_ID = 'aos';
@@ -66,8 +73,14 @@ export async function runRecallCli(): Promise<void> {
     process.exit(2);
   }
 
-  // Anchor the DB on PROJECT_ROOT before any query so the CLI hits the
-  // claudeclaw store even when spawned from the agentic-os cwd.
+  // Normalize cwd to the package root so config.ts (which reads cwd/.env at
+  // import time) resolves the claudeclaw .env, then load the DB + memory
+  // modules. Without this the CLI crashes on a missing DB_ENCRYPTION_KEY when
+  // run from the agentic-os workspace cwd (its actual AGENTS.md usage).
+  process.chdir(PACKAGE_ROOT);
+  const { initDatabase } = await import('./db.js');
+  const { recallForWorkspace } = await import('./memory.js');
+
   initDatabase();
 
   const results = await recallForWorkspace(query, { agentId: RECALL_AGENT_ID, topK });

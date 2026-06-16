@@ -87,5 +87,10 @@ describe('recallForWorkspace', () => {
     // canonicalizes argv[1] so both sides agree. Regression guard.
     expect(src).toContain('realpathSync');
     expect(src).not.toMatch(/new URL\(`file:\/\//);
+    // Cross-cwd guard: invoked from the agentic-os workspace terminal, the CLI
+    // anchors cwd on its package root so config's .env (read from cwd) resolves
+    // DB_ENCRYPTION_KEY. Without it the CLI crashes from a non-claudeclaw cwd.
+    expect(src).toContain('process.chdir');
+    expect(src).toContain('PACKAGE_ROOT');
   });
 });
