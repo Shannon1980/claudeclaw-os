@@ -91,8 +91,16 @@ export function getAvailableAgents(): AgentInfo[] {
 export function parseDelegation(
   message: string,
 ): { agentId: string; prompt: string } | null {
+  // Normalize leading whitespace before anchoring on `@`/`/delegate`. Slack DMs
+  // are trimmed upstream, but other transports (Telegram, WhatsApp, scheduled
+  // and mission tasks) reach processUserMessage untrimmed — a stray leading
+  // space or newline used to break `^@` and silently misroute a delegation to
+  // the main agent (intermittent "@aos:" bug). Anchor on the trimmed text so
+  // every caller is covered at a single point.
+  const text = message.trimStart();
+
   // /delegate agentId prompt
-  const cmdMatch = message.match(
+  const cmdMatch = text.match(
     /^\/delegate\s+(\S+)\s+([\s\S]+)/i,
   );
   if (cmdMatch) {
@@ -100,7 +108,7 @@ export function parseDelegation(
   }
 
   // @agentId: prompt
-  const atMatch = message.match(
+  const atMatch = text.match(
     /^@(\S+?):\s*([\s\S]+)/,
   );
   if (atMatch) {
@@ -108,7 +116,7 @@ export function parseDelegation(
   }
 
   // @agentId prompt (only for known agents to avoid false positives)
-  const atMatchNoColon = message.match(
+  const atMatchNoColon = text.match(
     /^@(\S+)\s+([\s\S]+)/,
   );
   if (atMatchNoColon) {

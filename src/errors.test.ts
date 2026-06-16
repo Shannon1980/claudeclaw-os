@@ -248,6 +248,36 @@ describe('classifyError', () => {
     expect(classified.recovery.userMessage).not.toContain('claude login');
   });
 
+  it('classifies an exit-1 whose assistant text holds the cap as session_limit, not auth', () => {
+    // SDK failure path: the subprocess exits 1 with the cap printed to stdout /
+    // the last assistant message. The result envelope carries no cap text, so
+    // without the assistant text this fell through to the zero-cost auth default.
+    const classified = classifyError(
+      new Error('Claude Code process exited with code 1'),
+      undefined,
+      {
+        isError: true,
+        assistantText: "You've hit your session limit · resets 9:50pm (America/New_York)",
+      },
+    );
+    expect(classified.category).toBe('session_limit');
+    expect(classified.recovery.userMessage).toContain('usage cap');
+    expect(classified.recovery.userMessage).not.toContain('claude login');
+    expect(classified.recovery.userMessage).not.toContain('ANTHROPIC_API_KEY');
+  });
+
+  it('classifies a bare exit-1 (no is_error) with cap in assistant text as session_limit', () => {
+    // No result envelope at all: the cap text reaches the classifier only via
+    // the captured assistant text. Must win over the subprocess_crash branch.
+    const classified = classifyError(
+      new Error('exited with code 1'),
+      undefined,
+      { assistantText: "You've hit your session limit · resets 9:50pm" },
+    );
+    expect(classified.category).toBe('session_limit');
+    expect(classified.recovery.shouldRetry).toBe(false);
+  });
+
   it('does NOT classify a plain exit-1 (no result error) as auth', () => {
     // Without an is_error result, a bare exit-1 is still a subprocess crash.
     const classified = classifyError(new Error('exited with code 1'));
