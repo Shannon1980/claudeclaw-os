@@ -29,6 +29,7 @@ import {
   getSlackChannelMap,
   resolveAgentRuntime,
   resolveAgentModel,
+  setAgentSlackChannel,
   workspaceMemoryKey,
   isWorkspaceAgent,
 } from './agent-config.js';
@@ -48,6 +49,11 @@ beforeAll(() => {
   );
   writeAgent('comms', 'name: Comms\ndescription: Comms\nslack_channel: C0COMMS\n');
   writeAgent('nochan', 'name: NoChannel\ndescription: No Slack channel\n');
+  // Malformed channel id (not C…/G…). The load path must drop it to undefined
+  // so it never lands in the routing map as a channel that can't match.
+  writeAgent('badchan', 'name: BadChannel\ndescription: Bad channel\nslack_channel: not-a-channel\n');
+  // A blank-slate agent used to exercise setAgentSlackChannel's write/clear.
+  writeAgent('setchan', 'name: SetChan\ndescription: Set channel target\n');
   // Malformed config (no `name` → loadAgentConfig throws). It must be skipped
   // without aborting the map build or dropping the valid agents.
   writeAgent('zbroken', 'description: no name here\nslack_channel: C0BROKEN\n');
@@ -80,6 +86,12 @@ describe('loadAgentConfig slack_channel', () => {
   it('leaves slack_channel undefined when absent', () => {
     expect(loadAgentConfig('nochan').slackChannel).toBeUndefined();
   });
+
+  it('drops a malformed channel id to undefined on the load path', () => {
+    // A hand-edited yaml with a bad channel id must not silently sit in the
+    // config as a value that can never match a real channel.
+    expect(loadAgentConfig('badchan').slackChannel).toBeUndefined();
+  });
 });
 
 describe('getSlackChannelMap', () => {
@@ -107,6 +119,32 @@ describe('getSlackChannelMap', () => {
     expect(map.has('C0BROKEN')).toBe(false);
     expect(map.get('C0RESEARCH')).toBe('research');
     expect(map.get('C0COMMS')).toBe('comms');
+  });
+
+  it('omits an agent whose channel id is malformed', () => {
+    // badchan's invalid id is dropped at load, so it contributes no route.
+    const map = getSlackChannelMap();
+    expect([...map.values()]).not.toContain('badchan');
+  });
+});
+
+describe('setAgentSlackChannel', () => {
+  it('writes a channel id that round-trips through loadAgentConfig', () => {
+    setAgentSlackChannel('setchan', 'C0SETCHAN');
+    expect(loadAgentConfig('setchan').slackChannel).toBe('C0SETCHAN');
+  });
+
+  it('clears the channel when given an empty string', () => {
+    setAgentSlackChannel('setchan', 'C0SETCHAN');
+    setAgentSlackChannel('setchan', '');
+    expect(loadAgentConfig('setchan').slackChannel).toBeUndefined();
+    // The key must be removed, not left as an empty string.
+    expect(fs.readFileSync(path.join(FIXTURE_ROOT, 'agents', 'setchan', 'agent.yaml'), 'utf-8'))
+      .not.toMatch(/slack_channel/);
+  });
+
+  it('throws for an agent that has no agent.yaml', () => {
+    expect(() => setAgentSlackChannel('ghost', 'C0GHOST')).toThrow();
   });
 });
 
