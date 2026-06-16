@@ -71,4 +71,15 @@ describe('recallForWorkspace', () => {
     expect(src).toMatch(/recallForWorkspace/);
     expect(src).toMatch(/workspaceMemoryKey/);
   });
+
+  it('source guard: recall-cli.ts has no second-index path, no em dash, server-side attribution', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'recall-cli.ts'), 'utf8');
+    // No second semantic index referenced anywhere in the recall path.
+    expect(src).not.toMatch(/memsearch/i);
+    expect(src).not.toContain('reranker');
+    // CLAUDE.md rule: no em dashes.
+    expect(src).not.toContain('—');
+    // Agent attribution is fixed server-side, never read from argv (T-06-02).
+    expect(src).toContain('RECALL_AGENT_ID');
+  });
 });
