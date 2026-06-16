@@ -38,9 +38,9 @@ created: 2026-06-15
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | Status |
 |---------|------|------|-------------|-----------|-------------------|--------|
-| 4-01-01 | 01 | 1 | MEM-02 (scoping) | unit | `npx vitest run src/memory.test.ts` (recall with strictAgentId excludes other agents' memories) | ⬜ pending |
-| 4-01-02 | 01 | 1 | MEM-02 (scoping) | unit | `npx vitest run src/orchestrator.test.ts` OR a memory-scope test asserting the delegated recall passes strictAgentId | ⬜ pending |
-| 4-01-03 | 01 | 1 | MEM-01 | structural | assert single DB resolves from PROJECT_ROOT (path test) and no second store path is constructed from cwd | ⬜ pending |
+| 4-01-01 | 01 | 1 | MEM-02 (scoping) | unit | `npx vitest run src/memory.test.ts` (recall with strictAgentId excludes other agents' memories) | ✅ green |
+| 4-01-02 | 01 | 1 | MEM-02 (scoping) | unit | `npx vitest run src/orchestrator.test.ts` (delegated recall passes `{ strictAgentId: 'aos' }`) + `src/db.test.ts` (`scopes by agent_id`, lines 436/449) | ✅ green |
+| 4-01-03 | 01 | 1 | MEM-01 | structural | `src/db.test.ts:459` — `STORE_DIR` absolute, under `PROJECT_ROOT`, never contains `agentic-os` | ✅ green |
 | 4-02-01 | 02 | 2 | MEM-02 | manual | live two-session transcript: write a standing preference via @aos: in session A, recall it in session B (fresh delegation; /newchat unnecessary — see 04-02-SUMMARY) | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red*
@@ -49,8 +49,8 @@ created: 2026-06-15
 
 ## Wave 0 Requirements
 
-- [ ] A unit test asserting strict per-agent recall: a memory written under agent X is NOT returned by `buildMemoryContext(..., { strictAgentId: 'aos' })` for agent `aos` sharing the same chat_id (cross-agent leakage guard). Extend `src/memory.test.ts`.
-- [ ] A test (orchestrator or memory) asserting the delegation recall path passes `strictAgentId` (no leakage into the workspace agent's recall).
+- [x] A unit test asserting strict per-agent recall: a memory written under agent X is NOT returned for agent `aos` sharing the same chat_id (cross-agent leakage guard). `src/db.test.ts:436/449` (real in-memory DB) + `src/memory.test.ts` strictAgentId forwarding guards. Green.
+- [x] A test asserting the delegation recall path passes `strictAgentId`. `src/orchestrator.test.ts` asserts the 4th arg is `{ strictAgentId: 'aos' }`. Green.
 
 *MEM-01 needs no new schema/code per research (single store already PROJECT_ROOT-based); a structural/path assertion suffices.*
 
@@ -76,3 +76,9 @@ created: 2026-06-15
 - [x] `nyquist_compliant: true` at sign-off
 
 **Approval:** approved — 2026-06-15. MEM-01 + MEM-02 verified; full suite at baseline.
+
+---
+
+## Validation Audit 2026-06-16
+
+Re-audit confirmed phase remains compliant. Synced the Per-Task Map and Wave 0 status cells (they still read `⬜ pending` from the draft) to ✅, matching the sign-off and summaries. Re-ran `npx vitest run src/memory.test.ts src/orchestrator.test.ts src/db.test.ts` → 80/80 green. Assertions verified on disk: strictAgentId forwarding (`memory.test.ts`/`orchestrator.test.ts`), agent_id scoping (`db.test.ts:436/449`), single-store path (`db.test.ts:459`). No gaps, no new tests, no auditor spawn.
