@@ -136,7 +136,7 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
-- [ ] 07-01-PLAN.md — Versioned migration (aos-cron columns) + db.ts atomic claimDueTask + aos-row helpers
+- [x] 07-01-PLAN.md — Versioned migration (aos-cron columns) + db.ts atomic claimDueTask + aos-row helpers
 - [ ] 07-02-PLAN.md — src/aos-cron.ts: frontmatter+body parser, time/days->cron mapping, syncAosCronJobs lifecycle
 - [ ] 07-03-PLAN.md — com.claudeclaw.aos launchd plist (spaces-safe /tmp logs, crash recovery)
 - [ ] 07-04-PLAN.md — aos firing loop in scheduler.ts (atomic claim, prompt re-read, timeout/retry, notify, no preamble) + index.ts wiring
@@ -192,7 +192,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 4. Memory Source of Record | 1/2 | In Progress|  |
 | 5. Memory Projection & Capture | 1/2 | In Progress|  |
 | 6. memsearch Retirement | 3/3 | Complete   | 2026-06-16 |
-| 7. Single Scheduler | 0/5 | In Progress | - |
+| 7. Single Scheduler | 1/5 | In Progress|  |
 | 8. Per-Agent Soul | 0/TBD | Not started | - |
 | 9. Command Centre Repoint | 0/TBD | Not started | - |
 | 10. Compatibility Verification | 0/TBD | Not started | - |

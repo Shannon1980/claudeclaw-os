@@ -113,6 +113,14 @@ None - no external service configuration. The migration applies via `npm run mig
 - `claimDueTask` ready for the aos firing loop as the SCH-04 cross-process backstop.
 - **Deploy note:** run `npm run migrate` on the live DB before restarting the service (D-09).
 
+## Self-Check: PASSED
+
+- FOUND: migrations/v1.1.1/add-aos-cron-scheduled-task-columns.ts
+- FOUND: .planning/phases/07-single-scheduler/07-01-SUMMARY.md
+- FOUND commit fa74d10 (RED tests)
+- FOUND commit 6eb78a0 (Task 1 migration)
+- FOUND commit ace0a6a (Task 2 db.ts)
+
 ---
 *Phase: 07-single-scheduler*
 *Completed: 2026-06-17*
