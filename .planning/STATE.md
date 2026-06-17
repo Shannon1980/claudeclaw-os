@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-06-17T21:26:50.850Z"
+last_updated: "2026-06-17T21:34:09.890Z"
 last_activity: 2026-06-17
 progress:
   total_phases: 10
   completed_phases: 6
   total_plans: 17
-  completed_plans: 15
+  completed_plans: 16
   percent: 60
 ---
 
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-06-14)
 ## Current Position
 
 Phase: 07 (single-scheduler) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-06-17
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 94%
 
 ## Phase 6 Note
 
@@ -60,6 +60,7 @@ MEM-04 was re-opened during Phase 6 research (capture Stop-hook was never commit
 | Phase 07 P01 | 5m | 2 tasks | 6 files |
 | Phase 07 P03 | 1m | 1 tasks | 1 files |
 | Phase 07 P02 | 6m | 2 tasks | 2 files |
+| Phase 07 P04 | 6m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Phase 7: aos-cron columns ship as versioned migration v1.1.1; mirrored in db.ts runMigrations (not createSchema) for test parity; claimDueTask is the SCH-04 atomic cross-process backstop
 - [Phase 07]: aos launchd plist forces /tmp/claudeclaw-aos.log log paths (no spaces) to avoid launchd exit 78; WorkingDirectory keeps __PROJECT_DIR__ placeholder for the spaces-safe symlink; service left unloaded for 07-05 cutover
 - [Phase ?]: [Phase 07]: aos-cron sync borrows proven parse/translate/orphan logic from superseded cron-sync.ts branch, adapted to 07-01 db.ts helpers; toCron emits plain cron strings into the single computeNextRun engine (no second scheduler); job id = slugified frontmatter name for idempotent upsert
+- [Phase ?]: [Phase 07]: aos firing fires source='aos-cron' rows via claimDueTask (atomic exactly-once, SCH-04), re-reads the .md body at fire time (D-07), honors per-job timeout/retry (D-10/D-11), suppresses the preamble (D-12), and gates Slack by notify (D-03); aos runs rows directly via runAgent in the aos process (not delegateToAgent) since aos is a standalone service with agent_id='aos' rows
 
 ### Pending Todos
 
@@ -101,6 +103,6 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-17T21:26:34.729Z
+Last session: 2026-06-17T21:32:24.173Z
 Stopped at: Completed 07-03-PLAN.md
 Resume file: None
