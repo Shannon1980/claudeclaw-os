@@ -7,6 +7,7 @@ import { PageState } from '@/components/PageState';
 import { Modal } from '@/components/Modal';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { AddExistingTasksModal } from '@/components/ProjectTaskAttach';
+import { CopyIconButton } from '@/components/CopyIconButton';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiPatch, apiDelete, dashboardToken } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -506,7 +507,10 @@ function ProjectTaskRow({ projectId, task, onDetached }: { projectId: string; ta
             </div>
           )}
           <div>
-            <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Input</div>
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)]">Input</div>
+              <CopyIconButton text={task.prompt} title="Copy input" />
+            </div>
             <div class="text-[11px] text-[var(--color-text-muted)] whitespace-pre-wrap font-mono leading-relaxed max-h-48 overflow-y-auto">{task.prompt}</div>
           </div>
           {(task.output?.length ?? 0) > 0 && (
@@ -521,7 +525,10 @@ function ProjectTaskRow({ projectId, task, onDetached }: { projectId: string; ta
           )}
           {(task.result_display || task.result) && (
             <div>
-              <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Output</div>
+              <div class="flex items-center justify-between mb-1">
+                <div class="text-[10px] uppercase tracking-wider text-[var(--color-text-faint)]">Output</div>
+                <CopyIconButton text={(task.result_display || task.result)!} title="Copy output" />
+              </div>
               <div class="text-[11.5px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">
                 {task.result_display || task.result}
               </div>
