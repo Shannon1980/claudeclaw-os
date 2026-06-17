@@ -126,6 +126,29 @@ describes, with the decisions below resolving the forks the handoff left open.
   (`mon`/`fri`/`sun`/…). If a raw `cron:` frontmatter field is present, it wins
   over `time`+`days`. (Exact mapping table is Claude's discretion — none of the
   current 8 jobs use a raw `cron:` field, but support it for forward-compat.)
+- **D-08a:** The mapping must cover the full `cron/templates/schedule-reference.md`
+  grammar, not just the values the current 8 jobs use:
+  - **Interval `time`** → cron steps: `every_5m` → `*/5 * * * *`,
+    `every_30m` → `*/30 * * * *`, `every_4h` → `0 */4 * * *`, etc.
+  - **Multi-time `time`** (comma list, e.g. `'09:00,17:00'`) → a **single** row
+    with comma cron fields (`0 9,17 * * *`) — one row per job, not one row per
+    fire time, so bookkeeping stays one-row-per-job (consistent with D-07).
+  - **`days`** also supports `weekends` and multi-day lists (`mon,wed,fri`)
+    alongside the values named in D-08.
+  Keep all of this inside the single `computeNextRun`/cron-string path — no
+  second scheduling engine.
+
+### Per-job execution detail (SCH-02, SCH-03)
+- **D-10:** Honor per-job **`timeout`** (`'5m'`/`'10m'`/`'15m'`) by parsing it to
+  a per-run abort timeout, falling back to the existing `TASK_TIMEOUT_MS` (10m)
+  when absent. (Resolves the timeout half of D-09's open discretion item.)
+- **D-11:** Honor **`retry: N`** — on failure/timeout, re-run the job up to N
+  times before recording a failed result and firing `on_failure`. Current values
+  are `'0'`/`'1'`; treat absent as `0`. Backoff timing is Claude's discretion.
+- **D-12:** For aos-cron jobs, **suppress the "Scheduled task running…" preamble**
+  that the current scheduler sends before user-created tasks — the retired engine
+  had no such preamble, and `notify:` (D-03) governs aos-job chat output:
+  `on_finish` → send result, `on_failure` → send only on error/timeout.
 
 ### Schema migration (milestone rule / success criterion 5)
 - **D-09:** New `scheduled_tasks` columns (at minimum `source`, plus whatever is
@@ -146,8 +169,8 @@ describes, with the decisions below resolving the forks the handoff left open.
   hitting one session.
 - The exact env-var name/semantics for the CC gate (`CRON_IN_PROCESS=0`
   suggested by the handoff doc).
-- How `timeout` (`'10m'`/`'15m'`/`'5m'`) and `retry` (`'0'`/`'1'`) frontmatter
-  map onto the existing `TASK_TIMEOUT_MS` and run handling.
+- `timeout`/`retry` mapping is now decided in D-10/D-11; only the precise
+  duration-parse helper and retry backoff timing remain Claude's discretion.
 </decisions>
 
 <canonical_refs>
@@ -198,6 +221,9 @@ describes, with the decisions below resolving the forks the handoff left open.
 - `/Users/shannongueringer/App Repo/agentic-os/cron/jobs/*.md` — the 8 job
   definitions to sync (frontmatter: `name`, `time`, `days`, `active`, `model`,
   `notify`, `description`, `timeout`, `retry`; body = prompt). Source of truth.
+- `/Users/shannongueringer/App Repo/agentic-os/cron/templates/schedule-reference.md`
+  — the full `time`/`days` schedule grammar the mapping must cover (interval
+  `every_Nm`/`every_Nh`, comma multi-time, `weekends`, multi-day) per D-08a.
 - `/Users/shannongueringer/App Repo/agentic-os/command-centre/src/instrumentation.ts`
   — calls `initCronScheduler()` unconditionally (D-01 gates this).
 - `/Users/shannongueringer/App Repo/agentic-os/command-centre/scripts/cron-daemon.cjs`
