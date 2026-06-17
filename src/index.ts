@@ -18,6 +18,7 @@ import { runWarroomAvatarMigration } from './avatars.js';
 import { initOAuthHealthCheck } from './oauth-health.js';
 import { initOrchestrator } from './orchestrator.js';
 import { initScheduler } from './scheduler.js';
+import { syncAosCronJobs } from './aos-cron.js';
 import { setTelegramConnected, setSlackConnected, setBotInfo } from './state.js';
 import { getVenvPython, killProcess } from './platform.js';
 
@@ -353,6 +354,13 @@ async function main(): Promise<void> {
 
   const hasDestination = useSlack ? !!ALLOWED_SLACK_USER_ID : !!ALLOWED_CHAT_ID;
   if (hasDestination) {
+    // aos service only: project agentic-os cron/jobs/*.md into scheduled_tasks
+    // rows BEFORE the scheduler's first tick so due aos jobs exist to fire
+    // (SCH-02). Other agents (main, comms, ...) never sync — no fleet change.
+    if (AGENT_ID === 'aos') {
+      syncAosCronJobs();
+    }
+
     // The notifier handles chunking and transport-specific formatting.
     initScheduler(async (text) => { await notifyUser(text); }, AGENT_ID);
 
