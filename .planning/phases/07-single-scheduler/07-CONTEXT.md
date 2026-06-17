@@ -291,6 +291,21 @@ describes, with the decisions below resolving the forks the handoff left open.
 - Sequence the destructive/cutover steps (disable old engine, CC gate, live
   proof) **last**, after sync + the aos service + firing all work — never
   disable the old engine before the new path fires a real job.
+- **Cross-repo boundary (D-01 execution mechanic):** the `CRON_IN_PROCESS` gate
+  in `command-centre/src/instrumentation.ts` is the **only write** this phase
+  makes into the **agentic-os** repo (`Shannon1980/agentic-os`); every other
+  agentic-os touchpoint here is read-only (`cron/jobs/*.md`,
+  `schedule-reference.md`) or left dormant (`cron-daemon.cjs`, `start-crons.sh`).
+  All ClaudeClaw source/migrations/launchd work lands in the claudeclaw repo
+  (`Shannon1980/claudeclaw-os`) on the phase branch. A single git commit cannot
+  span both repos, so the executor MUST land the `instrumentation.ts` edit as a
+  **separate atomic commit on its own branch in the agentic-os checkout**
+  (`/Users/shannongueringer/App Repo/agentic-os`, currently on
+  `claude/phase-06-memsearch-retirement` with a dirty tree — branch from a clean
+  base) with its **own PR `--repo Shannon1980/agentic-os`** — do **not** attempt
+  to stage or commit it on the claudeclaw phase branch. The phase isn't fully
+  cut over until that agentic-os PR also merges; note the dependency in PLAN.md
+  so the live-proof step accounts for both repos.
 </specifics>
 
 <deferred>
