@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { CronExpressionParser } from 'cron-parser';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import {
   parseJobFile,
@@ -7,8 +10,10 @@ import {
   daysToCronField,
   isActiveFrontmatter,
   parseRetry,
+  syncAosCronJobs,
 } from './aos-cron.js';
 import { computeNextRun } from './scheduler.js';
+import { _initTestDatabase, getAllScheduledTasks } from './db.js';
 
 // ── Parser + defensive coercion ──────────────────────────────────────────────
 
@@ -144,5 +149,135 @@ describe('toCron output is parseable by the existing cron engine', () => {
       const expr = toCron(time, days, raw);
       expect(computeNextRun(expr)).toBeGreaterThan(nowSec);
     }
+  });
+});
+
+// ── syncAosCronJobs: upsert + dormant + orphan lifecycle ──────────────────────
+
+describe('syncAosCronJobs (upsert + deactivate-orphan lifecycle)', () => {
+  let dir: string;
+
+  // Mirrors the real agentic-os job set: 8 jobs, 3 active, 5 dormant. `name`
+  // values match the real frontmatter so the derived slug ids are stable.
+  const FIXTURES: Array<[string, Record<string, string>]> = [
+    ['daily-memory-distill', { name: 'daily-memory-distill', time: '23:00', days: 'daily', active: 'true', model: 'sonnet', notify: 'on_finish', timeout: '10m', retry: '0' }],
+    ['weekly-memory-curator', { name: 'weekly-memory-curator', time: '10:00', days: 'sun', active: 'true' }],
+    ['weekly-memory-gaps', { name: 'weekly-memory-gaps', time: '09:30', days: 'sun', active: 'true' }],
+    ['monthly-learnings-health', { name: 'monthly-learnings-health', time: '10:00', days: 'mon', active: 'false' }],
+    ['nightly-memsearch-index', { name: 'nightly-memsearch-index', time: '23:30', days: 'daily', active: 'false' }],
+    ['skill-update-check', { name: 'skill-update-check', time: '09:00', days: 'weekdays', active: 'false' }],
+    ['weekly-activity-digest', { name: 'weekly-activity-digest', time: '17:00', days: 'fri', active: 'false' }],
+    ['youtube-newsletter', { name: 'youtube-newsletter', time: '09:00', days: 'daily', active: 'false' }],
+  ];
+
+  function writeJob(slug: string, fm: Record<string, string>, body = 'job body text'): void {
+    const lines = Object.entries(fm).map(([k, v]) => `${k}: '${v}'`);
+    fs.writeFileSync(path.join(dir, `${slug}.md`), `---\n${lines.join('\n')}\n---\n${body}\n`);
+  }
+
+  beforeEach(() => {
+    _initTestDatabase();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-aos-cron-'));
+    for (const [slug, fm] of FIXTURES) writeJob(slug, fm);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('syncs all 8 fixtures to exactly 8 rows, scoped aos / aos-cron', () => {
+    syncAosCronJobs(dir);
+    const rows = getAllScheduledTasks();
+    expect(rows).toHaveLength(8);
+    for (const r of rows) {
+      expect(r.agent_id).toBe('aos');
+      expect(r.source).toBe('aos-cron');
+    }
+  });
+
+  it('marks exactly the 3 active jobs active, the rest paused', () => {
+    syncAosCronJobs(dir);
+    const rows = getAllScheduledTasks();
+    const active = rows.filter((r) => r.status === 'active').map((r) => r.id).sort();
+    expect(active).toEqual(['daily-memory-distill', 'weekly-memory-curator', 'weekly-memory-gaps']);
+    expect(rows.filter((r) => r.status === 'paused')).toHaveLength(5);
+  });
+
+  it('keeps nightly-memsearch-index dormant and never reactivates it on re-sync', () => {
+    syncAosCronJobs(dir);
+    let row = getAllScheduledTasks().find((r) => r.id === 'nightly-memsearch-index');
+    expect(row?.status).toBe('paused');
+    // Re-sync: dormant job must stay paused (sync never flips dormant -> active).
+    syncAosCronJobs(dir);
+    row = getAllScheduledTasks().find((r) => r.id === 'nightly-memsearch-index');
+    expect(row?.status).toBe('paused');
+  });
+
+  it('is idempotent: double-sync yields 8 rows (not 16)', () => {
+    syncAosCronJobs(dir);
+    syncAosCronJobs(dir);
+    expect(getAllScheduledTasks()).toHaveLength(8);
+  });
+
+  it('translates the 3 active jobs to the right cron strings', () => {
+    syncAosCronJobs(dir);
+    const byId = Object.fromEntries(getAllScheduledTasks().map((r) => [r.id, r]));
+    expect(byId['daily-memory-distill'].schedule).toBe('0 23 * * *');
+    expect(byId['weekly-memory-curator'].schedule).toBe('0 10 * * 0');
+    expect(byId['weekly-memory-gaps'].schedule).toBe('30 9 * * 0');
+  });
+
+  it('persists job metadata (model/notify/timeout/retry/job_path) on the row', () => {
+    syncAosCronJobs(dir);
+    const row = getAllScheduledTasks().find((r) => r.id === 'daily-memory-distill')!;
+    expect(row.model).toBe('sonnet');
+    expect(row.notify).toBe('on_finish');
+    expect(row.timeout).toBe('10m');
+    expect(row.retry).toBe(0);
+    expect(row.job_path).toContain('daily-memory-distill.md');
+    expect(row.prompt).toBe('job body text');
+  });
+
+  it('deactivates (pauses, never deletes) a removed job on re-sync', () => {
+    syncAosCronJobs(dir);
+    expect(getAllScheduledTasks()).toHaveLength(8);
+
+    // Remove an active job file and re-sync.
+    fs.rmSync(path.join(dir, 'daily-memory-distill.md'));
+    syncAosCronJobs(dir);
+
+    const rows = getAllScheduledTasks();
+    // Row count is preserved (D-07: never delete), the orphan is paused.
+    expect(rows).toHaveLength(8);
+    const orphan = rows.find((r) => r.id === 'daily-memory-distill');
+    expect(orphan?.status).toBe('paused');
+  });
+
+  it('never writes back to the .md source files (read-only projection)', () => {
+    const before = FIXTURES.map(([slug]) =>
+      fs.readFileSync(path.join(dir, `${slug}.md`), 'utf-8'),
+    );
+    syncAosCronJobs(dir);
+    const after = FIXTURES.map(([slug]) =>
+      fs.readFileSync(path.join(dir, `${slug}.md`), 'utf-8'),
+    );
+    expect(after).toEqual(before);
+  });
+
+  it('skips a malformed job file without aborting the whole sync', () => {
+    fs.writeFileSync(path.join(dir, 'broken.md'), 'no frontmatter here, just text');
+    syncAosCronJobs(dir);
+    // The 8 valid fixtures still sync; the broken one is skipped (logged).
+    const rows = getAllScheduledTasks();
+    expect(rows).toHaveLength(8);
+    expect(rows.find((r) => r.id === 'broken')).toBeUndefined();
+  });
+
+  it('returns quietly when the jobs dir does not exist', () => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    expect(() => syncAosCronJobs(dir)).not.toThrow();
+    expect(getAllScheduledTasks()).toHaveLength(0);
+    // re-create so afterEach cleanup is a no-op
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-aos-cron-'));
   });
 });
