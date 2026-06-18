@@ -7,6 +7,7 @@ import { PrivacyToggle } from '@/components/PrivacyToggle';
 import { BrainGraph } from '@/components/BrainGraph';
 import { useFetch } from '@/lib/useFetch';
 import { formatRelativeTime } from '@/lib/format';
+import { term } from '@/lib/vocabulary';
 import { privacyBlur } from '@/lib/privacy';
 import { hasWebGL } from '@/lib/webgl';
 
@@ -82,7 +83,7 @@ export function HiveMind() {
   return (
     <div class="flex flex-col h-full">
       <PageHeader
-        title="Hive Mind"
+        title={term('page.pulse')}
         actions={
           <>
             <span class="text-[11px] text-[var(--color-text-muted)] tabular-nums">{entries.length} entries</span>

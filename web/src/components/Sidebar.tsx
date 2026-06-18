@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'wouter-preact';
 import { Search, ChevronDown, X } from 'lucide-preact';
-import { ROUTES, SECTION_LABEL, type RouteSection } from '@/lib/routes';
+import { ROUTES, routeLabel, sectionLabel, type RouteSection } from '@/lib/routes';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { commandPaletteOpen } from '@/lib/command-palette';
 import { chatUnread } from '@/lib/chat-stream';
@@ -74,7 +74,7 @@ export function Sidebar() {
                   class="text-[var(--color-text-faint)] transition-transform"
                   style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
                 />
-                <span>{SECTION_LABEL[section]}</span>
+                <span>{sectionLabel(section)}</span>
               </button>
               {!isCollapsed && items.map((r) => {
                 const active = pathname === r.path
@@ -95,7 +95,7 @@ export function Sidebar() {
                     ].join(' ')}
                   >
                     <Icon size={16} />
-                    <span class="flex-1">{r.label}</span>
+                    <span class="flex-1">{routeLabel(r)}</span>
                     {unread > 0 && (
                       <span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10.5px] font-semibold tabular-nums bg-[var(--color-accent)] text-white">
                         {unread > 99 ? '99+' : unread}

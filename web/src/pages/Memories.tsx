@@ -8,6 +8,7 @@ import { useFetch } from '@/lib/useFetch';
 import { useDebouncedValue } from '@/lib/useDebounce';
 import { formatRelativeTime, safeJsonArray } from '@/lib/format';
 import { chatId, apiGet } from '@/lib/api';
+import { term } from '@/lib/vocabulary';
 import { privacyBlur } from '@/lib/privacy';
 
 type SortMode = 'importance' | 'salience' | 'recent';
@@ -90,7 +91,7 @@ export function Memories() {
   return (
     <div class="flex flex-col h-full">
       <PageHeader
-        title="Memories"
+        title={term('page.knowledge')}
         actions={
           <>
             <span class="text-[11px] text-[var(--color-text-muted)] tabular-nums mr-2">
