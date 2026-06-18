@@ -10,6 +10,7 @@ import { ProjectAttachSelect, type ProjectLite } from '@/components/ProjectTaskA
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiPatch, apiDelete, apiGet, apiUpload } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
+import { term } from '@/lib/vocabulary';
 import { pushToast } from '@/lib/toasts';
 import { workspaceName } from '@/lib/personalization';
 
@@ -120,7 +121,7 @@ export function MissionControl() {
   const loading = (tasks.loading || agents.loading) && !tasks.data;
   const error = tasks.error || agents.error;
   const wsName = workspaceName.value;
-  const headerTitle = wsName && wsName !== 'ClaudeClaw' ? `${wsName} · Tasks` : 'Mission Control';
+  const headerTitle = wsName && wsName !== 'ClaudeClaw' ? `${wsName} · Tasks` : term('page.home');
 
   return (
     <div class="flex flex-col h-full">

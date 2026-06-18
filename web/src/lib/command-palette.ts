@@ -1,6 +1,7 @@
 import { signal } from '@preact/signals';
-import { ROUTES } from './routes';
+import { ROUTES, routeLabel } from './routes';
 import { setTheme } from './theme';
+import { term } from './vocabulary';
 
 export const commandPaletteOpen = signal(false);
 
@@ -18,7 +19,7 @@ export interface PaletteAction {
 export function buildActions(): PaletteAction[] {
   const nav: PaletteAction[] = ROUTES.map((r) => ({
     id: 'nav:' + r.path,
-    label: r.label,
+    label: routeLabel(r),
     hint: r.shortcut ? r.shortcut.toUpperCase() : undefined,
     group: 'Navigation',
     run: ({ navigate }) => navigate(r.path),
@@ -33,14 +34,14 @@ export function buildActions(): PaletteAction[] {
   const actions: PaletteAction[] = [
     {
       id: 'action:new-task',
-      label: 'New mission task',
+      label: term('action.newTask'),
       hint: 'C',
       group: 'Actions',
       run: ({ navigate }) => navigate('/mission?new=1'),
     },
     {
       id: 'action:new-agent',
-      label: 'Create new agent',
+      label: term('action.addTeammate'),
       group: 'Actions',
       run: ({ navigate }) => navigate('/agents?new=1'),
     },

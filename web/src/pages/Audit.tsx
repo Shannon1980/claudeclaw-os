@@ -4,6 +4,7 @@ import { PageHeader, Tab } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { apiGet } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
+import { term } from '@/lib/vocabulary';
 
 interface AuditEntry {
   id: number;
@@ -63,7 +64,7 @@ export function Audit() {
   return (
     <div class="flex flex-col h-full">
       <PageHeader
-        title="Audit"
+        title={term('page.activity')}
         actions={<span class="text-[11px] text-[var(--color-text-muted)] tabular-nums">{filter === 'blocked' ? items.length + ' blocked' : total + ' entries'}</span>}
         tabs={
           <>
