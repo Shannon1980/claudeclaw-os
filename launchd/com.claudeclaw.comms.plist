@@ -27,8 +27,8 @@
   <key>ThrottleInterval</key>
   <integer>30</integer>
   <key>StandardOutPath</key>
-  <string>__PROJECT_DIR__/logs/comms.log</string>
+  <string>/tmp/claudeclaw-comms.log</string>
   <key>StandardErrorPath</key>
-  <string>__PROJECT_DIR__/logs/comms.log</string>
+  <string>/tmp/claudeclaw-comms.log</string>
 </dict>
 </plist>
