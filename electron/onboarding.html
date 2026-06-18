@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';"
+    />
+    <title>Set up ClaudeClaw</title>
+    <style>
+      /* Flat, dark-first, sentence case — inherits the dashboard language.
+         No gradients or shadows; colors via variables. */
+      :root {
+        --bg: #0b0d12;
+        --panel: #11141b;
+        --fg: #e7e9ee;
+        --muted: #8a90a0;
+        --accent: #7c8cff;
+        --accent-fg: #0b0d12;
+        --track: #20242e;
+        --ok: #4ec98a;
+        --err: #e2645a;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        font-size: 14px;
+      }
+      .app { height: 100%; display: flex; flex-direction: column; }
+
+      /* Progress indicator across the top. */
+      .progress {
+        display: flex;
+        gap: 8px;
+        padding: 20px 28px;
+        border-bottom: 1px solid var(--track);
+      }
+      .progress .dot {
+        flex: 1;
+        height: 3px;
+        border-radius: 3px;
+        background: var(--track);
+      }
+      .progress .dot.done { background: var(--accent); }
+
+      .body {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        justify-content: center;
+        padding: 40px 28px;
+      }
+      .content { width: 100%; max-width: 520px; }
+      h1 { font-size: 22px; font-weight: 500; margin: 0 0 8px; }
+      h2 { font-size: 13px; font-weight: 500; margin: 0 0 4px; }
+      p { color: var(--muted); line-height: 1.55; margin: 0 0 14px; }
+      .lead { color: var(--fg); }
+
+      .values { list-style: none; padding: 0; margin: 18px 0; }
+      .values li {
+        display: flex; gap: 10px; align-items: flex-start;
+        padding: 12px 0; border-top: 1px solid var(--track);
+        color: var(--fg);
+      }
+      .values li .ico { color: var(--accent); flex: none; }
+
+      /* Setup checklist rows. */
+      .rows { margin: 18px 0; }
+      .row {
+        display: flex; align-items: center; gap: 12px;
+        padding: 14px 0; border-top: 1px solid var(--track);
+      }
+      .row:last-child { border-bottom: 1px solid var(--track); }
+      .row .label { flex: 1; }
+      .row .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+      .status { font-size: 18px; width: 22px; text-align: center; flex: none; }
+      .status.pending { color: var(--muted); }
+      .status.ok { color: var(--ok); }
+      .status.err { color: var(--err); }
+      .spin {
+        width: 14px; height: 14px; border-radius: 50%;
+        border: 2px solid var(--track); border-top-color: var(--accent);
+        animation: rot 0.8s linear infinite; display: inline-block;
+      }
+      @keyframes rot { to { transform: rotate(360deg); } }
+
+      .log {
+        margin-top: 14px; background: var(--panel); border: 1px solid var(--track);
+        border-radius: 8px; padding: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px; color: var(--muted); white-space: pre-wrap;
+        max-height: 140px; overflow-y: auto;
+      }
+      .log:empty { display: none; }
+
+      /* Transport cards. */
+      .cards { display: flex; gap: 12px; margin: 18px 0; }
+      .card {
+        flex: 1; border: 1px solid var(--track); border-radius: 10px;
+        padding: 16px; cursor: pointer; background: var(--panel);
+        transition: border-color 0.12s;
+      }
+      .card:hover { border-color: var(--muted); }
+      .card.selected { border-color: var(--accent); }
+      .card .name { font-weight: 500; margin-bottom: 4px; }
+      .card .tag { font-size: 11px; color: var(--accent); }
+      .card .desc { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+      .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 18px 0; }
+      .tool {
+        border: 1px solid var(--track); border-radius: 10px; padding: 14px;
+        text-align: center; color: var(--muted); background: var(--panel);
+      }
+      .tool .name { color: var(--fg); font-weight: 500; }
+      .tool .soon { font-size: 11px; margin-top: 4px; }
+
+      label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+      input[type="text"], input[type="password"] {
+        width: 100%; padding: 10px 12px; border-radius: 8px;
+        border: 1px solid var(--track); background: var(--panel); color: var(--fg);
+        font-size: 13px;
+      }
+      input:focus { outline: none; border-color: var(--accent); }
+
+      a.link { color: var(--accent); cursor: pointer; text-decoration: none; }
+      a.link:hover { text-decoration: underline; }
+      .hidden { display: none !important; }
+      .note { font-size: 12px; color: var(--muted); }
+      .confirm { color: var(--ok); font-size: 13px; margin-top: 8px; }
+
+      /* Footer. */
+      .footer {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 16px 28px; border-top: 1px solid var(--track);
+      }
+      button {
+        font: inherit; border-radius: 8px; padding: 10px 18px; cursor: pointer;
+        border: 1px solid var(--track); background: transparent; color: var(--fg);
+      }
+      button:hover { border-color: var(--muted); }
+      button.primary {
+        background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+        font-weight: 500;
+      }
+      button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+      button.ghost { border-color: transparent; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="progress" id="progress"></div>
+      <div class="body">
+        <div class="content" id="content"></div>
+      </div>
+      <div class="footer">
+        <button class="ghost" id="back">Back</button>
+        <div style="flex:1"></div>
+        <button class="ghost hidden" id="skip">Skip</button>
+        <button class="primary" id="next">Continue</button>
+      </div>
+    </div>
+
+    <script>
+      const api = window.claudeclaw.onboarding;
+      const STEPS = ['welcome', 'setup', 'signin', 'transport', 'tools', 'done'];
+      let step = 0;
+      const state = { auth: null, transport: null };
+
+      const $ = (id) => document.getElementById(id);
+      const content = $('content');
+      const backBtn = $('back');
+      const nextBtn = $('next');
+      const skipBtn = $('skip');
+
+      function renderProgress() {
+        $('progress').innerHTML = STEPS.map(
+          (_, i) => `<div class="dot ${i <= step ? 'done' : ''}"></div>`,
+        ).join('');
+      }
+
+      // ── Step renderers ───────────────────────────────────────────────
+      const render = {
+        welcome() {
+          content.innerHTML = `
+            <h1>Welcome to ClaudeClaw</h1>
+            <p class="lead">Your assistant runs on this machine. Your files and accounts never leave it.</p>
+            <ul class="values">
+              <li><span class="ico">●</span><div>Runs quietly in the background, even when this window is closed.</div></li>
+              <li><span class="ico">●</span><div>Reach it from Slack or your phone, wherever you are.</div></li>
+              <li><span class="ico">●</span><div>Your files and accounts stay on this Mac. Nothing is uploaded.</div></li>
+            </ul>`;
+          setFooter({ next: 'Continue' });
+        },
+
+        async setup() {
+          content.innerHTML = `
+            <h1>Setting things up</h1>
+            <p>This happens automatically. You don't need to do anything.</p>
+            <div class="rows">
+              <div class="row" id="row-engine">
+                <span class="status pending" id="st-engine"><span class="spin"></span></span>
+                <div class="label">Engine ready<div class="sub">Local background service</div></div>
+              </div>
+              <div class="row" id="row-cli">
+                <span class="status pending" id="st-cli"><span class="spin"></span></span>
+                <div class="label">Claude Code<div class="sub" id="cli-sub">Checking…</div></div>
+              </div>
+            </div>
+            <div class="log" id="log"></div>`;
+          setFooter({ next: 'Continue', disabled: true });
+          attachLog();
+          await runSetup();
+        },
+
+        signin() {
+          const li = state.auth === 'oauth' || state.auth === 'apikey';
+          content.innerHTML = `
+            <h1>Sign in to Claude</h1>
+            <p>ClaudeClaw uses your existing Claude subscription. No API keys, no extra per-message cost.</p>
+            <button class="primary" id="login-btn">Sign in with Claude</button>
+            <div class="confirm hidden" id="login-ok">Signed in.</div>
+            <p style="margin-top:18px"><a class="link" id="apikey-toggle">Use an API key instead</a></p>
+            <div id="apikey-box" class="hidden">
+              <p class="note">Recommended if you run heavy automation around the clock. Your key is stored locally.</p>
+              <label for="apikey">Anthropic API key</label>
+              <input type="password" id="apikey" placeholder="sk-ant-…" />
+              <p style="margin-top:10px"><button id="apikey-save">Save key</button></p>
+              <div class="confirm hidden" id="apikey-ok">API key saved.</div>
+            </div>`;
+          setFooter({ next: 'Continue', disabled: !li });
+          if (li) $('login-ok').classList.remove('hidden');
+
+          $('login-btn').onclick = async () => {
+            $('login-btn').textContent = 'Opening sign-in…';
+            $('login-btn').disabled = true;
+            const res = await api.claudeLogin();
+            if (res.ok) {
+              await api.saveAuth({ mode: 'oauth' });
+              state.auth = 'oauth';
+              $('login-ok').classList.remove('hidden');
+              nextBtn.disabled = false;
+            } else {
+              $('login-btn').textContent = 'Try again';
+              $('login-btn').disabled = false;
+              alert(res.error || 'Sign-in did not complete.');
+            }
+          };
+          $('apikey-toggle').onclick = () =>
+            $('apikey-box').classList.toggle('hidden');
+          $('apikey-save').onclick = async () => {
+            const key = $('apikey').value.trim();
+            if (!key) return;
+            const res = await api.saveAuth({ mode: 'apikey', key });
+            if (res.ok) {
+              state.auth = 'apikey';
+              $('apikey-ok').classList.remove('hidden');
+              nextBtn.disabled = false;
+            } else {
+              alert(res.error || 'Could not save key.');
+            }
+          };
+        },
+
+        transport() {
+          content.innerHTML = `
+            <h1>Where do you want to talk to it?</h1>
+            <p>Pick where you'll message your assistant. You can add the other later.</p>
+            <div class="cards">
+              <div class="card" data-t="slack" id="card-slack">
+                <div class="name">Slack</div><div class="tag">Recommended</div>
+                <div class="desc">Message it in a DM or channel.</div>
+              </div>
+              <div class="card" data-t="telegram" id="card-telegram">
+                <div class="name">Telegram</div><div class="tag">&nbsp;</div>
+                <div class="desc">Message it from your phone.</div>
+              </div>
+            </div>
+            <div id="slack-fields" class="hidden">
+              <p class="note">Create a Slack app and paste its tokens. <a class="link" id="slack-help">How to get these</a></p>
+              <label>Bot token (xoxb-…)</label><input type="password" id="slack-bot" />
+              <label>App token (xapp-…)</label><input type="password" id="slack-app" />
+              <label>Your Slack user ID (optional, U…)</label><input type="text" id="slack-user" />
+            </div>
+            <div id="telegram-fields" class="hidden">
+              <p class="note">Create a bot with @BotFather and paste its token. <a class="link" id="tg-help">How to get this</a></p>
+              <label>Bot token</label><input type="password" id="tg-bot" />
+              <label>Your chat ID (optional)</label><input type="text" id="tg-chat" />
+            </div>`;
+          setFooter({ next: 'Continue', disabled: true });
+
+          const pick = (t) => {
+            state.transport = t;
+            $('card-slack').classList.toggle('selected', t === 'slack');
+            $('card-telegram').classList.toggle('selected', t === 'telegram');
+            $('slack-fields').classList.toggle('hidden', t !== 'slack');
+            $('telegram-fields').classList.toggle('hidden', t !== 'telegram');
+            validateTransport();
+          };
+          $('card-slack').onclick = () => pick('slack');
+          $('card-telegram').onclick = () => pick('telegram');
+          $('slack-help').onclick = () =>
+            openExternal('https://github.com/Shannon1980/claudeclaw-os#slack');
+          $('tg-help').onclick = () =>
+            openExternal('https://github.com/Shannon1980/claudeclaw-os#telegram');
+          ['slack-bot', 'slack-app', 'tg-bot'].forEach((id) => {
+            const el = $(id);
+            if (el) el.oninput = validateTransport;
+          });
+        },
+
+        tools() {
+          content.innerHTML = `
+            <h1>Connect your tools</h1>
+            <p>Optional. You can connect these any time from Settings.</p>
+            <div class="grid">
+              <div class="tool"><div class="name">Gmail</div><div class="soon">Connect later</div></div>
+              <div class="tool"><div class="name">Calendar</div><div class="soon">Connect later</div></div>
+              <div class="tool"><div class="name">Drive</div><div class="soon">Connect later</div></div>
+            </div>
+            <p class="note">One-click tool connect is coming soon. For now, skip this and you're set.</p>`;
+          setFooter({ next: 'Continue', skip: true });
+        },
+
+        done() {
+          content.innerHTML = `
+            <h1>You're all set</h1>
+            <p class="lead">ClaudeClaw is starting up. It keeps running in the background even when you close this window.</p>
+            <p>Message it from ${state.transport === 'telegram' ? 'Telegram' : 'Slack'} any time, or use the dashboard that's about to open.</p>`;
+          setFooter({ next: 'Open dashboard' });
+        },
+      };
+
+      // ── Step 2 logic: run checks, auto-install the CLI, surface retry ──
+      async function runSetup() {
+        setStatus('st-engine', 'ok');
+        const sub = $('cli-sub');
+        let cli = await api.checkCli();
+        if (!cli.ok) {
+          sub.textContent = 'Installing…';
+          const res = await api.installCli();
+          cli = { ok: res.ok, version: res.version };
+          if (!res.ok) {
+            setStatus('st-cli', 'err');
+            sub.innerHTML =
+              'Could not install. <a class="link" id="retry-cli">Retry</a>';
+            $('retry-cli').onclick = () => render.setup();
+            return;
+          }
+        }
+        setStatus('st-cli', 'ok');
+        sub.textContent = cli.version || 'Installed';
+        nextBtn.disabled = false;
+      }
+
+      function setStatus(id, kind) {
+        const el = $(id);
+        el.className = 'status ' + kind;
+        el.textContent = kind === 'ok' ? '✓' : kind === 'err' ? '✕' : '';
+        if (kind === 'pending') el.innerHTML = '<span class="spin"></span>';
+      }
+
+      function attachLog() {
+        const log = $('log');
+        api.onLog((line) => {
+          log.textContent += line;
+          log.scrollTop = log.scrollHeight;
+        });
+      }
+
+      function validateTransport() {
+        let ok = false;
+        if (state.transport === 'slack') {
+          ok = $('slack-bot').value.trim() && $('slack-app').value.trim();
+        } else if (state.transport === 'telegram') {
+          ok = !!$('tg-bot').value.trim();
+        }
+        nextBtn.disabled = !ok;
+      }
+
+      async function saveTransport() {
+        if (state.transport === 'telegram') {
+          return api.saveTransport({
+            type: 'telegram',
+            telegramBotToken: $('tg-bot').value,
+            allowedChatId: $('tg-chat').value,
+          });
+        }
+        return api.saveTransport({
+          type: 'slack',
+          slackBotToken: $('slack-bot').value,
+          slackAppToken: $('slack-app').value,
+          allowedSlackUserId: $('slack-user').value,
+        });
+      }
+
+      function openExternal(url) {
+        // setWindowOpenHandler in main routes http(s) to the system browser.
+        window.open(url, '_blank');
+      }
+
+      function setFooter({ next, disabled, skip }) {
+        nextBtn.textContent = next || 'Continue';
+        nextBtn.disabled = !!disabled;
+        backBtn.style.visibility = step === 0 ? 'hidden' : 'visible';
+        skipBtn.classList.toggle('hidden', !skip);
+      }
+
+      async function go(n) {
+        step = Math.max(0, Math.min(STEPS.length - 1, n));
+        renderProgress();
+        await render[STEPS[step]]();
+      }
+
+      // ── Footer navigation ─────────────────────────────────────────────
+      backBtn.onclick = () => go(step - 1);
+      skipBtn.onclick = () => go(step + 1);
+      nextBtn.onclick = async () => {
+        const name = STEPS[step];
+        if (name === 'transport') {
+          nextBtn.disabled = true;
+          const res = await saveTransport();
+          if (!res.ok) {
+            alert(res.error || 'Could not save. Check the tokens.');
+            nextBtn.disabled = false;
+            return;
+          }
+        }
+        if (name === 'done') {
+          nextBtn.disabled = true;
+          nextBtn.textContent = 'Starting…';
+          await api.finish();
+          return; // main navigates to the dashboard
+        }
+        await go(step + 1);
+      };
+
+      go(0);
+    </script>
+  </body>
+</html>
