@@ -4,6 +4,10 @@ node_modules/
 # Build output
 dist/
 
+# Electron packaged installers (electron-builder output)
+release/
+dist_electron/
+
 # Environment — never commit API keys
 .env
 
