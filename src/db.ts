@@ -525,7 +525,7 @@ function runMigrations(database: Database.Database): void {
   }
 
   // aos-cron columns (Phase 7, SCH-02/SCH-03). These also ship as the versioned
-  // migration migrations/v1.1.1/add-aos-cron-scheduled-task-columns.ts for the
+  // migration migrations/v1.2.1/add-aos-cron-scheduled-task-columns.ts for the
   // production DB; mirrored here via addColumnIfMissing so the in-memory test DB
   // (createSchema + runMigrations, no versioned-migration run) reaches column
   // parity. `source` defaults to 'user' so existing rows stay non-aos-cron.
