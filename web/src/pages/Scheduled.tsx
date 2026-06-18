@@ -9,6 +9,7 @@ import { EditTaskModal } from '@/components/EditTaskModal';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiDelete } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
+import { term } from '@/lib/vocabulary';
 import { privacyBlur } from '@/lib/privacy';
 import { pushToast } from '@/lib/toasts';
 import { describeCron } from '@/lib/cron';
@@ -131,7 +132,7 @@ export function Scheduled() {
   return (
     <div class="flex flex-col h-full">
       <PageHeader
-        title="Scheduled"
+        title={term('page.routines')}
         actions={
           <>
             <span class="text-[11.5px] text-[var(--color-text-muted)] tabular-nums">

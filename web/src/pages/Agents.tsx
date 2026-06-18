@@ -14,6 +14,7 @@ import { useFetch } from '@/lib/useFetch';
 import { useDebouncedValue } from '@/lib/useDebounce';
 import { apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { formatCost } from '@/lib/format';
+import { term } from '@/lib/vocabulary';
 import { showCosts } from '@/lib/theme';
 import { pushToast } from '@/lib/toasts';
 
@@ -103,7 +104,7 @@ export function Agents() {
   return (
     <div class="flex flex-col h-full">
       <PageHeader
-        title="Agents"
+        title={term('page.team')}
         actions={
           <>
             <span class="text-[11px] text-[var(--color-text-muted)] tabular-nums mr-2">

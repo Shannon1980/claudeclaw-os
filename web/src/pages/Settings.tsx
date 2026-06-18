@@ -12,6 +12,7 @@ import {
   uiScale, setUiScale,
   showCosts, setShowCosts,
 } from '@/lib/theme';
+import { vocabMode, toggleVocabMode } from '@/lib/vocabulary';
 import {
   workspaceName,
   setWorkspaceName,
@@ -107,6 +108,14 @@ export function Settings() {
                   on={showCosts.value}
                   onChange={() => setShowCosts(!showCosts.value)}
                   ariaLabel="Show costs"
+                />
+              </Row>
+              <Divider />
+              <Row label="Advanced labels" hint="Show builder terms (agents, models, scheduled tasks) instead of the plain operator labels (teammates, brains, routines).">
+                <Toggle
+                  on={vocabMode.value === 'builder'}
+                  onChange={toggleVocabMode}
+                  ariaLabel="Advanced labels"
                 />
               </Row>
             </Card>
