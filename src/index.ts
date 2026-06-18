@@ -3,7 +3,7 @@ import path from 'path';
 
 import { loadAgentConfig, listAgentIds, resolveAgentDir, resolveAgentClaudeMd, refreshWarRoomRoster } from './agent-config.js';
 import { createBot } from './bot.js';
-import { createSlackBot, type SlackBot } from './slack-bot.js';
+import { createSlackBot, createSlackSender, type SlackBot, type SlackSender } from './slack-bot.js';
 import { splitMessage } from './format.js';
 import { checkPendingMigrations } from './migrations.js';
 import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
@@ -199,13 +199,24 @@ async function main(): Promise<void> {
 
   cleanupOldUploads();
 
-  const bot = useSlack ? undefined : createBot();
+  // A sub-agent (--agent) wired to the Slack bot token posts cron/proactive
+  // output to Slack via a send-only Web API client — NO Socket Mode listener,
+  // so it never double-handles events with the main process (Phase 07 aos).
+  // Telegram-backed sub-agents (their own *_BOT_TOKEN) keep the Telegram path.
+  // True when this sub-agent's resolved bot token IS the main Slack bot token
+  // (i.e. its config sets telegram_bot_token_env: SLACK_BOT_TOKEN). activeBotToken
+  // is the agent's own token after setAgentOverrides; comparing to SLACK_BOT_TOKEN
+  // keeps this in main()'s scope (agentConfig is only bound in the pre-main bootstrap).
+  const useSlackSender = !useSlack && TRANSPORT === 'slack' && !!SLACK_BOT_TOKEN && activeBotToken === SLACK_BOT_TOKEN;
+  const bot = (useSlack || useSlackSender) ? undefined : createBot();
   const slack: SlackBot | undefined = useSlack ? createSlackBot() : undefined;
+  const slackSender: SlackSender | undefined = useSlackSender ? createSlackSender() : undefined;
 
   // Unified proactive notifier — routes scheduler / OAuth-health / War Room
   // messages to whichever transport is active.
   const notifyUser = async (text: string): Promise<void> => {
     if (slack) { await slack.postToUser(text); return; }
+    if (slackSender) { await slackSender.postToUser(text); return; }
     if (bot) {
       for (const chunk of splitMessage(text)) {
         await bot.api.sendMessage(ALLOWED_CHAT_ID, chunk, { parse_mode: 'HTML' }).catch((err) =>
