@@ -1,0 +1,14 @@
+name: aos
+description: Agentic OS workspace agent. Runs the single cron scheduler for ClaudeClaw -- fires the agentic-os cron/jobs/*.md on schedule (memory distillation, weekly digests, curators) scoped to the agentic-os workspace. Gates Slack output by each job's notify policy. Phase 07 single-scheduler.
+
+# Add a Slack bot token to .env as AOS_BOT_TOKEN.
+# (Key name is telegram_bot_token_env for legacy reasons; the value is the
+#  env var holding the Slack bot token, same convention as the other agents.)
+telegram_bot_token_env: AOS_BOT_TOKEN
+
+model: claude-sonnet-4-6
+
+# Workspace root: aos runs against your agentic-os checkout. This is what makes
+# resolveAosJobsDir() find <project_dir>/cron/jobs for syncAosCronJobs().
+# Point this at your real agentic-os path.
+project_dir: /path/to/agentic-os
