@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Memory Source of Record** - ClaudeClaw SQLite is the single memory store; bot exchanges persist and recall across sessions (completed 2026-06-15)
 - [x] **Phase 5: Memory Projection & Capture** - SQLite memories render to agentic-os daily markdown; terminal-session work captured back via hooks (completed 2026-06-15)
 - [x] **Phase 6: memsearch Retirement** - Second semantic index disabled; recall runs entirely through ClaudeClaw embeddings (completed 2026-06-16)
-- [ ] **Phase 7: Single Scheduler** - ClaudeClaw scheduler reads agentic-os cron/jobs/*.md and is the only runner; agentic-os cron disabled, no double-fire
+- [x] **Phase 7: Single Scheduler** - ClaudeClaw scheduler reads agentic-os cron/jobs/*.md and is the only runner; agentic-os cron disabled, no double-fire (completed 2026-06-19)
 - [ ] **Phase 8: Per-Agent Soul** - Every agent gets its own SOUL.md (voice) separate from its role CLAUDE.md; workspace agent's soul aligns with agentic-os SOUL.md
 - [ ] **Phase 9: Command Centre Repoint** - Command Centre reads ClaudeClaw SQLite through the decryption path; its own cron/memory engines disabled
 - [ ] **Phase 10: Compatibility Verification** - Both modes proven working end-to-end, no default-fleet regression, full test suite green
@@ -140,7 +140,7 @@ Plans:
 - [x] 07-02-PLAN.md — src/aos-cron.ts: frontmatter+body parser, time/days->cron mapping, syncAosCronJobs lifecycle
 - [x] 07-03-PLAN.md — com.claudeclaw.aos launchd plist (spaces-safe /tmp logs, crash recovery)
 - [x] 07-04-PLAN.md — aos firing loop in scheduler.ts (atomic claim, prompt re-read, timeout/retry, notify, no preamble) + index.ts wiring
-- [ ] 07-05-PLAN.md — Cutover + live proof: CRON_IN_PROCESS gate, migrate+restart, load aos service, no-double-fire human-verify (LAST)
+- [x] 07-05-PLAN.md — Cutover + live proof: CRON_IN_PROCESS gate, migrate+restart, load aos service, no-double-fire human-verify (LAST)
 
 ### Phase 8: Per-Agent Soul
 **Goal**: Introduce a per-agent `SOUL.md` that defines each named agent's personality/voice, loaded into its system prompt separately from its role (`CLAUDE.md`). Souls resolve like role files (`CLAUDECLAW_CONFIG/agents/<id>/SOUL.md` first, repo fallback), mirroring `resolveAgentClaudeMd` in `src/agent-config.ts`. The workspace agent's soul aligns with agentic-os `SOUL.md`; the existing named fleet (Bertha, Forge, Samantha, Sentinel, Skylar) each gain a distinct soul without losing role behavior.
@@ -192,7 +192,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 4. Memory Source of Record | 1/2 | In Progress|  |
 | 5. Memory Projection & Capture | 1/2 | In Progress|  |
 | 6. memsearch Retirement | 3/3 | Complete   | 2026-06-16 |
-| 7. Single Scheduler | 4/5 | In Progress|  |
+| 7. Single Scheduler | 5/5 | Complete   | 2026-06-19 |
 | 8. Per-Agent Soul | 0/TBD | Not started | - |
 | 9. Command Centre Repoint | 0/TBD | Not started | - |
 | 10. Compatibility Verification | 0/TBD | Not started | - |
