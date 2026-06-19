@@ -46,6 +46,10 @@ import {
   assignMissionTask,
   getUnassignedMissionTasks,
   getMissionTaskHistory,
+  getHomeSummary,
+  setMissionTaskBlocked,
+  unblockMissionTask,
+  getUpcomingScheduledTasks,
   getAuditLog,
   getAuditLogCount,
   getRecentBlockedActions,
@@ -1579,6 +1583,32 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return c.json({ task });
   });
 
+  // Home daily-loop payload, grouped server-side (operator-product 03-home.md).
+  // One call returns the three zones, the needs-you queue, and "Today"
+  // suggestions. "Today" is derived from routines due in the next 24h — the
+  // only schedule data this process can surface honestly without a
+  // calendar/email integration (D2: no unprompted inbox scan). The frontend
+  // falls back to starter prompts when both needsYou and today are empty.
+  app.get('/api/home/summary', (c) => {
+    const summary = getHomeSummary();
+    const upcoming = getUpcomingScheduledTasks(24 * 60 * 60);
+    const today = upcoming.slice(0, 4).map((r) => ({
+      id: r.id,
+      kind: 'routine' as const,
+      text: r.prompt.length > 80 ? r.prompt.slice(0, 77) + '…' : r.prompt,
+      when: r.next_run,
+    }));
+    const status = {
+      needsYou: summary.needsYou.length,
+      waiting: summary.waiting.length,
+      shipped: summary.shipped.length,
+      hasAnyWork:
+        summary.needsYou.length + summary.onPlate.length +
+        summary.waiting.length + summary.shipped.length > 0,
+    };
+    return c.json({ ...summary, today, status });
+  });
+
   app.post('/api/mission/tasks', async (c) => {
     const body = await c.req.json<{
       title?: string;
@@ -1626,6 +1656,26 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const id = c.req.param('id');
     const ok = cancelMissionTask(id);
     return c.json({ ok });
+  });
+
+  // Park a task as "waiting on others" with a free-text note of who/what.
+  app.post('/api/mission/tasks/:id/block', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json<{ blocked_on?: string }>().catch(() => ({} as { blocked_on?: string }));
+    const blockedOn = (body?.blocked_on ?? '').trim();
+    if (!blockedOn) return c.json({ error: 'blocked_on required' }, 400);
+    if (blockedOn.length > 200) return c.json({ error: 'blocked_on too long (max 200 chars)' }, 400);
+    const ok = setMissionTaskBlocked(id, blockedOn);
+    if (!ok) return c.json({ error: 'Task not found or not blockable' }, 409);
+    return c.json({ ok, task: getMissionTask(id) });
+  });
+
+  // Return a blocked task to the queue.
+  app.post('/api/mission/tasks/:id/unblock', (c) => {
+    const id = c.req.param('id');
+    const ok = unblockMissionTask(id);
+    if (!ok) return c.json({ error: 'Task not blocked' }, 409);
+    return c.json({ ok, task: getMissionTask(id) });
   });
 
   // Auto-assign all unassigned tasks. MUST register before /:id/auto-assign

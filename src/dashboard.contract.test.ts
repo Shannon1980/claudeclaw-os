@@ -691,3 +691,83 @@ describe('Security headers on /', () => {
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
   });
 });
+
+// ── Home daily-loop endpoints (operator-product step 3) ──────────────
+
+async function createTask(fields: Record<string, unknown>): Promise<string> {
+  const res = await app.request('/api/mission/tasks' + Q, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  const body = await jsonOf(res);
+  return body.task.id as string;
+}
+
+async function postAction(p: string, body?: unknown) {
+  return app.request(p + Q, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+describe('GET /api/home/summary', () => {
+  it('returns the grouped daily-loop shape', async () => {
+    const res = await get('/api/home/summary');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({
+      needsYou: expect.any(Array),
+      onPlate: expect.any(Array),
+      waiting: expect.any(Array),
+      shipped: expect.any(Array),
+      today: expect.any(Array),
+      status: {
+        needsYou: expect.any(Number),
+        waiting: expect.any(Number),
+        shipped: expect.any(Number),
+        hasAnyWork: expect.any(Boolean),
+      },
+    });
+  });
+
+  it('routes an unassigned task into needsYou and reflects hasAnyWork', async () => {
+    await createTask({ title: 'route me', prompt: 'p' });
+    const res = await get('/api/home/summary');
+    const body = await jsonOf(res);
+    expect(body.status.hasAnyWork).toBe(true);
+    expect(body.needsYou.some((t: any) => t.title === 'route me')).toBe(true);
+  });
+});
+
+describe('POST /api/mission/tasks/:id/block + /unblock', () => {
+  it('rejects a block with no blocked_on (400)', async () => {
+    const id = await createTask({ title: 'b', prompt: 'p' });
+    const res = await postAction(`/api/mission/tasks/${id}/block`, { blocked_on: '   ' });
+    expect(res.status).toBe(400);
+  });
+
+  it('blocks a task, surfaces it in waiting, then unblocks it back to queued', async () => {
+    const id = await createTask({ title: 'waiting work', prompt: 'p' });
+
+    const blocked = await postAction(`/api/mission/tasks/${id}/block`, { blocked_on: 'Sarah, legal' });
+    expect(blocked.status).toBe(200);
+    const blockedBody = await jsonOf(blocked);
+    expect(blockedBody.task).toMatchObject({ status: 'blocked', blocked_on: 'Sarah, legal', blocked_since: expect.any(Number) });
+
+    const summary = await jsonOf(await get('/api/home/summary'));
+    expect(summary.waiting.some((t: any) => t.id === id)).toBe(true);
+    expect(summary.needsYou.some((t: any) => t.id === id)).toBe(false);
+
+    const unblocked = await postAction(`/api/mission/tasks/${id}/unblock`);
+    expect(unblocked.status).toBe(200);
+    expect((await jsonOf(unblocked)).task).toMatchObject({ status: 'queued', blocked_on: null, blocked_since: null });
+  });
+
+  it('returns 409 when unblocking a task that is not blocked', async () => {
+    const id = await createTask({ title: 'not blocked', prompt: 'p' });
+    const res = await postAction(`/api/mission/tasks/${id}/unblock`);
+    expect(res.status).toBe(409);
+  });
+});

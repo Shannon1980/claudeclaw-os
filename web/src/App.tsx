@@ -5,7 +5,7 @@ import { CommandPalette } from '@/components/CommandPalette';
 import { ToastStack } from '@/components/ToastStack';
 import { sidebarOpen, closeSidebar } from '@/lib/sidebar';
 import { Placeholder } from '@/pages/Placeholder';
-import { MissionControl } from '@/pages/MissionControl';
+import { Home } from '@/pages/Home';
 import { Projects } from '@/pages/Projects';
 import { Memories } from '@/pages/Memories';
 import { HiveMind } from '@/pages/HiveMind';
@@ -46,7 +46,7 @@ export function App() {
       <Sidebar />
       <main class="flex-1 min-w-0 overflow-hidden pl-12 md:pl-0">
         <Switch>
-          <Route path="/mission"><MissionControl /></Route>
+          <Route path="/mission"><Home /></Route>
           <Route path="/projects/:id"><Projects /></Route>
           <Route path="/projects"><Projects /></Route>
           <Route path="/scheduled"><Scheduled /></Route>
