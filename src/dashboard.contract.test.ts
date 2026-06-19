@@ -771,3 +771,69 @@ describe('POST /api/mission/tasks/:id/block + /unblock', () => {
     expect(res.status).toBe(409);
   });
 });
+
+// ── Projects: operator reframe (operator-product step 3) ─────────────
+
+async function createProject(fields: Record<string, unknown>): Promise<any> {
+  const res = await app.request('/api/projects' + Q, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  return jsonOf(res);
+}
+
+describe('Projects: type + scoped stats', () => {
+  it('creates with a type and defaults to internal for missing/invalid', async () => {
+    const a = await createProject({ name: 'Acme client', type: 'client' });
+    expect(a.project).toMatchObject({ type: 'client', status: 'active' });
+
+    const b = await createProject({ name: 'no type' });
+    expect(b.project.type).toBe('internal');
+
+    const c = await createProject({ name: 'bad type', type: 'nonsense' });
+    expect(c.project.type).toBe('internal');
+  });
+
+  it('rejects an invalid type on PATCH (400)', async () => {
+    const { project } = await createProject({ name: 'patch me' });
+    const patch = await app.request(`/api/projects/${project.id}` + Q, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'nope' }),
+    });
+    expect(patch.status).toBe(400);
+  });
+
+  it('returns the operator daily-loop stat fields per project', async () => {
+    const { project } = await createProject({ name: 'stats', type: 'internal' });
+    const res = await get('/api/projects');
+    const body = await jsonOf(res);
+    const found = body.projects.find((p: any) => p.id === project.id);
+    expect(found).toMatchObject({
+      task_plate: expect.any(Number),
+      task_waiting: expect.any(Number),
+      task_needs: expect.any(Number),
+      teammates: expect.any(Array),
+    });
+  });
+});
+
+describe('GET /api/home/summary?project=', () => {
+  it('scopes the loop to a single project', async () => {
+    const { project } = await createProject({ name: 'scoped' });
+    // One task in the project, one outside it.
+    const insideRes = await app.request('/api/mission/tasks' + Q, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'inside', prompt: 'p', project_id: project.id }),
+    });
+    const inside = (await jsonOf(insideRes)).task;
+    await createTask({ title: 'outside', prompt: 'p' });
+
+    const scoped = await jsonOf(await get(`/api/home/summary?project=${project.id}`));
+    const allIds = [...scoped.needsYou, ...scoped.onPlate, ...scoped.waiting, ...scoped.shipped].map((t: any) => t.id);
+    expect(allIds).toContain(inside.id);
+    expect(allIds.every((id: string) => id === inside.id)).toBe(true);
+  });
+});

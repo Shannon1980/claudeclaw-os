@@ -1590,7 +1590,10 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   // calendar/email integration (D2: no unprompted inbox scan). The frontend
   // falls back to starter prompts when both needsYou and today are empty.
   app.get('/api/home/summary', (c) => {
-    const summary = getHomeSummary();
+    // ?project=<id> scopes the loop to one project (the project detail view is
+    // the Home skeleton scoped down — see specs/operator-product/04-projects.md).
+    const projectId = c.req.query('project') || undefined;
+    const summary = getHomeSummary(7, projectId);
     const upcoming = getUpcomingScheduledTasks(24 * 60 * 60);
     const today = upcoming.slice(0, 4).map((r) => ({
       id: r.id,
@@ -1758,13 +1761,16 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   });
 
   app.post('/api/projects', async (c) => {
-    const body = await c.req.json<{ name?: string; description?: string; task_ids?: string[] }>();
+    const body = await c.req.json<{ name?: string; description?: string; type?: string; task_ids?: string[] }>();
     const name = body?.name?.trim();
     const description = body?.description?.trim() || null;
     if (!name || name.length > 120) return c.json({ error: 'name required (max 120 chars)' }, 400);
+    const type = ['client', 'internal', 'hiring', 'other'].includes(body?.type ?? '')
+      ? (body!.type as 'client' | 'internal' | 'hiring' | 'other')
+      : 'internal';
 
     const id = crypto.randomBytes(4).toString('hex');
-    createProject(id, name, description);
+    createProject(id, name, description, type);
 
     // Optionally pull existing tasks into the new project
     for (const taskId of body?.task_ids ?? []) {
@@ -1809,9 +1815,9 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   app.patch('/api/projects/:id', async (c) => {
     const id = c.req.param('id');
     if (!getProject(id)) return c.json({ error: 'Not found' }, 404);
-    const body = await c.req.json<{ name?: string; description?: string | null; status?: string }>();
+    const body = await c.req.json<{ name?: string; description?: string | null; status?: string; type?: string }>();
 
-    const fields: { name?: string; description?: string | null; status?: 'active' | 'completed' | 'closed' } = {};
+    const fields: { name?: string; description?: string | null; status?: 'active' | 'completed' | 'closed'; type?: 'client' | 'internal' | 'hiring' | 'other' } = {};
     if (typeof body?.name === 'string') {
       const name = body.name.trim();
       if (!name || name.length > 120) return c.json({ error: 'name must be 1-120 chars' }, 400);
@@ -1819,6 +1825,12 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     }
     if (body && 'description' in body) {
       fields.description = typeof body.description === 'string' ? body.description.trim() || null : null;
+    }
+    if (typeof body?.type === 'string') {
+      if (!['client', 'internal', 'hiring', 'other'].includes(body.type)) {
+        return c.json({ error: 'type must be client, internal, hiring, or other' }, 400);
+      }
+      fields.type = body.type as 'client' | 'internal' | 'hiring' | 'other';
     }
     if (typeof body?.status === 'string') {
       if (!['active', 'completed', 'closed'].includes(body.status)) {
