@@ -31,6 +31,12 @@ import {
   getAosCronTaskIds,
   getAllScheduledTasks,
   _getScheduledTaskColumns,
+  createMissionTask,
+  claimNextMissionTask,
+  getTeamRoster,
+  getPausedAgents,
+  isAgentPaused,
+  setAgentPaused,
 } from './db.js';
 import path from 'path';
 import { STORE_DIR, PROJECT_ROOT, TRANSPORT } from './config.js';
@@ -556,6 +562,50 @@ describe('database', () => {
       const ids = getAosCronTaskIds();
       expect(ids).toContain('aos-row');
       expect(ids).not.toContain('user-row');
+    });
+  });
+
+  describe('team roster + pause (operator-product spec 05-team)', () => {
+    it('paused-agents flag round-trips and is non-destructive per id', () => {
+      expect(getPausedAgents()).toEqual([]);
+      expect(isAgentPaused('research')).toBe(false);
+
+      setAgentPaused('research', true);
+      expect(isAgentPaused('research')).toBe(true);
+      expect(getPausedAgents()).toContain('research');
+
+      // Idempotent: pausing again doesn't duplicate.
+      setAgentPaused('research', true);
+      expect(getPausedAgents().filter((id) => id === 'research')).toHaveLength(1);
+
+      // Pausing one doesn't touch another.
+      setAgentPaused('comms', true);
+      setAgentPaused('research', false);
+      expect(isAgentPaused('research')).toBe(false);
+      expect(isAgentPaused('comms')).toBe(true);
+    });
+
+    it('getTeamRoster rolls up active task count, the running task title, and routines', () => {
+      createMissionTask('t-run', 'Scan competitors', 'p', 'research');
+      createMissionTask('t-queue', 'Draft brief', 'p', 'research');
+      createScheduledTask('r-1', 'daily digest', '0 9 * * *', 9_999_999_999, 'research');
+
+      // Promote the first task to running so it becomes the live activity line.
+      claimNextMissionTask('research');
+
+      const roster = getTeamRoster();
+      expect(roster.research).toBeTruthy();
+      expect(roster.research.activeTaskCount).toBe(2); // running + queued
+      expect(roster.research.activeTask).toBe('Scan competitors');
+      expect(roster.research.routineCount).toBe(1);
+      expect(roster.research.nextRoutineAt).toBe(9_999_999_999);
+      expect(roster.research.paused).toBe(false);
+    });
+
+    it('getTeamRoster marks paused teammates even with no active work', () => {
+      setAgentPaused('ops', true);
+      const roster = getTeamRoster();
+      expect(roster.ops?.paused).toBe(true);
     });
   });
 });

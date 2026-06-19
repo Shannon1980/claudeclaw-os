@@ -9,7 +9,7 @@ import { Home } from '@/pages/Home';
 import { Projects } from '@/pages/Projects';
 import { Memories } from '@/pages/Memories';
 import { HiveMind } from '@/pages/HiveMind';
-import { Agents } from '@/pages/Agents';
+import { Team } from '@/pages/Team';
 import { Scheduled } from '@/pages/Scheduled';
 import { Audit } from '@/pages/Audit';
 import { Usage } from '@/pages/Usage';
@@ -50,7 +50,7 @@ export function App() {
           <Route path="/projects/:id"><Projects /></Route>
           <Route path="/projects"><Projects /></Route>
           <Route path="/scheduled"><Scheduled /></Route>
-          <Route path="/agents"><Agents /></Route>
+          <Route path="/agents"><Team /></Route>
           <Route path="/agents/:id/files"><AgentFiles /></Route>
           <Route path="/chat"><Chat /></Route>
           <Route path="/memories"><Memories /></Route>
