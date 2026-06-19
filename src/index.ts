@@ -400,7 +400,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
 
-  logger.info({ agentId: AGENT_ID, transport: slack ? 'slack' : 'telegram' }, 'Starting ClaudeClaw...');
+  logger.info({ agentId: AGENT_ID, transport: slack ? 'slack' : slackSender ? 'slack-send-only' : bot ? 'telegram' : 'none' }, 'Starting ClaudeClaw...');
 
   if (slack) {
     try {
