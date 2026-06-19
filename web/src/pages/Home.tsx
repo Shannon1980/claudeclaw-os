@@ -9,47 +9,25 @@
 //   5. Capture bar (always present)
 //
 // Grouping is computed server-side by GET /api/home/summary so this page makes
-// one call and holds no grouping logic. Slots whose engine isn't built yet
-// degrade honestly rather than faking data:
-//   - "Needs you"  = unassigned-queued tasks (route them) + recent failed
-//                    (handle them). Permission approvals fold in here once the
-//                    trust system (spec step 4) lands.
-//   - "Today"      = routines due in the next 24h (the only schedule data the
-//                    backend can derive honestly) + static starter prompts.
-//                    D2: conservative, no unprompted inbox scan.
-//   - "Waiting on others" = tasks parked in the 'blocked' status with a note of
-//                    who/what they wait on; set via "Mark waiting", cleared via
-//                    "Unblock".
+// one call and holds no grouping logic. The zone/card pieces live in
+// components/DailyLoop so the project detail can render the same loop scoped
+// to one project. Degraded slots (no permission feed, no calendar) fail
+// honestly — see DailyLoop and the summary endpoint for the specifics.
 
 import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'wouter-preact';
-import {
-  Plus, History, Inbox, Hourglass, CheckCircle2, Send, X, Wand2,
-  Sparkles, Plug, FileText, Trash2, ArrowRight, Clock, Undo2, PauseCircle,
-} from 'lucide-preact';
+import { Plus, History, Send, Sparkles, Plug, FileText, ArrowRight } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
-import { Pill, StatusDot } from '@/components/Pill';
 import { PageState } from '@/components/PageState';
 import { Drawer } from '@/components/Modal';
-import { AgentAvatar } from '@/components/AgentAvatar';
 import { type ProjectLite } from '@/components/ProjectTaskAttach';
 import { CreateTaskModal, HistoryList, type MissionTask, type Agent } from '@/components/TaskModals';
+import { LoopZones, NeedsYouCard, type HomeSummary } from '@/components/DailyLoop';
 import { useFetch } from '@/lib/useFetch';
-import { apiPost, apiPatch, apiDelete } from '@/lib/api';
-import { formatRelativeTime } from '@/lib/format';
+import { apiPost } from '@/lib/api';
 import { term } from '@/lib/vocabulary';
 import { pushToast } from '@/lib/toasts';
 import { workspaceName } from '@/lib/personalization';
-
-interface TodaySuggestion { id: string; kind: 'routine'; text: string; when: number | null }
-interface HomeSummary {
-  needsYou: MissionTask[];
-  onPlate: MissionTask[];
-  waiting: MissionTask[];
-  shipped: MissionTask[];
-  today: TodaySuggestion[];
-  status: { needsYou: number; waiting: number; shipped: number; hasAnyWork: boolean };
-}
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -184,8 +162,10 @@ export function Home() {
 
             {/* 3. Needs you / Today */}
             <NeedsYouCard
+              variant="home"
               needsYou={needsYou}
               today={today}
+              starters={STARTER_SUGGESTIONS}
               agents={agents.data?.agents ?? []}
               agentById={agentById}
               onChange={refresh}
@@ -193,43 +173,7 @@ export function Home() {
             />
 
             {/* 4. Three zones */}
-            <div class="grid gap-3 md:grid-cols-3">
-              <Zone
-                title="On my plate"
-                hint="Active work, and who's on it."
-                icon={Inbox}
-                count={onPlate.length}
-                empty="Nothing in flight."
-              >
-                {onPlate.map((t) => (
-                  <PlateItem key={t.id} task={t} agent={t.assigned_agent ? agentById.get(t.assigned_agent) : undefined} onChange={refresh} />
-                ))}
-              </Zone>
-
-              <Zone
-                title="Waiting on others"
-                hint="Work blocked on someone else."
-                icon={Hourglass}
-                count={waiting.length}
-                empty="Nothing waiting on anyone right now."
-              >
-                {waiting.map((t) => (
-                  <WaitingItem key={t.id} task={t} agent={t.assigned_agent ? agentById.get(t.assigned_agent) : undefined} onChange={refresh} />
-                ))}
-              </Zone>
-
-              <Zone
-                title="Shipped this week"
-                hint="Done in the last 7 days."
-                icon={CheckCircle2}
-                count={shipped.length}
-                empty="Nothing shipped yet this week."
-              >
-                {shipped.map((t) => (
-                  <ShippedItem key={t.id} task={t} agent={t.assigned_agent ? agentById.get(t.assigned_agent) : undefined} />
-                ))}
-              </Zone>
-            </div>
+            <LoopZones onPlate={onPlate} waiting={waiting} shipped={shipped} agentById={agentById} onChange={refresh} />
           </div>
         </div>
       )}
@@ -351,324 +295,6 @@ function ActivationStrip({ dayOne, onTellWork, onConnect, onBrief }: {
           );
         })}
       </div>
-    </div>
-  );
-}
-
-// ── Needs you / Today ───────────────────────────────────────────────
-
-function NeedsYouCard({ needsYou, today, agents, agentById, onChange, onSuggest }: {
-  needsYou: MissionTask[];
-  today: TodaySuggestion[];
-  agents: Agent[];
-  agentById: Map<string, Agent>;
-  onChange: () => void;
-  onSuggest: (text: string) => void;
-}) {
-  const hasNeeds = needsYou.length > 0;
-  return (
-    <div class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden">
-      <div class="px-4 py-2.5 border-b border-[var(--color-border)] flex items-center gap-2">
-        <span class="text-[13px] font-semibold text-[var(--color-text)]">{hasNeeds ? 'Needs you' : 'Today'}</span>
-        {hasNeeds && <span class="text-[11px] text-[var(--color-text-muted)] tabular-nums">{needsYou.length}</span>}
-        <span class="ml-auto text-[11px] text-[var(--color-text-faint)]">
-          {hasNeeds ? 'Decisions only you can make' : 'A few ways to get me going'}
-        </span>
-      </div>
-      <div class="p-2.5 space-y-1.5">
-        {hasNeeds ? (
-          <>
-            {needsYou.slice(0, 6).map((t) => (
-              <NeedsItem key={t.id} task={t} agents={agents} agentById={agentById} onChange={onChange} />
-            ))}
-            {needsYou.length > 6 && (
-              <div class="text-[11px] text-[var(--color-text-faint)] text-center pt-1">
-                +{needsYou.length - 6} more need you
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            {today.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => onSuggest(`Help me get ready for: ${s.text}`)}
-                class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-md bg-[var(--color-elevated)] border border-[var(--color-border)] text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] transition-colors group"
-              >
-                <Clock size={12} class="text-[var(--color-accent)] shrink-0" />
-                <span class="flex-1 truncate">Coming up — {s.text}</span>
-                {s.when && <span class="text-[10px] text-[var(--color-text-faint)] tabular-nums shrink-0">{formatRelativeTime(s.when)}</span>}
-              </button>
-            ))}
-            {STARTER_SUGGESTIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => onSuggest(s)}
-                class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-md bg-[var(--color-elevated)] border border-[var(--color-border)] text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] transition-colors group"
-              >
-                <Sparkles size={12} class="text-[var(--color-accent)] shrink-0" />
-                <span class="flex-1">{s}</span>
-                <ArrowRight size={12} class="opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
-              </button>
-            ))}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function NeedsItem({ task, agents, agentById, onChange }: {
-  task: MissionTask; agents: Agent[]; agentById: Map<string, Agent>; onChange: () => void;
-}) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const isFailed = task.status === 'failed';
-
-  async function autoAssign() {
-    setBusy('auto');
-    try {
-      const res = await apiPost<{ assigned_agent?: string }>(`/api/mission/tasks/${task.id}/auto-assign`);
-      onChange();
-      pushToast({ tone: 'success', title: 'Routed', description: res.assigned_agent ? `Sent to ${res.assigned_agent}.` : 'Sent.' });
-    } catch (err: any) {
-      pushToast({ tone: 'error', title: 'Could not route', description: err?.message || String(err), durationMs: 6000 });
-    } finally { setBusy(null); }
-  }
-
-  async function manualAssign(agentId: string) {
-    setBusy('manual');
-    try {
-      await apiPatch(`/api/mission/tasks/${task.id}`, { assigned_agent: agentId });
-      onChange();
-      pushToast({ tone: 'success', title: 'Assigned', description: `Sent to ${agentById.get(agentId)?.name || agentId}.` });
-    } catch (err: any) {
-      pushToast({ tone: 'error', title: 'Assign failed', description: err?.message || String(err), durationMs: 6000 });
-    } finally { setBusy(null); }
-  }
-
-  async function remove() {
-    if (!confirm('Dismiss this?')) return;
-    setBusy('delete');
-    try { await apiDelete(`/api/mission/tasks/${task.id}`); onChange(); }
-    catch (err: any) { pushToast({ tone: 'error', title: 'Delete failed', description: err?.message || String(err), durationMs: 6000 }); }
-    finally { setBusy(null); }
-  }
-
-  return (
-    <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5">
-      <div class="flex items-center gap-1.5 mb-1">
-        {isFailed ? <Pill tone="failed">needs a look</Pill> : <Pill tone="neutral">unrouted</Pill>}
-        <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">{formatRelativeTime(task.created_at)}</span>
-      </div>
-      <div class="text-[12.5px] text-[var(--color-text)] leading-snug mb-2 line-clamp-2">{task.title}</div>
-      {isFailed && task.error && (
-        <div class="text-[10.5px] text-[var(--color-status-failed)] font-mono line-clamp-2 mb-2">{task.error}</div>
-      )}
-      <div class="flex items-center gap-1">
-        {!isFailed && (
-          <>
-            <button
-              type="button"
-              onClick={autoAssign}
-              disabled={busy !== null}
-              class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white transition-colors disabled:opacity-40"
-            >
-              <Wand2 size={11} /> {busy === 'auto' ? '…' : 'Route for me'}
-            </button>
-            <select
-              value=""
-              onChange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) manualAssign(v); }}
-              disabled={busy !== null}
-              class="flex-1 bg-[var(--color-card)] border border-[var(--color-border)] rounded text-[10.5px] text-[var(--color-text-muted)] px-1 py-0.5 outline-none"
-            >
-              <option value="">Assign to…</option>
-              {agents.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
-            </select>
-          </>
-        )}
-        {isFailed && <div class="flex-1" />}
-        <button
-          type="button"
-          onClick={remove}
-          disabled={busy !== null}
-          class="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-status-failed)] transition-colors disabled:opacity-40"
-          title="Dismiss"
-        >
-          <Trash2 size={11} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Zones ───────────────────────────────────────────────────────────
-
-function Zone({ title, hint, icon: Icon, count, empty, children }: {
-  title: string; hint: string; icon: typeof Inbox; count: number; empty: string;
-  children: any;
-}) {
-  return (
-    <div class="flex flex-col bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden min-h-[160px]">
-      <div class="px-3 py-2.5 border-b border-[var(--color-border)] flex items-center gap-2">
-        <Icon size={14} class="text-[var(--color-text-muted)]" />
-        <div class="flex-1 min-w-0">
-          <div class="text-[12.5px] font-medium text-[var(--color-text)]">{title}</div>
-          <div class="text-[10px] text-[var(--color-text-faint)]">{hint}</div>
-        </div>
-        <span class="text-[11.5px] text-[var(--color-text-muted)] tabular-nums">{count}</span>
-      </div>
-      <div class="flex-1 p-2 space-y-1.5">
-        {count === 0
-          ? <div class="text-[11.5px] text-[var(--color-text-faint)] text-center py-6">{empty}</div>
-          : children}
-      </div>
-    </div>
-  );
-}
-
-function TeammatePill({ agent, fallback }: { agent?: Agent; fallback: string | null }) {
-  const label = agent?.name || fallback;
-  if (!label) return null;
-  return (
-    <Pill tone="accent">
-      {agent && <AgentAvatar agentId={agent.id} name={agent.name} running={agent.running} size={14} />}
-      <span class="max-w-[100px] truncate">{label}</span>
-    </Pill>
-  );
-}
-
-function PlateItem({ task, agent, onChange }: { task: MissionTask; agent?: Agent; onChange: () => void }) {
-  const [busy, setBusy] = useState<string | null>(null);
-
-  async function cancel() {
-    setBusy('cancel');
-    try { await apiPost(`/api/mission/tasks/${task.id}/cancel`); onChange(); }
-    catch (err: any) { pushToast({ tone: 'error', title: 'Cancel failed', description: err?.message || String(err), durationMs: 6000 }); }
-    finally { setBusy(null); }
-  }
-
-  async function markWaiting() {
-    const who = prompt('Waiting on who or what? (e.g. "Sarah, legal" or "client payment")');
-    if (who === null) return;
-    const trimmed = who.trim();
-    if (!trimmed) return;
-    setBusy('block');
-    try {
-      await apiPost(`/api/mission/tasks/${task.id}/block`, { blocked_on: trimmed });
-      onChange();
-      pushToast({ tone: 'success', title: 'Moved to waiting', description: `Blocked on ${trimmed}.` });
-    } catch (err: any) {
-      pushToast({ tone: 'error', title: 'Could not park', description: err?.message || String(err), durationMs: 6000 });
-    } finally { setBusy(null); }
-  }
-
-  return (
-    <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <StatusDot tone={task.status === 'running' ? 'running' : 'queued'} />
-        <span class="text-[10px] text-[var(--color-text-faint)] uppercase tracking-wider">
-          {task.status === 'running' ? 'Working' : 'Queued'}
-        </span>
-        <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">
-          {formatRelativeTime(task.started_at || task.created_at)}
-        </span>
-      </div>
-      <div class="text-[12.5px] text-[var(--color-text)] leading-snug mb-1.5 line-clamp-2">{task.title}</div>
-      <div class="flex items-center gap-1.5">
-        <TeammatePill agent={agent} fallback={task.assigned_agent} />
-        <div class="ml-auto flex items-center gap-1">
-          <button
-            type="button"
-            onClick={markWaiting}
-            disabled={busy !== null}
-            class="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-40"
-            title="Mark waiting on others"
-          >
-            <PauseCircle size={12} />
-          </button>
-          <button
-            type="button"
-            onClick={cancel}
-            disabled={busy !== null}
-            class="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-status-failed)] transition-colors disabled:opacity-40"
-            title="Cancel"
-          >
-            <X size={11} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WaitingItem({ task, agent, onChange }: { task: MissionTask; agent?: Agent; onChange: () => void }) {
-  const [busy, setBusy] = useState(false);
-
-  async function unblock() {
-    setBusy(true);
-    try {
-      await apiPost(`/api/mission/tasks/${task.id}/unblock`);
-      onChange();
-      pushToast({ tone: 'success', title: 'Back in the queue', description: 'No longer waiting.' });
-    } catch (err: any) {
-      pushToast({ tone: 'error', title: 'Could not unblock', description: err?.message || String(err), durationMs: 6000 });
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <Hourglass size={11} class="text-[var(--color-text-muted)]" />
-        <span class="text-[10px] text-[var(--color-text-faint)] uppercase tracking-wider">Waiting</span>
-        {task.blocked_since && (
-          <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">{formatRelativeTime(task.blocked_since)}</span>
-        )}
-      </div>
-      <div class="text-[12.5px] text-[var(--color-text)] leading-snug mb-1.5 line-clamp-2">{task.title}</div>
-      {task.blocked_on && (
-        <div class="text-[11px] text-[var(--color-text-muted)] mb-1.5">
-          On <span class="text-[var(--color-text)]">{task.blocked_on}</span>
-        </div>
-      )}
-      <div class="flex items-center gap-1.5">
-        <TeammatePill agent={agent} fallback={task.assigned_agent} />
-        <button
-          type="button"
-          onClick={unblock}
-          disabled={busy}
-          class="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-40"
-          title="Unblock — return to the queue"
-        >
-          <Undo2 size={11} /> {busy ? '…' : 'Unblock'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ShippedItem({ task, agent }: { task: MissionTask; agent?: Agent }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div
-      onClick={() => setExpanded((v) => !v)}
-      class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5 cursor-pointer hover:border-[var(--color-border-strong)] transition-colors"
-    >
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <StatusDot tone="done" />
-        <span class="text-[10px] text-[var(--color-text-faint)] uppercase tracking-wider">Shipped</span>
-        <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">
-          {formatRelativeTime(task.completed_at || task.created_at)}
-        </span>
-      </div>
-      <div class={'text-[12.5px] text-[var(--color-text)] leading-snug mb-1.5 ' + (expanded ? '' : 'line-clamp-2')}>{task.title}</div>
-      <TeammatePill agent={agent} fallback={task.assigned_agent} />
-      {expanded && task.result && (
-        <div class="mt-2 text-[11px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed border-t border-[var(--color-border)] pt-2">
-          {task.result}
-        </div>
-      )}
     </div>
   );
 }

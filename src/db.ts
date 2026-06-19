@@ -242,6 +242,7 @@ function createSchema(database: Database.Database): void {
       name        TEXT NOT NULL,
       description TEXT,
       status      TEXT NOT NULL DEFAULT 'active',  -- active | completed | closed
+      type        TEXT NOT NULL DEFAULT 'internal',-- client | internal | hiring | other
       created_at  INTEGER NOT NULL,
       updated_at  INTEGER NOT NULL,
       closed_at   INTEGER
@@ -732,6 +733,9 @@ function runMigrations(database: Database.Database): void {
   // claims 'queued', so a blocked task is naturally skipped until unblocked.
   addColumnIfMissing(database, 'mission_tasks', 'blocked_on', 'TEXT');
   addColumnIfMissing(database, 'mission_tasks', 'blocked_since', 'INTEGER');
+
+  // Projects gain an operator-facing type (client / internal / hiring / other).
+  addColumnIfMissing(database, 'projects', 'type', "TEXT NOT NULL DEFAULT 'internal'");
 
   // Live Meetings: add provider column so we can track which platform
   // each session used (pika avatar vs recall voice-only). Default 'pika'
@@ -2508,9 +2512,11 @@ export interface HomeSummary {
   shipped: MissionTask[];
 }
 
-export function getHomeSummary(recentDays = 7): HomeSummary {
+export function getHomeSummary(recentDays = 7, projectId?: string): HomeSummary {
   const cutoff = Math.floor(Date.now() / 1000) - recentDays * 86400;
-  const all = db.prepare('SELECT * FROM mission_tasks').all() as MissionTask[];
+  const all = projectId
+    ? db.prepare('SELECT * FROM mission_tasks WHERE project_id = ?').all(projectId) as MissionTask[]
+    : db.prepare('SELECT * FROM mission_tasks').all() as MissionTask[];
 
   const byPriority = (a: MissionTask, b: MissionTask) =>
     b.priority - a.priority || b.created_at - a.created_at;
@@ -2586,11 +2592,14 @@ export function resetStuckMissionTasks(agentId: string): number {
 
 // ── Projects (group mission tasks; track inputs/outputs to completion) ─
 
+export type ProjectType = 'client' | 'internal' | 'hiring' | 'other';
+
 export interface Project {
   id: string;
   name: string;
   description: string | null;
   status: 'active' | 'completed' | 'closed';
+  type: ProjectType;
   created_at: number;
   updated_at: number;
   closed_at: number | null;
@@ -2603,6 +2612,12 @@ export interface ProjectWithStats extends Project {
   task_queued: number;
   task_failed: number;
   last_activity: number | null;
+  // Operator daily-loop counts, scoped to the project (mirror Home's zones).
+  task_plate: number;   // running + assigned-queued ("on my plate")
+  task_waiting: number; // blocked ("waiting on others")
+  task_needs: number;   // unassigned-queued + failed ("needs you")
+  oldest_blocked: number | null; // earliest blocked_since, for at-risk derivation
+  teammates: string[];  // distinct assigned_agent ids with work in this project
 }
 
 const PROJECT_STATS_SELECT = `
@@ -2612,39 +2627,64 @@ const PROJECT_STATS_SELECT = `
     COALESCE(SUM(CASE WHEN t.status = 'running' THEN 1 ELSE 0 END), 0) AS task_running,
     COALESCE(SUM(CASE WHEN t.status = 'queued' THEN 1 ELSE 0 END), 0) AS task_queued,
     COALESCE(SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END), 0) AS task_failed,
+    COALESCE(SUM(CASE WHEN t.status = 'running' OR (t.status = 'queued' AND t.assigned_agent IS NOT NULL) THEN 1 ELSE 0 END), 0) AS task_plate,
+    COALESCE(SUM(CASE WHEN t.status = 'blocked' THEN 1 ELSE 0 END), 0) AS task_waiting,
+    COALESCE(SUM(CASE WHEN (t.status = 'queued' AND t.assigned_agent IS NULL) OR t.status = 'failed' THEN 1 ELSE 0 END), 0) AS task_needs,
+    MIN(CASE WHEN t.status = 'blocked' THEN t.blocked_since END) AS oldest_blocked,
     MAX(COALESCE(t.completed_at, t.started_at, t.created_at)) AS last_activity
   FROM projects p
   LEFT JOIN mission_tasks t ON t.project_id = p.id`;
 
-export function createProject(id: string, name: string, description: string | null): void {
+// Distinct teammates (assigned agents) per project, attached to the stats rows.
+function attachTeammates<T extends { id: string }>(projects: T[]): (T & { teammates: string[] })[] {
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT project_id, assigned_agent FROM mission_tasks
+       WHERE project_id IS NOT NULL AND assigned_agent IS NOT NULL`,
+    )
+    .all() as Array<{ project_id: string; assigned_agent: string }>;
+  const byProject = new Map<string, string[]>();
+  for (const r of rows) {
+    const list = byProject.get(r.project_id) ?? [];
+    list.push(r.assigned_agent);
+    byProject.set(r.project_id, list);
+  }
+  return projects.map((p) => ({ ...p, teammates: byProject.get(p.id) ?? [] }));
+}
+
+export function createProject(id: string, name: string, description: string | null, type: ProjectType = 'internal'): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO projects (id, name, description, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)`,
-  ).run(id, name, description, now, now);
+    `INSERT INTO projects (id, name, description, status, type, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+  ).run(id, name, description, type, now, now);
 }
 
 export function getProject(id: string): ProjectWithStats | null {
-  return (db.prepare(`${PROJECT_STATS_SELECT} WHERE p.id = ? GROUP BY p.id`).get(id) as ProjectWithStats) ?? null;
+  const row = db.prepare(`${PROJECT_STATS_SELECT} WHERE p.id = ? GROUP BY p.id`).get(id) as ProjectWithStats | undefined;
+  if (!row) return null;
+  return attachTeammates([row])[0];
 }
 
 export function getAllProjects(): ProjectWithStats[] {
-  return db
+  const rows = db
     .prepare(
       `${PROJECT_STATS_SELECT}
        GROUP BY p.id
        ORDER BY CASE p.status WHEN 'active' THEN 0 ELSE 1 END, p.updated_at DESC`,
     )
     .all() as ProjectWithStats[];
+  return attachTeammates(rows);
 }
 
 export function updateProject(
   id: string,
-  fields: { name?: string; description?: string | null; status?: Project['status'] },
+  fields: { name?: string; description?: string | null; status?: Project['status']; type?: ProjectType },
 ): boolean {
   const sets: string[] = [];
   const params: unknown[] = [];
   if (fields.name !== undefined) { sets.push('name = ?'); params.push(fields.name); }
   if (fields.description !== undefined) { sets.push('description = ?'); params.push(fields.description); }
+  if (fields.type !== undefined) { sets.push('type = ?'); params.push(fields.type); }
   if (fields.status !== undefined) {
     sets.push('status = ?'); params.push(fields.status);
     sets.push('closed_at = ?');
