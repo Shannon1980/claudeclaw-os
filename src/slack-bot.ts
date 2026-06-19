@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import boltPkg from '@slack/bolt';
-import type { WebClient } from '@slack/web-api';
+import { WebClient } from '@slack/web-api';
 
 import { runAgent } from './agent.js';
 import { getSlackChannelMap, resolveAgentRuntime, type AgentRuntime } from './agent-config.js';
@@ -702,6 +702,47 @@ export function createSlackBot(): SlackBot {
       for (const chunk of splitMessage(formatForSlack(text), SLACK_MAX_LEN)) {
         await app.client.chat.postMessage({ channel, text: chunk }).catch((err) =>
           logger.error({ err }, 'Slack postToUser failed'),
+        );
+      }
+    },
+  };
+}
+
+/**
+ * Send-only Slack poster for sub-agents on a Slack transport (e.g. the `aos`
+ * cron runner). Posts to the configured user's DM via the Web API only — it
+ * does NOT open a Socket Mode connection, so it never competes with the main
+ * process's listener (no duplicate event handling). The client is injectable
+ * for testing. Used when an agent's bot token env is SLACK_BOT_TOKEN.
+ */
+export interface SlackSender {
+  postToUser: (text: string) => Promise<void>;
+}
+
+type SlackSenderClient = Pick<WebClient, 'conversations' | 'chat'>;
+
+export function createSlackSender(
+  client: SlackSenderClient = new WebClient(SLACK_BOT_TOKEN),
+  userId: string = ALLOWED_SLACK_USER_ID,
+): SlackSender {
+  let cachedChannel = '';
+  const resolveDmChannel = async (): Promise<string> => {
+    if (cachedChannel) return cachedChannel;
+    if (!userId) return '';
+    const res = await client.conversations.open({ users: userId });
+    cachedChannel = (res.channel?.id as string) || '';
+    return cachedChannel;
+  };
+  return {
+    postToUser: async (text) => {
+      const channel = await resolveDmChannel();
+      if (!channel) {
+        logger.warn('Cannot post to Slack user: ALLOWED_SLACK_USER_ID not set');
+        return;
+      }
+      for (const chunk of splitMessage(formatForSlack(text), SLACK_MAX_LEN)) {
+        await client.chat.postMessage({ channel, text: chunk }).catch((err) =>
+          logger.error({ err }, 'Slack sender postToUser failed'),
         );
       }
     },

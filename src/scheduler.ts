@@ -1,3 +1,5 @@
+import fs from 'fs';
+
 import { CronExpressionParser } from 'cron-parser';
 
 import { AGENT_ID, ALLOWED_CHAT_ID, agentMcpAllowlist } from './config.js';
@@ -6,6 +8,7 @@ import {
   getSession,
   logConversationTurn,
   markTaskRunning,
+  claimDueTask,
   updateTaskAfterRun,
   resetStuckTasks,
   claimNextMissionTask,
@@ -13,6 +16,7 @@ import {
   resetStuckMissionTasks,
   getMissionTask,
   type MissionTask,
+  type ScheduledTask,
 } from './db.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
@@ -20,11 +24,40 @@ import { runAgent } from './agent.js';
 import { formatForTelegram, splitMessage } from './bot.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { isAgentRunning } from './agent-create.js';
+import { AOS_CRON_SOURCE, parseJobFile } from './aos-cron.js';
 
 type Sender = (text: string) => Promise<void>;
 
 /** Max time (ms) a scheduled task can run before being killed. */
-const TASK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+export const TASK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Parse a per-job timeout token ('5m'/'10m'/'15m'/'1h'/'2h') to milliseconds
+ * (D-10). Null / absent / unparseable falls back to TASK_TIMEOUT_MS rather than
+ * crashing the fire — a garbled timeout must never take a job down.
+ */
+export function parseTimeout(raw: string | null | undefined): number {
+  const s = String(raw ?? '').trim().toLowerCase();
+  const m = s.match(/^(\d+)([mh])$/);
+  if (!m) return TASK_TIMEOUT_MS;
+  const n = Number(m[1]);
+  if (!Number.isInteger(n) || n < 1) return TASK_TIMEOUT_MS;
+  return m[2] === 'h' ? n * 60 * 60 * 1000 : n * 60 * 1000;
+}
+
+/**
+ * Injectable dependencies for the aos-cron fire path so the claim/notify/
+ * timeout/retry/re-read logic is unit-testable without the message queue, the
+ * 60s interval, or a real agent subprocess. Production wires the real
+ * `sender` + `runAgent`.
+ */
+export interface AosFireDeps {
+  sender: Sender;
+  runAgent: (
+    prompt: string,
+    abortController: AbortController,
+  ) => Promise<{ text: string | null; aborted?: boolean }>;
+}
 
 let sender: Sender;
 
@@ -72,6 +105,116 @@ export function initScheduler(send: Sender, agentId = 'main'): void {
   logger.info({ agentId }, 'Scheduler started (checking every 60s)');
 }
 
+/**
+ * Fire a single aos-cron job once (plan 07-04). Deltas over the user-task path:
+ *  - D-07: re-read the prompt body from the row's `job_path` at fire time so
+ *    `.md` edits take effect with no restart; fall back to the stored prompt
+ *    projection (and log) if the file is missing/unreadable.
+ *  - D-10: honor the row's per-job `timeout` ('5m'/'1h'/...) via parseTimeout,
+ *    falling back to TASK_TIMEOUT_MS.
+ *  - D-11: retry up to `task.retry` times (absent=0) on throw/abort before
+ *    recording failure and firing the on_failure notify.
+ *  - D-12: NO "Scheduled task running" preamble is sent.
+ *  - D-03: `notify` gates Slack output — 'on_finish' sends the result on
+ *    success; 'on_failure' sends only on error/timeout; both always write
+ *    last_run/last_status/last_result to the row via updateTaskAfterRun.
+ *
+ * The atomic claim (claimDueTask) and the in-memory `runningTaskIds` guard are
+ * performed by the caller (runDueTasks) BEFORE this runs; this function owns
+ * the run + bookkeeping only. Dependencies are injected (AosFireDeps) for tests.
+ */
+export async function runAosCronTaskOnce(
+  task: ScheduledTask,
+  nextRun: number,
+  deps: AosFireDeps,
+): Promise<void> {
+  const { sender: send, runAgent: run } = deps;
+  const notify = task.notify ?? null;
+
+  // D-07: re-read the live body from job_path; fall back to the projection.
+  let body = task.prompt;
+  if (task.job_path) {
+    try {
+      body = parseJobFile(fs.readFileSync(task.job_path, 'utf-8')).body;
+    } catch (err) {
+      logger.warn(
+        { err, taskId: task.id, jobPath: task.job_path },
+        'aos-cron job_path unreadable — falling back to stored prompt',
+      );
+    }
+  }
+
+  // D-10: per-job timeout (ms), falling back to the global default.
+  const timeoutMs = parseTimeout(task.timeout);
+  // D-11: total attempts = 1 initial + retry count.
+  const attempts = 1 + Math.max(0, task.retry || 0);
+
+  logger.info(
+    { taskId: task.id, source: task.source, attempts, timeoutMs, prompt: body.slice(0, 60) },
+    'Firing aos-cron task',
+  );
+
+  let lastErrMsg = '';
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), timeoutMs);
+    try {
+      const result = await run(body, abortController);
+      clearTimeout(timer);
+
+      if (result.aborted) {
+        lastErrMsg = `Timed out after ${Math.round(timeoutMs / 60000)} minutes`;
+        if (attempt < attempts) {
+          logger.warn({ taskId: task.id, attempt }, 'aos-cron task timed out, retrying');
+          continue;
+        }
+        updateTaskAfterRun(task.id, nextRun, lastErrMsg, 'timeout');
+        logger.warn({ taskId: task.id }, 'aos-cron task timed out');
+        if (notify === 'on_failure' || notify === 'on_finish') {
+          try {
+            await send(`⏱ Task timed out after ${Math.round(timeoutMs / 60000)}m: "${body.slice(0, 60)}..." — killed.`);
+          } catch { /* ignore send failure */ }
+        }
+        return;
+      }
+
+      // Success.
+      const text = result.text?.trim() || 'Task completed with no output.';
+      updateTaskAfterRun(task.id, nextRun, text, 'success');
+      logger.info({ taskId: task.id, nextRun }, 'aos-cron task complete, next run scheduled');
+
+      // D-03: only 'on_finish' sends the result on success.
+      if (notify === 'on_finish') {
+        for (const chunk of splitMessage(formatForTelegram(text))) {
+          await send(chunk);
+        }
+        // Inject output into the active chat session so user replies have context.
+        if (ALLOWED_CHAT_ID) {
+          const activeSession = getSession(ALLOWED_CHAT_ID, schedulerAgentId);
+          logConversationTurn(ALLOWED_CHAT_ID, 'user', `[Scheduled task]: ${body}`, activeSession ?? undefined, schedulerAgentId);
+          logConversationTurn(ALLOWED_CHAT_ID, 'assistant', text, activeSession ?? undefined, schedulerAgentId);
+        }
+      }
+      return;
+    } catch (err) {
+      clearTimeout(timer);
+      lastErrMsg = err instanceof Error ? err.message : String(err);
+      if (attempt < attempts) {
+        logger.warn({ err, taskId: task.id, attempt }, 'aos-cron task failed, retrying');
+        continue;
+      }
+      updateTaskAfterRun(task.id, nextRun, lastErrMsg.slice(0, 500), 'failed');
+      logger.error({ err, taskId: task.id }, 'aos-cron task failed');
+      if (notify === 'on_failure' || notify === 'on_finish') {
+        try {
+          await send(`❌ Task failed: "${body.slice(0, 60)}..." — ${lastErrMsg.slice(0, 200)}`);
+        } catch { /* ignore send failure */ }
+      }
+      return;
+    }
+  }
+}
+
 async function runDueTasks(): Promise<void> {
   const tasks = getDueTasks(schedulerAgentId);
 
@@ -89,6 +232,30 @@ async function runDueTasks(): Promise<void> {
     // Compute next occurrence BEFORE executing so we can lock the task
     // in the DB immediately, preventing re-fire on subsequent ticks.
     const nextRun = computeNextRun(task.schedule);
+
+    // ── aos-cron firing branch (SCH-04 / D-03 / D-07 / D-10 / D-11 / D-12) ──
+    if (task.source === AOS_CRON_SOURCE) {
+      // Atomic cross-process claim: only the winner (changes===1) proceeds; a
+      // concurrent second caller sees false and skips — no double-fire (D-06).
+      if (!claimDueTask(task.id, nextRun)) continue;
+      runningTaskIds.add(task.id);
+
+      const chatId = ALLOWED_CHAT_ID || 'scheduler';
+      messageQueue.enqueue(chatId, async () => {
+        try {
+          await runAosCronTaskOnce(task, nextRun, {
+            sender,
+            runAgent: (prompt, abortController) =>
+              runAgent(prompt, undefined, () => {}, undefined, task.model ?? undefined, abortController, undefined, agentMcpAllowlist),
+          });
+        } finally {
+          runningTaskIds.delete(task.id);
+        }
+      });
+      continue;
+    }
+
+    // ── User-created task path (source='user') — unchanged ──
     runningTaskIds.add(task.id);
     markTaskRunning(task.id, nextRun);
 

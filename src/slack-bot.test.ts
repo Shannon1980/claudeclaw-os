@@ -1,6 +1,45 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-import { slackChatId, slackChannelChatId, resolveSlackCommandTarget, isAuthorisedSlack, classifyFile, type SlackFile } from './slack-bot.js';
+import { slackChatId, slackChannelChatId, resolveSlackCommandTarget, isAuthorisedSlack, classifyFile, createSlackSender, type SlackFile } from './slack-bot.js';
+
+describe('createSlackSender (send-only Slack poster for sub-agents)', () => {
+  function fakeClient() {
+    const open = vi.fn().mockResolvedValue({ channel: { id: 'D0DM' } });
+    const postMessage = vi.fn().mockResolvedValue({ ok: true });
+    return {
+      client: { conversations: { open }, chat: { postMessage } } as any,
+      open,
+      postMessage,
+    };
+  }
+
+  it('opens a DM to the configured user and posts the message there', async () => {
+    const { client, open, postMessage } = fakeClient();
+    const sender = createSlackSender(client, 'U123');
+    await sender.postToUser('hello from aos cron');
+    expect(open).toHaveBeenCalledWith({ users: 'U123' });
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(postMessage.mock.calls[0][0]).toMatchObject({ channel: 'D0DM' });
+    expect(postMessage.mock.calls[0][0].text).toContain('hello from aos cron');
+  });
+
+  it('caches the resolved DM channel across calls (opens once)', async () => {
+    const { client, open, postMessage } = fakeClient();
+    const sender = createSlackSender(client, 'U123');
+    await sender.postToUser('one');
+    await sender.postToUser('two');
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not post when no user id is configured', async () => {
+    const { client, open, postMessage } = fakeClient();
+    const sender = createSlackSender(client, '');
+    await sender.postToUser('nope');
+    expect(open).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+});
 
 describe('slackChatId', () => {
   it('namespaces the user id to avoid colliding with Telegram chat ids', () => {

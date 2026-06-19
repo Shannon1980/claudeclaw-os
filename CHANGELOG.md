@@ -2,6 +2,11 @@
 
 All notable changes to ClaudeClaw will be documented here.
 
+## [v1.1.1] - 2026-06-17
+
+### Added
+- Add aos-cron columns (source, job_path, model, timeout, notify, retry) to scheduled_tasks
+
 ## [unreleased] - 2026-06-10
 
 ### Added — multi-agent Slack channel routing

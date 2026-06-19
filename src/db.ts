@@ -524,6 +524,18 @@ function runMigrations(database: Database.Database): void {
     database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN last_status TEXT`);
   }
 
+  // aos-cron columns (Phase 7, SCH-02/SCH-03). These also ship as the versioned
+  // migration migrations/v1.2.1/add-aos-cron-scheduled-task-columns.ts for the
+  // production DB; mirrored here via addColumnIfMissing so the in-memory test DB
+  // (createSchema + runMigrations, no versioned-migration run) reaches column
+  // parity. `source` defaults to 'user' so existing rows stay non-aos-cron.
+  addColumnIfMissing(database, 'scheduled_tasks', 'source', `TEXT NOT NULL DEFAULT 'user'`);
+  addColumnIfMissing(database, 'scheduled_tasks', 'job_path', `TEXT`);
+  addColumnIfMissing(database, 'scheduled_tasks', 'model', `TEXT`);
+  addColumnIfMissing(database, 'scheduled_tasks', 'timeout', `TEXT`);
+  addColumnIfMissing(database, 'scheduled_tasks', 'notify', `TEXT`);
+  addColumnIfMissing(database, 'scheduled_tasks', 'retry', `INTEGER NOT NULL DEFAULT 0`);
+
   // ── Memory V2 migration ──────────────────────────────────────────────
   // Detect old schema (has 'sector' column but no 'importance') and migrate.
   const memCols = database.prepare(`PRAGMA table_info(memories)`).all() as Array<{ name: string }>;
@@ -1256,6 +1268,14 @@ export interface ScheduledTask {
   agent_id: string;
   started_at: number | null;
   last_status: 'success' | 'failed' | 'timeout' | null;
+  // aos-cron columns (Phase 7, SCH-02/SCH-03). 'source' is 'user' for hand-created
+  // rows and 'aos-cron' for rows synced from agentic-os cron/jobs/*.md.
+  source: string;
+  job_path: string | null;
+  model: string | null;
+  timeout: string | null;
+  notify: string | null;
+  retry: number;
 }
 
 export function createScheduledTask(
@@ -1311,6 +1331,27 @@ export function markTaskRunning(id: string, tentativeNextRun?: number): void {
   }
 }
 
+/**
+ * Atomically claim a due task for this process (SCH-04 cross-process backstop).
+ *
+ * Unlike `markTaskRunning` (a blind `WHERE id = ?`), this adds the status
+ * predicate `AND status = 'active'` and returns whether *this* call won the
+ * claim (`result.changes === 1`). SQLite serialises writes, so if two scheduler
+ * processes race to fire the same row, exactly one UPDATE flips it from
+ * 'active' to 'running' and reports a change; the loser sees `changes === 0`
+ * and returns false. Advancing `next_run` to the tentative next occurrence at
+ * claim time prevents re-fire on subsequent ticks while the task runs.
+ */
+export function claimDueTask(id: string, tentativeNextRun: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const result = db
+    .prepare(
+      `UPDATE scheduled_tasks SET status = 'running', started_at = ?, next_run = ? WHERE id = ? AND status = 'active'`,
+    )
+    .run(now, tentativeNextRun, id);
+  return result.changes === 1;
+}
+
 export function updateTaskAfterRun(
   id: string,
   nextRun: number,
@@ -1360,6 +1401,98 @@ export function pauseScheduledTask(id: string): void {
 
 export function resumeScheduledTask(id: string): void {
   db.prepare(`UPDATE scheduled_tasks SET status = 'active' WHERE id = ?`).run(id);
+}
+
+// ── aos-cron row sync (Phase 7, SCH-02/SCH-03) ───────────────────────
+// Rows synced from agentic-os cron/jobs/*.md are scoped agent_id='aos',
+// source='aos-cron', so the aos firing loop (getDueTasks('aos')) and main's
+// loop (getDueTasks('main')) never contend. The DB row is a derived projection:
+// the firing loop re-reads the job body at fire time (D-07).
+
+export interface UpsertAosCronTaskInput {
+  id: string;
+  prompt: string;
+  schedule: string;
+  nextRun: number;
+  jobPath: string | null;
+  model: string | null;
+  timeout: string | null;
+  notify: string | null;
+  retry: number;
+  active: boolean;
+}
+
+/**
+ * Idempotently upsert one aos-cron job row (D-07). Re-running for the same id
+ * updates the schedule/next_run + metadata (model, timeout, notify, retry,
+ * job_path, prompt projection) without creating a duplicate row. Dormant jobs
+ * (`active: false`) are written 'paused' so they show on the dashboard but
+ * never fire. Never DELETEs — `last_result`/`last_run` history is preserved.
+ */
+export function upsertAosCronTask(input: UpsertAosCronTaskInput): void {
+  const now = Math.floor(Date.now() / 1000);
+  const status = input.active ? 'active' : 'paused';
+  db.prepare(
+    `INSERT INTO scheduled_tasks
+       (id, prompt, schedule, next_run, status, created_at, agent_id, source,
+        job_path, model, timeout, notify, retry)
+     VALUES
+       (@id, @prompt, @schedule, @nextRun, @status, @now, 'aos', 'aos-cron',
+        @jobPath, @model, @timeout, @notify, @retry)
+     ON CONFLICT(id) DO UPDATE SET
+       prompt   = excluded.prompt,
+       schedule = excluded.schedule,
+       next_run = excluded.next_run,
+       status   = excluded.status,
+       source   = 'aos-cron',
+       agent_id = 'aos',
+       job_path = excluded.job_path,
+       model    = excluded.model,
+       timeout  = excluded.timeout,
+       notify   = excluded.notify,
+       retry    = excluded.retry`,
+  ).run({
+    id: input.id,
+    prompt: input.prompt,
+    schedule: input.schedule,
+    nextRun: input.nextRun,
+    status,
+    now,
+    jobPath: input.jobPath,
+    model: input.model,
+    timeout: input.timeout,
+    notify: input.notify,
+    retry: input.retry,
+  });
+}
+
+/**
+ * Deactivate an orphaned aos-cron row (its .md was deleted) by pausing it
+ * (D-07). Mirrors `pauseScheduledTask`; never DELETEs so `last_result` history
+ * survives. Scoped to aos-cron rows to avoid touching user tasks.
+ */
+export function deactivateAosCronTask(id: string): void {
+  db.prepare(
+    `UPDATE scheduled_tasks SET status = 'paused' WHERE id = ? AND agent_id = 'aos' AND source = 'aos-cron'`,
+  ).run(id);
+}
+
+/** All synced aos-cron row ids, so a sync pass can compute the orphan set. */
+export function getAosCronTaskIds(): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT id FROM scheduled_tasks WHERE agent_id = 'aos' AND source = 'aos-cron'`,
+      )
+      .all() as Array<{ id: string }>
+  ).map((r) => r.id);
+}
+
+/** @internal - for tests only. Column names on scheduled_tasks. */
+export function _getScheduledTaskColumns(): string[] {
+  return (
+    db.prepare(`PRAGMA table_info(scheduled_tasks)`).all() as Array<{ name: string }>
+  ).map((c) => c.name);
 }
 
 /**

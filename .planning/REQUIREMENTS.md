@@ -33,10 +33,10 @@ Requirements for this consolidation milestone. Each maps to roadmap phases.
 
 ### Scheduler
 
-- [ ] **SCH-01**: ClaudeClaw's scheduler is the single job runner; the agentic-os cron engine no longer schedules or fires jobs
-- [ ] **SCH-02**: ClaudeClaw's scheduler can read job definitions from agentic-os `cron/jobs/*.md` (YAML frontmatter + prompt body) and run them on schedule
-- [ ] **SCH-03**: A migrated `cron/jobs/*.md` job fires at its configured time and writes its result where the user expects (status/log parity)
-- [ ] **SCH-04**: No double-firing — a given job runs once per trigger even with both a terminal workflow and the bot present
+- [x] **SCH-01**: ClaudeClaw's scheduler is the single job runner; the agentic-os cron engine no longer schedules or fires jobs
+- [x] **SCH-02**: ClaudeClaw's scheduler can read job definitions from agentic-os `cron/jobs/*.md` (YAML frontmatter + prompt body) and run them on schedule
+- [x] **SCH-03**: A migrated `cron/jobs/*.md` job fires at its configured time and writes its result where the user expects (status/log parity)
+- [x] **SCH-04**: No double-firing — a given job runs once per trigger even with both a terminal workflow and the bot present
 
 ### Identity
 
@@ -101,10 +101,10 @@ Mapped during roadmap creation (2026-06-14). COMPAT-* are cross-cutting and wove
 | MEM-04 | Phase 5 | Rescoped (workspace files; D-07 capture-hook superseded) |
 | MEM-06 | Phase 5 | Done |
 | MEM-05 | Phase 6 | Impl landed; live proof (06-03) pending |
-| SCH-01 | Phase 7 | Pending |
-| SCH-02 | Phase 7 | Pending |
-| SCH-03 | Phase 7 | Pending |
-| SCH-04 | Phase 7 | Pending |
+| SCH-01 | Phase 7 | Complete |
+| SCH-02 | Phase 7 | Complete |
+| SCH-03 | Phase 7 | Complete |
+| SCH-04 | Phase 7 | Complete |
 | IDENT-01 | Phase 8 | Pending |
 | IDENT-02 | Phase 8 | Pending |
 | IDENT-03 | Phase 8 | Pending |

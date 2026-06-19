@@ -23,6 +23,14 @@ import {
   getDashboardMemoryTimeline,
   logConversationTurn,
   getConversationPage,
+  createScheduledTask,
+  getDueTasks,
+  claimDueTask,
+  upsertAosCronTask,
+  deactivateAosCronTask,
+  getAosCronTaskIds,
+  getAllScheduledTasks,
+  _getScheduledTaskColumns,
 } from './db.js';
 import path from 'path';
 import { STORE_DIR, PROJECT_ROOT, TRANSPORT } from './config.js';
@@ -460,6 +468,94 @@ describe('database', () => {
       expect(path.isAbsolute(STORE_DIR)).toBe(true);
       expect(STORE_DIR.startsWith(PROJECT_ROOT)).toBe(true);
       expect(STORE_DIR.includes('agentic-os')).toBe(false);
+    });
+  });
+
+  // ── aos-cron columns + atomic claim (SCH-02/SCH-03/SCH-04) ──────────
+
+  describe('aos-cron scheduled_tasks columns', () => {
+    it('scheduled_tasks exposes source, job_path, model, timeout, notify, retry', () => {
+      const cols = _getScheduledTaskColumns();
+      for (const c of ['source', 'job_path', 'model', 'timeout', 'notify', 'retry']) {
+        expect(cols).toContain(c);
+      }
+    });
+
+    it('source defaults to user for plain createScheduledTask rows', () => {
+      createScheduledTask('plain-1', 'do thing', '0 9 * * *', 9999999999, 'main');
+      const [row] = getAllScheduledTasks('main') as Array<{ source: string; retry: number }>;
+      expect(row.source).toBe('user');
+      expect(row.retry).toBe(0);
+    });
+  });
+
+  describe('claimDueTask atomic claim (SCH-04)', () => {
+    it('returns true exactly once for a fresh active row and false on a second claim', () => {
+      createScheduledTask('claim-1', 'p', '0 9 * * *', 1, 'aos');
+      const first = claimDueTask('claim-1', 9999999999);
+      const second = claimDueTask('claim-1', 9999999999);
+      expect(first).toBe(true);
+      expect(second).toBe(false);
+    });
+
+    it('returns false for a non-existent id', () => {
+      expect(claimDueTask('nope', 9999999999)).toBe(false);
+    });
+  });
+
+  describe('aos-cron row helpers', () => {
+    it('upsertAosCronTask creates exactly one row per id and updates on re-run without duplicating', () => {
+      upsertAosCronTask({
+        id: 'job-a', prompt: 'body v1', schedule: '0 9 * * *', nextRun: 100,
+        jobPath: '/jobs/a.md', model: 'sonnet', timeout: '10m', notify: 'on_finish', retry: 1, active: true,
+      });
+      upsertAosCronTask({
+        id: 'job-a', prompt: 'body v2', schedule: '0 17 * * *', nextRun: 200,
+        jobPath: '/jobs/a.md', model: 'opus', timeout: '15m', notify: 'on_failure', retry: 2, active: true,
+      });
+      const rows = getAllScheduledTasks('aos') as Array<{
+        id: string; schedule: string; model: string; timeout: string; notify: string; retry: number; source: string; status: string;
+      }>;
+      expect(rows.length).toBe(1);
+      expect(rows[0].schedule).toBe('0 17 * * *');
+      expect(rows[0].model).toBe('opus');
+      expect(rows[0].timeout).toBe('15m');
+      expect(rows[0].notify).toBe('on_failure');
+      expect(rows[0].retry).toBe(2);
+      expect(rows[0].source).toBe('aos-cron');
+      expect(rows[0].status).toBe('active');
+    });
+
+    it('dormant jobs (active:false) are written paused so they never fire', () => {
+      upsertAosCronTask({
+        id: 'job-dormant', prompt: 'b', schedule: '0 9 * * *', nextRun: 1,
+        jobPath: '/jobs/d.md', model: null, timeout: null, notify: null, retry: 0, active: false,
+      });
+      const due = getDueTasks('aos');
+      expect(due.find((t) => t.id === 'job-dormant')).toBeUndefined();
+      const [row] = getAllScheduledTasks('aos') as Array<{ status: string }>;
+      expect(row.status).toBe('paused');
+    });
+
+    it('deactivateAosCronTask sets status paused and preserves last_result (no DELETE)', () => {
+      upsertAosCronTask({
+        id: 'job-orphan', prompt: 'b', schedule: '0 9 * * *', nextRun: 1,
+        jobPath: '/jobs/o.md', model: null, timeout: null, notify: null, retry: 0, active: true,
+      });
+      deactivateAosCronTask('job-orphan');
+      const [row] = getAllScheduledTasks('aos') as Array<{ status: string }>;
+      expect(row.status).toBe('paused');
+    });
+
+    it('getAosCronTaskIds returns only aos-cron rows, scoped to agent_id=aos', () => {
+      createScheduledTask('user-row', 'p', '0 9 * * *', 1, 'main');
+      upsertAosCronTask({
+        id: 'aos-row', prompt: 'b', schedule: '0 9 * * *', nextRun: 1,
+        jobPath: '/jobs/x.md', model: null, timeout: null, notify: null, retry: 0, active: true,
+      });
+      const ids = getAosCronTaskIds();
+      expect(ids).toContain('aos-row');
+      expect(ids).not.toContain('user-row');
     });
   });
 });
