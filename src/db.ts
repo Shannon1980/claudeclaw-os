@@ -229,7 +229,9 @@ function createSchema(database: Database.Database): void {
       created_at      INTEGER NOT NULL,
       started_at      INTEGER,
       completed_at    INTEGER,
-      project_id      TEXT
+      project_id      TEXT,
+      blocked_on      TEXT,     -- who/what the task is waiting on (free text)
+      blocked_since   INTEGER   -- unix seconds the block was set
     );
 
     CREATE INDEX IF NOT EXISTS idx_mission_status
@@ -712,6 +714,12 @@ function runMigrations(database: Database.Database): void {
   // Index lives here (not in the base schema block) because on pre-existing
   // DBs the column only exists after the ALTER above has run.
   database.exec(`CREATE INDEX IF NOT EXISTS idx_mission_project ON mission_tasks(project_id, created_at ASC)`);
+
+  // "Waiting on others": a task can be parked in a 'blocked' status with a
+  // free-text note of who/what it waits on and since when. The runner only
+  // claims 'queued', so a blocked task is naturally skipped until unblocked.
+  addColumnIfMissing(database, 'mission_tasks', 'blocked_on', 'TEXT');
+  addColumnIfMissing(database, 'mission_tasks', 'blocked_since', 'INTEGER');
 
   // Live Meetings: add provider column so we can track which platform
   // each session used (pika avatar vs recall voice-only). Default 'pika'
@@ -1290,6 +1298,25 @@ export function getAllScheduledTasks(agentId?: string): ScheduledTask[] {
   return db
     .prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC')
     .all() as ScheduledTask[];
+}
+
+/**
+ * Active routines whose next run lands within `withinSecs` from now, soonest
+ * first. Feeds the Home "Today" suggestions — the only schedule data the
+ * dashboard process can derive honestly without a calendar/email integration.
+ */
+export function getUpcomingScheduledTasks(withinSecs: number, agentId?: string): ScheduledTask[] {
+  const horizon = Math.floor(Date.now() / 1000) + withinSecs;
+  const params: unknown[] = [horizon];
+  let agentClause = '';
+  if (agentId) { agentClause = ' AND agent_id = ?'; params.push(agentId); }
+  return db
+    .prepare(
+      `SELECT * FROM scheduled_tasks
+       WHERE status = 'active' AND next_run <= ?${agentClause}
+       ORDER BY next_run ASC`,
+    )
+    .all(...params) as ScheduledTask[];
 }
 
 /**
@@ -2180,7 +2207,7 @@ export interface MissionTask {
   title: string;
   prompt: string;
   assigned_agent: string | null;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked';
   result: string | null;
   error: string | null;
   created_by: string;
@@ -2189,6 +2216,8 @@ export interface MissionTask {
   started_at: number | null;
   completed_at: number | null;
   project_id: string | null;
+  blocked_on: string | null;
+  blocked_since: number | null;
 }
 
 export function createMissionTask(
@@ -2299,9 +2328,78 @@ export function completeMissionTask(
 
 export function cancelMissionTask(id: string): boolean {
   const result = db.prepare(
-    `UPDATE mission_tasks SET status = 'cancelled', completed_at = ? WHERE id = ? AND status IN ('queued', 'running')`,
+    `UPDATE mission_tasks SET status = 'cancelled', completed_at = ? WHERE id = ? AND status IN ('queued', 'running', 'blocked')`,
   ).run(Math.floor(Date.now() / 1000), id);
   return result.changes > 0;
+}
+
+/**
+ * Park a task as "waiting on others". Allowed from queued/running/blocked
+ * (already-settled tasks can't be blocked). `blockedOn` is a free-text note of
+ * who/what it waits on. started_at is cleared so the task reads as not-running.
+ * The runner only claims 'queued', so a blocked task is skipped until unblocked.
+ */
+export function setMissionTaskBlocked(id: string, blockedOn: string): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const result = db.prepare(
+    `UPDATE mission_tasks
+       SET status = 'blocked', blocked_on = ?, blocked_since = ?, started_at = NULL
+     WHERE id = ? AND status IN ('queued', 'running', 'blocked')`,
+  ).run(blockedOn, now, id);
+  return result.changes > 0;
+}
+
+/** Return a blocked task to the queue so a teammate can pick it up again. */
+export function unblockMissionTask(id: string): boolean {
+  const result = db.prepare(
+    `UPDATE mission_tasks
+       SET status = 'queued', blocked_on = NULL, blocked_since = NULL
+     WHERE id = ? AND status = 'blocked'`,
+  ).run(id);
+  return result.changes > 0;
+}
+
+/**
+ * The Home daily-loop payload, grouped server-side so the frontend makes one
+ * call and holds no grouping logic. Mirrors specs/operator-product/03-home.md:
+ *   needsYou = unassigned-queued (route it) + recent failed (handle it)
+ *   onPlate  = running + assigned-queued (active work, who's on it)
+ *   waiting  = blocked (waiting on others)
+ *   shipped  = completed within the last `recentDays`
+ * Cancelled tasks and stale failures drop away.
+ */
+export interface HomeSummary {
+  needsYou: MissionTask[];
+  onPlate: MissionTask[];
+  waiting: MissionTask[];
+  shipped: MissionTask[];
+}
+
+export function getHomeSummary(recentDays = 7): HomeSummary {
+  const cutoff = Math.floor(Date.now() / 1000) - recentDays * 86400;
+  const all = db.prepare('SELECT * FROM mission_tasks').all() as MissionTask[];
+
+  const byPriority = (a: MissionTask, b: MissionTask) =>
+    b.priority - a.priority || b.created_at - a.created_at;
+  const byRecency = (a: MissionTask, b: MissionTask) =>
+    (b.completed_at ?? b.created_at) - (a.completed_at ?? a.created_at);
+
+  const needsYou = all
+    .filter((t) =>
+      (t.status === 'queued' && !t.assigned_agent) ||
+      (t.status === 'failed' && (t.completed_at == null || t.completed_at >= cutoff)))
+    .sort(byPriority);
+  const onPlate = all
+    .filter((t) => t.status === 'running' || (t.status === 'queued' && !!t.assigned_agent))
+    .sort(byPriority);
+  const waiting = all
+    .filter((t) => t.status === 'blocked')
+    .sort((a, b) => (a.blocked_since ?? a.created_at) - (b.blocked_since ?? b.created_at));
+  const shipped = all
+    .filter((t) => t.status === 'completed' && (t.completed_at == null || t.completed_at >= cutoff))
+    .sort(byRecency);
+
+  return { needsYou, onPlate, waiting, shipped };
 }
 
 export function deleteMissionTask(id: string): boolean {

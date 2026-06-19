@@ -20,7 +20,7 @@ export interface MissionTask {
   title: string;
   prompt: string;
   assigned_agent: string | null;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked';
   priority: number;
   created_by: string;
   created_at: number;
@@ -29,6 +29,8 @@ export interface MissionTask {
   result: string | null;
   error: string | null;
   project_id: string | null;
+  blocked_on: string | null;
+  blocked_since: number | null;
 }
 
 export interface Agent {
