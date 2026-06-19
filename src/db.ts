@@ -2535,6 +2535,99 @@ export function getHomeSummary(recentDays = 7): HomeSummary {
   return { needsYou, onPlate, waiting, shipped };
 }
 
+// ── Team roster (operator-product spec 05-team.md) ──────────────────
+//
+// Per-teammate rollup for the Team page: what each teammate is doing right
+// now (live activity), how much work it's holding (workload), and whether the
+// operator has paused it. A view over the same mission_tasks / scheduled_tasks
+// the engine already produces — no new write paths.
+
+export interface TeammateRollup {
+  /** Title of the task this teammate is actively running, if any. */
+  activeTask: string | null;
+  /** Active mission tasks held by this teammate: running + queued + blocked. */
+  activeTaskCount: number;
+  /** Active (not paused) routines owned by this teammate. */
+  routineCount: number;
+  /** Soonest upcoming routine run for this teammate (epoch secs), if any. */
+  nextRoutineAt: number | null;
+  /** Operator paused this teammate — no new work, no routines. */
+  paused: boolean;
+}
+
+/**
+ * Roll up live activity + workload + paused state for every agent that has any
+ * mission task or routine, keyed by agent id. The Team page merges this onto
+ * the agent registry, so agents with no work simply get the default rollup.
+ */
+export function getTeamRoster(): Record<string, TeammateRollup> {
+  const out: Record<string, TeammateRollup> = {};
+  const ensure = (id: string): TeammateRollup =>
+    (out[id] ??= { activeTask: null, activeTaskCount: 0, routineCount: 0, nextRoutineAt: null, paused: false });
+
+  const tasks = db
+    .prepare(
+      `SELECT assigned_agent, title, status FROM mission_tasks
+       WHERE assigned_agent IS NOT NULL AND status IN ('running', 'queued', 'blocked')`,
+    )
+    .all() as { assigned_agent: string; title: string; status: string }[];
+  for (const t of tasks) {
+    const r = ensure(t.assigned_agent);
+    r.activeTaskCount++;
+    // Running tasks are the live activity line; the first one we see wins.
+    if (t.status === 'running' && !r.activeTask) r.activeTask = t.title;
+  }
+
+  const routines = db
+    .prepare(
+      `SELECT agent_id, COUNT(*) as c, MIN(next_run) as next
+       FROM scheduled_tasks WHERE status = 'active' GROUP BY agent_id`,
+    )
+    .all() as { agent_id: string; c: number; next: number | null }[];
+  for (const row of routines) {
+    const r = ensure(row.agent_id);
+    r.routineCount = row.c;
+    r.nextRoutineAt = row.next;
+  }
+
+  for (const id of getPausedAgents()) ensure(id).paused = true;
+
+  return out;
+}
+
+// ── Paused teammates (operator pause/resume, spec 05-team.md) ────────
+//
+// A non-destructive enabled flag the scheduler honors: a paused teammate is
+// not assigned new mission tasks and its routines do not fire. Stored as a JSON
+// id-array in dashboard_settings so it survives restarts and both the scheduler
+// process and the dashboard read the same source. Pausing never stops a
+// teammate's standalone service (that's the builder's start/stop control); it
+// only halts new autonomous work.
+
+const PAUSED_AGENTS_KEY = 'paused_agents';
+
+export function getPausedAgents(): string[] {
+  const raw = getDashboardSetting(PAUSED_AGENTS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function isAgentPaused(agentId: string): boolean {
+  return getPausedAgents().includes(agentId);
+}
+
+export function setAgentPaused(agentId: string, paused: boolean): void {
+  const current = new Set(getPausedAgents());
+  if (paused) current.add(agentId);
+  else current.delete(agentId);
+  setDashboardSetting(PAUSED_AGENTS_KEY, JSON.stringify([...current]));
+}
+
 export function deleteMissionTask(id: string): boolean {
   const result = db.prepare(
     `DELETE FROM mission_tasks WHERE id = ? AND status IN ('completed', 'cancelled', 'failed')`,

@@ -47,6 +47,9 @@ import {
   getUnassignedMissionTasks,
   getMissionTaskHistory,
   getHomeSummary,
+  getTeamRoster,
+  isAgentPaused,
+  setAgentPaused,
   setMissionTaskBlocked,
   unblockMissionTask,
   getUpcomingScheduledTasks,
@@ -2102,6 +2105,8 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           // No bot token = no standalone process; reachable only via
           // delegation through the main bot (@agent: / mission tasks).
           delegationOnly: !config.botToken,
+          // Operator paused this teammate: no new mission tasks, no routines.
+          paused: isAgentPaused(id),
           todayTurns: stats.todayTurns,
           todayCost: stats.todayCost,
           // Cache-bust token for <img> URLs across all surfaces. Derived
@@ -2110,7 +2115,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           avatar_etag: avatarEtagForId(id),
         };
       } catch {
-        return { id, name: id, description: '', model: 'unknown', slackChannel: '', running: false, delegationOnly: false, todayTurns: 0, todayCost: 0, avatar_etag: avatarEtagForId(id) };
+        return { id, name: id, description: '', model: 'unknown', slackChannel: '', running: false, delegationOnly: false, paused: isAgentPaused(id), todayTurns: 0, todayCost: 0, avatar_etag: avatarEtagForId(id) };
       }
     });
 
@@ -2125,11 +2130,34 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     }
     const mainStats = getAgentTokenStats('main');
     const allAgents = [
-      { id: 'main', name: 'Main', description: 'Primary ClaudeClaw bot', model: getMainModelOverride() ?? 'claude-opus-4-6', slackChannel: '', running: mainRunning, delegationOnly: false, todayTurns: mainStats.todayTurns, todayCost: mainStats.todayCost, avatar_etag: avatarEtagForId('main') },
+      { id: 'main', name: 'Main', description: 'Primary ClaudeClaw bot', model: getMainModelOverride() ?? 'claude-opus-4-6', slackChannel: '', running: mainRunning, delegationOnly: false, paused: isAgentPaused('main'), todayTurns: mainStats.todayTurns, todayCost: mainStats.todayCost, avatar_etag: avatarEtagForId('main') },
       ...agents,
     ];
 
     return c.json({ agents: allAgents });
+  });
+
+  // Team roster rollup (operator-product spec 05-team.md). Per-teammate live
+  // activity + workload + paused state, keyed by agent id. The Team page merges
+  // this onto /api/agents; agents absent from the map have no active work.
+  app.get('/api/team/roster', (c) => {
+    return c.json({ roster: getTeamRoster() });
+  });
+
+  // Pause a teammate (non-destructive): the scheduler stops assigning it new
+  // mission tasks and stops firing its routines until it resumes. The standalone
+  // service, if any, keeps running — pause halts new autonomous work, not the
+  // process (that's the builder's start/stop control).
+  app.post('/api/agents/:id/pause', (c) => {
+    const agentId = c.req.param('id');
+    setAgentPaused(agentId, true);
+    return c.json({ ok: true, id: agentId, paused: true });
+  });
+
+  app.post('/api/agents/:id/resume', (c) => {
+    const agentId = c.req.param('id');
+    setAgentPaused(agentId, false);
+    return c.json({ ok: true, id: agentId, paused: false });
   });
 
   // Agent-specific recent conversation

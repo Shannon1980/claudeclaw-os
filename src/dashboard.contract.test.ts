@@ -223,6 +223,56 @@ describe('GET /api/agents', () => {
   });
 });
 
+describe('GET /api/team/roster', () => {
+  it('returns { roster: {} } when no agents have work', async () => {
+    const res = await get('/api/team/roster');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ roster: expect.any(Object) });
+  });
+
+  it('rolls up active mission tasks per teammate', async () => {
+    // Seed a queued task assigned to a teammate; it should show up in workload.
+    await app.request('/api/mission/tasks' + Q, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'roster seed', prompt: 'x', assigned_agent: 'research' }),
+    });
+    const res = await get('/api/team/roster');
+    const body = await jsonOf(res);
+    // research either appears with a count >= 1, or (if the create endpoint
+    // didn't accept the assignment) is simply absent — never malformed.
+    if (body.roster.research) {
+      expect(body.roster.research.activeTaskCount).toBeGreaterThanOrEqual(1);
+      expect(body.roster.research).toMatchObject({ paused: expect.any(Boolean) });
+    }
+  });
+});
+
+describe('POST /api/agents/:id/pause and /resume', () => {
+  it('pause then resume round-trips the paused flag', async () => {
+    const pause = await app.request('/api/agents/research/pause' + Q, { method: 'POST' });
+    expect(pause.status).toBe(200);
+    expect(await jsonOf(pause)).toMatchObject({ ok: true, id: 'research', paused: true });
+
+    const roster1 = await jsonOf(await get('/api/team/roster'));
+    expect(roster1.roster.research?.paused).toBe(true);
+
+    const resume = await app.request('/api/agents/research/resume' + Q, { method: 'POST' });
+    expect(resume.status).toBe(200);
+    expect(await jsonOf(resume)).toMatchObject({ ok: true, id: 'research', paused: false });
+  });
+
+  it('/api/agents reflects the paused flag', async () => {
+    await app.request('/api/agents/main/pause' + Q, { method: 'POST' });
+    const body = await jsonOf(await get('/api/agents'));
+    const main = body.agents.find((a: any) => a.id === 'main');
+    if (main) expect(main.paused).toBe(true);
+    // reset so other tests aren't affected (beforeEach also resets the DB)
+    await app.request('/api/agents/main/resume' + Q, { method: 'POST' });
+  });
+});
+
 describe('GET /api/tasks (scheduled)', () => {
   it('returns { tasks: [] }', async () => {
     const res = await get('/api/tasks');

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Link } from 'wouter-preact';
-import { Camera, Trash2, ExternalLink, FileText, Save } from 'lucide-preact';
+import { Camera, Trash2, ExternalLink, FileText, Save, Power, RotateCcw } from 'lucide-preact';
 import { Modal } from '@/components/Modal';
 import { AgentAvatar } from '@/components/AgentAvatar';
+import { ModelPicker } from '@/components/ModelPicker';
 import { Pill, StatusDot } from '@/components/Pill';
 import { Tab } from '@/components/PageHeader';
 import { useFetch } from '@/lib/useFetch';
 import { formatRelativeTime, formatCost } from '@/lib/format';
-import { chatId, dashboardToken, apiPatch } from '@/lib/api';
+import { chatId, dashboardToken, apiPatch, apiPost, apiDelete } from '@/lib/api';
 import { pushToast } from '@/lib/toasts';
 import { showCosts } from '@/lib/theme';
 
@@ -17,6 +18,8 @@ interface Agent {
   description: string;
   model: string;
   running: boolean;
+  delegationOnly?: boolean;
+  paused?: boolean;
   todayTurns: number;
   todayCost: number;
 }
@@ -32,9 +35,12 @@ interface Props {
   agent: Agent | null;
   onClose: () => void;
   onUpdated?: (agent: Agent) => void;
+  /** Called after the teammate is removed (deleted). The parent should close
+   *  the drawer and refresh the roster. */
+  onRemoved?: () => void;
 }
 
-export function AgentDetail({ agent, onClose, onUpdated }: Props) {
+export function AgentDetail({ agent, onClose, onUpdated, onRemoved }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
   if (!agent) return null;
 
@@ -49,7 +55,7 @@ export function AgentDetail({ agent, onClose, onUpdated }: Props) {
       </div>
 
       {activeTab === 'overview' && (
-        <OverviewTab agent={agent} onEditFiles={onClose} onUpdated={onUpdated} />
+        <OverviewTab agent={agent} onEditFiles={onClose} onUpdated={onUpdated} onRemoved={onRemoved} />
       )}
       {activeTab === 'conversation' && <ConversationTab agentId={agent.id} />}
       {activeTab === 'tasks' && <TasksTab agentId={agent.id} />}
@@ -203,23 +209,79 @@ function Header({ agent }: { agent: Agent }) {
 }
 
 function OverviewTab({
-  agent, onEditFiles, onUpdated,
+  agent, onEditFiles, onUpdated, onRemoved,
 }: {
   agent: Agent;
   onEditFiles: () => void;
   onUpdated?: (agent: Agent) => void;
+  onRemoved?: () => void;
 }) {
   const tokens = useFetch<AgentTokens>(`/api/agents/${agent.id}/tokens`);
   const costsOn = showCosts.value;
   const isMain = agent.id === 'main';
+  const isDelegationOnly = !isMain && agent.delegationOnly === true;
   const [name, setName] = useState(agent.name || '');
   const [description, setDescription] = useState(agent.description || '');
   const [saving, setSaving] = useState(false);
+  const [service, setService] = useState<string | null>(null);
 
   useEffect(() => {
     setName(agent.name || '');
     setDescription(agent.description || '');
   }, [agent.id, agent.name, agent.description]);
+
+  async function setModel(model: string) {
+    setService('model');
+    try {
+      const res = await apiPatch<{ ok: boolean; restartRequired: boolean }>(`/api/agents/${agent.id}/model`, { model });
+      onUpdated?.({ ...agent, model });
+      if (res.restartRequired) {
+        pushToast({
+          tone: 'warn',
+          title: agent.id + ' needs a restart',
+          description: `Brain is now ${model}, but the running process is still on the old one.`,
+          durationMs: 0,
+          action: {
+            label: 'Restart now',
+            run: async () => {
+              await apiPost(`/api/agents/${agent.id}/restart`);
+              pushToast({ tone: 'success', title: agent.id + ' restarting' });
+            },
+          },
+        });
+      } else {
+        pushToast({ tone: 'success', title: 'Brain set', description: 'Takes effect on the next message.' });
+      }
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Brain change failed', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setService(null); }
+  }
+
+  async function runService(action: 'restart' | 'stop' | 'start') {
+    setService(action);
+    try {
+      if (action === 'restart') await apiPost(`/api/agents/${agent.id}/restart`);
+      if (action === 'stop') await apiPost(`/api/agents/${agent.id}/deactivate`);
+      if (action === 'start') await apiPost(`/api/agents/${agent.id}/activate`);
+      pushToast({ tone: 'success', title: `Service ${action === 'stop' ? 'stopping' : action === 'start' ? 'starting' : 'restarting'}` });
+      onUpdated?.({ ...agent });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: action + ' failed', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setService(null); }
+  }
+
+  async function remove() {
+    if (!confirm(`Remove teammate "${agent.id}"? This unloads the service, removes its config and bot token, and deletes its log files. This cannot be undone.`)) return;
+    setService('delete');
+    try {
+      await apiDelete(`/api/agents/${agent.id}/full`);
+      pushToast({ tone: 'success', title: `${agent.name || agent.id} removed` });
+      onRemoved?.();
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Remove failed', description: err?.message || String(err), durationMs: 6000 });
+      setService(null);
+    }
+  }
 
   const dirty =
     !isMain && (
@@ -299,21 +361,78 @@ function OverviewTab({
       </Section>
 
       <Section label="Configuration">
-        <Row label="Model"><Pill tone="neutral">{agent.model || 'default'}</Pill></Row>
+        <Row label="Brain">
+          <ModelPicker value={agent.model} onSelect={setModel} disabled={service === 'model'} />
+        </Row>
         <Row label="Status">{agent.running
           ? <Pill tone="done">running</Pill>
-          : <Pill tone="cancelled">offline</Pill>}</Row>
-        <Row label="Persona & config">
+          : isDelegationOnly
+            ? <Pill tone="accent">delegation-only</Pill>
+            : <Pill tone="cancelled">offline</Pill>}</Row>
+        <Row label="Instructions & connected tools">
           <Link
             href={`/agents/${agent.id}/files`}
             onClick={onEditFiles}
             class="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] border border-[var(--color-border)] transition-colors"
           >
             <FileText size={11} />
-            {isMain ? 'Edit CLAUDE.md' : 'Edit CLAUDE.md & agent.yaml'}
+            {isMain ? 'Edit instructions' : 'Edit instructions & agent.yaml'}
           </Link>
         </Row>
       </Section>
+
+      {/* Service controls — builder-only. The standalone process (start/stop) is
+          distinct from the operator's pause (which only halts new work). Main
+          can't be stopped here; delegation-only teammates have no service. */}
+      {!isMain && !isDelegationOnly && (
+        <Section label="Service">
+          <Row label="Process">
+            <div class="flex items-center gap-1">
+              {agent.running ? (
+                <button
+                  type="button"
+                  onClick={() => runService('stop')}
+                  disabled={service !== null}
+                  class="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors disabled:opacity-40"
+                >
+                  <Power size={11} /> {service === 'stop' ? 'Stopping…' : 'Stop'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => runService('start')}
+                  disabled={service !== null}
+                  class="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white border border-[var(--color-accent-soft)] transition-colors disabled:opacity-40"
+                >
+                  <Power size={11} /> {service === 'start' ? 'Starting…' : 'Start'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => runService('restart')}
+                disabled={service !== null}
+                class="inline-flex items-center justify-center px-2 py-1 rounded text-[11px] bg-[var(--color-elevated)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] transition-colors disabled:opacity-40"
+                title="Restart"
+              >
+                <RotateCcw size={11} class={service === 'restart' ? 'animate-spin' : ''} />
+              </button>
+            </div>
+          </Row>
+        </Section>
+      )}
+
+      {!isMain && (
+        <div class="pt-1">
+          <button
+            type="button"
+            onClick={remove}
+            disabled={service !== null}
+            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11.5px] text-[var(--color-text-muted)] hover:text-[var(--color-status-failed)] border border-[var(--color-border)] hover:border-[var(--color-status-failed)] transition-colors disabled:opacity-40"
+          >
+            <Trash2 size={12} /> {service === 'delete' ? 'Removing…' : 'Remove teammate'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

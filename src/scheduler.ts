@@ -15,6 +15,7 @@ import {
   completeMissionTask,
   resetStuckMissionTasks,
   getMissionTask,
+  isAgentPaused,
   type MissionTask,
   type ScheduledTask,
 } from './db.js';
@@ -229,6 +230,13 @@ async function runDueTasks(): Promise<void> {
       continue;
     }
 
+    // Operator paused this teammate: its routines do not fire. next_run is left
+    // untouched, so a routine that came due while paused fires once on resume.
+    if (isAgentPaused(task.agent_id)) {
+      logger.debug({ taskId: task.id, agentId: task.agent_id }, 'Teammate paused, skipping routine');
+      continue;
+    }
+
     // Compute next occurrence BEFORE executing so we can lock the task
     // in the DB immediately, preventing re-fire on subsequent ticks.
     const nextRun = computeNextRun(task.schedule);
@@ -320,15 +328,18 @@ async function runDueTasks(): Promise<void> {
 }
 
 async function runDueMissionTasks(): Promise<void> {
-  // Tasks assigned to this process's own agent
-  startMissionTask(claimNextMissionTask(schedulerAgentId), null);
+  // Tasks assigned to this process's own agent (unless the operator paused it).
+  if (!isAgentPaused(schedulerAgentId)) {
+    startMissionTask(claimNextMissionTask(schedulerAgentId), null);
+  }
 
   // The main process also executes tasks assigned to agents that have no
   // standalone process running (delegation-only agents, or stopped services).
-  // Without this, those tasks would sit queued forever.
+  // Without this, those tasks would sit queued forever. Paused teammates are
+  // skipped here too, so their queued work waits until they resume.
   if (schedulerAgentId === 'main') {
     for (const agent of getAvailableAgents()) {
-      if (agent.id === schedulerAgentId || isAgentRunning(agent.id)) continue;
+      if (agent.id === schedulerAgentId || isAgentRunning(agent.id) || isAgentPaused(agent.id)) continue;
       startMissionTask(claimNextMissionTask(agent.id), agent.id);
     }
   }
