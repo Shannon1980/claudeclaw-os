@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
 status: executing
-last_updated: "2026-06-22T23:44:52.619Z"
+last_updated: "2026-06-22T23:56:13.001Z"
 last_activity: 2026-06-22
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 01 (desktop-shell-onboarding) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-06-22
 
@@ -50,6 +50,7 @@ Last activity: 2026-06-22
 
 *Updated after each plan completion*
 | Phase 01 P01 | 30 | 2 tasks | 5 files |
+| Phase 01 P02 | ~25min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,8 @@ Recent decisions affecting current work:
 - Trust chain spine: Permissions (rules) → action → Activity (operator view) → Audit (technical truth), with Memory feeding the rules. Phases 3→4→5 build the chain in order; Phase 6 (Memory) depends on Phase 3.
 - The reframe is mostly a view layer over data the engine already produces (audit_log, hive_mind, memories, scheduled_tasks, token_usage). Most operator surfaces are UI→API→DB vertical slices (mvp mode).
 - [Phase ?]: A1 resolved: claude setup-token captures a token from a non-TTY Electron subprocess; plan 03 uses spawn+capture path.
+- [Phase ?]: MED-2: desktop service logs via pino to stdout/stderr only (no file/log-dir) — no log-path redirect needed for the launchd space trap
+- [Phase ?]: MED-4 BLOCKER: better-sqlite3 11.10.0 has no Electron-v115 prebuilt (lowest v116); pinned electron ^33.4.11 = ABI 115 forces a source compile the broken toolchain can't do — needs a version-bump decision before plan 04 build
 
 ### Pending Todos
 
@@ -76,6 +79,7 @@ None yet.
 - Phase 3: the permission gate sits at the Agent SDK tool-call layer — before any external/irreversible tool runs it must consult the model, log the decision, and proceed/queue/block. New surface, not just a view.
 - Phase 5: audit_log is encryption-adjacent and append-only; reads of any encrypted columns must go through ClaudeClaw's decryption path, not raw better-sqlite3 reads of ciphertext.
 - All phases: schema changes go through versioned migrations (`migrations/<version>/`, `add-migration` skill) — never inline-edit the schema.
+- ABI gap (01-02 MED-4): better-sqlite3 11.10.0 has no Electron-v115 prebuilt (lowest v116); pinned electron ^33.4.11 = ABI 115, so install-app-deps falls back to a source compile the broken toolchain cannot do. W4 .dmg build will fail under current pins. Needs a version-bump decision (electron 35+ for ABI116, or a better-sqlite3 version publishing v115) before plan 04.
 
 ## Deferred Items
 
@@ -89,8 +93,8 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-22T23:44:41.687Z
-Stopped at: v2.0 roadmap created (8 phases)
+Last session: 2026-06-22T23:56:07.821Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
