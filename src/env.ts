@@ -8,7 +8,15 @@ import path from 'path';
  * so they don't leak to child processes.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
+  // In a packaged .app the bundle is read-only, so the desktop shell points the
+  // service at a writable per-user data dir via CLAUDECLAW_DATA_DIR. When set,
+  // read .env from <data-dir>/.env (where the shell's config.cjs wrote it).
+  // Unset => fall back to process.cwd()/.env (unchanged dev/terminal default).
+  // The var comes from the shell env, never .env itself (it locates the .env).
+  const dataDir = process.env.CLAUDECLAW_DATA_DIR;
+  const envFile = dataDir
+    ? path.join(dataDir, '.env')
+    : path.join(process.cwd(), '.env');
   let content: string;
   try {
     content = fs.readFileSync(envFile, 'utf-8');
