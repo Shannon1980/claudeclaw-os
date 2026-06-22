@@ -46,7 +46,12 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
   3. First run installs/sets up the Claude Code CLI and completes `claude login` inside the app (browser OAuth driven through an Electron window, no terminal)
   4. The user can sign in with their Claude subscription by default, with an API-key path one link away for heavy automation, and the app shows the active auth source (D1)
   5. The app registers as a login item and keeps running across reboots
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 01-01-PLAN.md — Auth-precedence/env helpers (tested) + setup-token spike (A1) + smoke checklist
+- [ ] 01-02-PLAN.md — Writable-state redirect, migration-before-fork, native-ABI rebuild in build
+- [ ] 01-03-PLAN.md — Native CLI installer + setup-token capture + auth precedence + login item
+- [ ] 01-04-PLAN.md — Sign/notarize/package the .dmg + clean-machine end-to-end smoke
 **UI hint**: yes
 
 ### Phase 2: Routines
