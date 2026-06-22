@@ -1,198 +1,168 @@
-# Roadmap: Consolidate Agentic OS into ClaudeClaw
+# Roadmap: ClaudeClaw
 
-## Overview
+## Milestones
 
-This consolidation makes a terminal Claude Code session in the agentic-os workspace and the ClaudeClaw chat bot behave as one assistant — same identity, skills, memory, and scheduled jobs. ClaudeClaw is the host runtime; agentic-os becomes the workspace and skill library it runs against. The journey starts with a low-risk "afternoon win" (point an agent at the workspace, get skills working over Slack) to derisk everything before any bridge work. From there it sequences the bridges by risk: skills hardening, then the hardest bridge (memory: source-of-record, markdown projection, memsearch retirement), then scheduler, identity, and the Command Centre repoint. A final phase explicitly owns the cross-cutting compatibility guardrails — both modes always working, no fleet regression, tests green — though those guardrails are woven into every phase as success criteria too. All schema changes go through ClaudeClaw's versioned migration system (`migrations/<version>/`, see the `add-migration` skill).
+- ✅ **v1.0 Agentic OS Consolidation** — Phases 1-7 (shipped 2026-06-19) — see [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
+- 🚧 **v2.0 Operator Product** — packaging, trust, and distribution: reframe ClaudeClaw into a local-first desktop product for business operators (see `specs/operator-product/`)
 
 ## Phases
 
-**Phase Numbering:**
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+<details>
+<summary>✅ v1.0 Agentic OS Consolidation (Phases 1-7) — SHIPPED 2026-06-19</summary>
 
-Decimal phases appear between their surrounding integers in numeric order.
+- [x] Phase 1: Afternoon Win — Point Agent at Workspace (completed 2026-06-14)
+- [x] Phase 2: Skills Over Chat (completed 2026-06-15)
+- [x] Phase 3: Skill Hardening (completed 2026-06-15)
+- [x] Phase 4: Memory Source of Record (completed 2026-06-15)
+- [x] Phase 5: Memory Projection & Capture (completed 2026-06-15)
+- [x] Phase 6: memsearch Retirement (completed 2026-06-16)
+- [x] Phase 7: Single Scheduler (completed 2026-06-19)
 
-- [x] **Phase 1: Afternoon Win — Point Agent at Workspace** - Configure an agent's project_dir at agentic-os, auto-load its context, document the setup (completed 2026-06-14)
-- [x] **Phase 2: Skills Over Chat** - Agentic-os methodology skills discoverable and invocable over Slack/Telegram, file outputs delivered via markers (completed 2026-06-15)
-- [x] **Phase 3: Skill Hardening** - Command-Centre/hook/download-dependent skills degrade gracefully headless; skill self-improvement keeps working (completed 2026-06-15)
-- [x] **Phase 4: Memory Source of Record** - ClaudeClaw SQLite is the single memory store; bot exchanges persist and recall across sessions (completed 2026-06-15)
-- [x] **Phase 5: Memory Projection & Capture** - SQLite memories render to agentic-os daily markdown; terminal-session work captured back via hooks (completed 2026-06-15)
-- [x] **Phase 6: memsearch Retirement** - Second semantic index disabled; recall runs entirely through ClaudeClaw embeddings (completed 2026-06-16)
-- [x] **Phase 7: Single Scheduler** - ClaudeClaw scheduler reads agentic-os cron/jobs/*.md and is the only runner; agentic-os cron disabled, no double-fire (completed 2026-06-19)
-- [ ] **Phase 8: Per-Agent Soul** - Every agent gets its own SOUL.md (voice) separate from its role CLAUDE.md; workspace agent's soul aligns with agentic-os SOUL.md
-- [ ] **Phase 9: Command Centre Repoint** - Command Centre reads ClaudeClaw SQLite through the decryption path; its own cron/memory engines disabled
-- [ ] **Phase 10: Compatibility Verification** - Both modes proven working end-to-end, no default-fleet regression, full test suite green
+Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
+
+</details>
+
+### 🚧 v2.0 Operator Product
+
+- [ ] **Phase 1: Desktop Shell & Onboarding** - Zero-terminal install: Electron shell boots the service and drives Claude login/auth
+- [ ] **Phase 2: Routines** - Plain-language scheduled multi-step workflows the operator builds by describing
+- [ ] **Phase 3: Permissions & Autonomy** - The four-tier autonomy model that gates every external action
+- [ ] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo
+- [ ] **Phase 5: Audit Log** - Admin-facing immutable, append-only, exportable record of every event
+- [ ] **Phase 6: Memory Surface** - "What your assistant knows": editable, provenance-tagged knowledge base
+- [ ] **Phase 7: Power Surfaces** - War room decision tool + live team pulse, reframed off the daily path
+- [ ] **Phase 8: Billing & Licensing** - Flat per-seat subscription gated by a license key; spend-and-outcomes view
 
 ## Phase Details
 
-### Phase 1: Afternoon Win — Point Agent at Workspace
-**Goal**: A ClaudeClaw agent runs Claude Code with the agentic-os repo as its working directory, auto-loading that workspace's project context, with reproducible setup docs.
-**Mode:** mvp
-**Depends on**: Nothing (first phase)
-**Requirements**: WS-01, WS-02, WS-03, WS-04
+### Phase 1: Desktop Shell & Onboarding
+**Goal**: A non-technical operator can install ClaudeClaw by double-clicking an installer and reach a working dashboard with their Claude account connected, never touching a terminal.
+**Depends on**: Nothing (gating prerequisite — the spec sequences this first: "until a non-developer can install and run it with no terminal, there is no product")
+**Mode**: mvp
+**Requirements**: PKG-01, PKG-02, PKG-03, PKG-04, PKG-05
 **Success Criteria** (what must be TRUE):
-  1. An agent configured with `project_dir` pointing at the agentic-os repo runs Claude Code with that directory as the SDK cwd, verifiable over Slack
-  2. The agent's responses reflect agentic-os CLAUDE.md/AGENTS.md context (it knows the workspace's instructions without being told)
-  3. A skill that requests `brand_context/` (voice, positioning, ICP) produces observably on-brand output over chat
-  4. A setup doc exists that lets the user repoint an agent at any workspace without reading source
-**Plans**: 2 plans
-
+  1. A user installs the app by double-clicking an installer and never opens a terminal
+  2. Launching the app boots the existing Node service internally and opens the dashboard as the app window
+  3. First run installs/sets up the Claude Code CLI and completes `claude login` inside the app (browser OAuth driven through an Electron window, no terminal)
+  4. The user can sign in with their Claude subscription by default, with an API-key path one link away for heavy automation, and the app shows the active auth source (D1)
+  5. The app registers as a login item and keeps running across reboots
+**Plans**: 4 plans
 Plans:
-- [x] 01-01-PLAN.md — Workspace agent config + WS-01 test gap + live WS-02/WS-03 verification
-- [x] 01-02-PLAN.md — Reproducible workspace-agent setup doc (WS-04)
-
-### Phase 2: Skills Over Chat
-**Goal**: The agentic-os methodology skills are discoverable and invocable by the workspace agent, and a real brand/marketing skill runs end-to-end over chat including delivering any file output.
-**Mode:** mvp
-**Depends on**: Phase 1
-**Requirements**: SK-01, SK-02, SK-03
-**Success Criteria** (what must be TRUE):
-  1. The agent can list/invoke agentic-os methodology skills (mkt-*, str-*, viz-*, meta-*) when running in the workspace
-  2. At least one representative brand/marketing skill triggered over Slack/Telegram produces a correct, on-brand result end-to-end
-  3. A skill that produces a file (image, PDF, doc) delivers it as a chat attachment via `[SEND_FILE:]`/`[SEND_PHOTO:]` markers
-  4. The existing default-fleet agents (not pointed at the workspace) behave exactly as before
-**Plans**: 2 plans
+- [ ] 01-01-PLAN.md — Auth-precedence/env helpers (tested) + setup-token spike (A1) + smoke checklist
+- [ ] 01-02-PLAN.md — Writable-state redirect, migration-before-fork, native-ABI rebuild in build
+- [ ] 01-03-PLAN.md — Native CLI installer + setup-token capture + auth precedence + login item
+- [ ] 01-04-PLAN.md — Sign/notarize/package the .dmg + clean-machine end-to-end smoke
 **UI hint**: yes
 
-Plans:
-- [x] 02-01-PLAN.md — Delegation-path file-marker fix (mirror mission-files.ts) + Wave 0 unit tests (space-in-path, delegation extraction)
-- [x] 02-02-PLAN.md — Pre-warm excalidraw venv, aos slack_channel config (human-action), live SK-01/SK-02/SK-03 transcripts
-
-### Phase 3: Skill Hardening
-**Goal**: Skills that assume the Command Centre, agentic-os hooks, or auto-download-to-Downloads no longer hard-fail headless, and skill self-improvement feedback keeps flowing.
-**Mode:** mvp
-**Depends on**: Phase 2
-**Requirements**: SK-04, SK-05
+### Phase 2: Routines
+**Goal**: An operator can stand up multi-step work that runs on its own by describing it in plain language, then review, control, and trust its run history.
+**Depends on**: Phase 1
+**Mode**: mvp
+**Requirements**: RTN-01, RTN-02, RTN-03, RTN-04, RTN-05
 **Success Criteria** (what must be TRUE):
-  1. A skill that normally relies on the Command Centre / agentic-os hooks / auto-download runs over chat without a hard failure (falls back or routes output through chat)
-  2. File outputs that would have hit the Downloads folder are instead delivered through ClaudeClaw `[SEND_FILE:]` markers
-  3. Skill self-improvement feedback written to agentic-os `learnings.md` is produced when a skill is invoked via the bot
-  4. No regression to the default fleet and the test suite stays green
-**Plans**: 1 plan
+  1. A user creates a routine by describing it in plain language and the assistant assembles the ordered steps
+  2. A routine runs multi-step work on a plain-language schedule with no cron syntax shown anywhere in the operator UI
+  3. A user can review and edit a routine's ordered steps, each assigned to a named teammate
+  4. A user can turn a routine on/off and run it now
+  5. Run history shows success, degraded, and failed runs honestly, and the user is notified when a routine breaks or degrades
+**Plans**: TBD
+**UI hint**: yes
 
-Plans:
-- [x] 03-01-PLAN.md — aos agent-role overlay (SEND_FILE marker + inline learnings write) + live SK-04/SK-05 verification
+### Phase 3: Permissions & Autonomy
+**Goal**: An operator can set how much the team may do on its own through a single autonomy dial backed by the four-tier reversibility model, and every external action is checked against it before it runs.
+**Depends on**: Phase 1
+**Mode**: mvp
+**Requirements**: PERM-01, PERM-02, PERM-03, PERM-04
+**Success Criteria** (what must be TRUE):
+  1. A user can set a global autonomy mode (Cautious / Balanced / Autonomous) and it changes what the team does unprompted
+  2. A user can override individual actions between Always and Ask first
+  3. Irreversible actions (send money, sign, delete) are visibly locked to Ask-first and cannot be set to Always in any mode (D4)
+  4. A gated action is fully prepared and queued as a "Needs you" item for one-tap approval
+**Plans**: TBD
+**UI hint**: yes
 
-### Phase 4: Memory Source of Record
-**Goal**: ClaudeClaw's SQLite store is the single source of record for memory across both modes, and a bot exchange is durably written and recallable later.
-**Mode:** mvp
-**Depends on**: Phase 3
+### Phase 4: Activity Feed
+**Goal**: An operator can glance at what the team did, see which actions ran autonomously vs were approved, and undo anything reversible — the transparency that makes autonomy safe to trust.
+**Depends on**: Phase 3 (Permissions is the front half of the trust chain; Activity is the operator view of its outcomes)
+**Mode**: mvp
+**Requirements**: TRUST-01, TRUST-02
+**Success Criteria** (what must be TRUE):
+  1. A user sees a reverse-chronological activity feed of what the team did, in plain language, attributed by teammate
+  2. Each item is tagged autonomous ("Ran on its own") vs approved ("You approved"), with held items tagged "Needs you"
+  3. A user can undo a reversible action directly from the feed; irreversible actions show no undo (D9)
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 5: Audit Log
+**Goal**: An admin can open a complete, read-only, append-only technical record of every event and export it, closing the Permissions → action → Activity → Audit trace.
+**Depends on**: Phase 4 (Audit is the technical back half of the same trust chain Activity surfaces; both read the same event stream)
+**Mode**: mvp
+**Requirements**: AUD-01, AUD-02
+**Success Criteria** (what must be TRUE):
+  1. An admin can view a complete, append-only audit log of every event with technical detail (tool, target, permission decision, result, duration, cost, session, model)
+  2. The log is read-only — no delete, no silent dropping; uncaptured categories are stated rather than implied
+  3. An admin can export the audit log as CSV/JSON
+  4. Log retention is bounded by a configurable window and the window is stated (D10)
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 6: Memory Surface
+**Goal**: An operator can see, correct, and control what the assistant knows about them and their business, with every fact showing where it came from.
+**Depends on**: Phase 3 (Memory feeds Permissions: preference-level facts inform autonomy defaults, so the permission model must exist for memory to feed it)
+**Mode**: mvp
 **Requirements**: MEM-01, MEM-02
 **Success Criteria** (what must be TRUE):
-  1. A chat exchange handled by the bot is written to ClaudeClaw memory and retrieved as relevant context in a later, separate session
-  2. Memory writes/reads are scoped correctly to the workspace agent (no cross-agent leakage into the workspace agent's recall)
-  3. The memory pipeline (ingest, embeddings, recall) runs against `store/claudeclaw.db` with no second store involved
-  4. Any schema change required is delivered as a versioned migration under `migrations/<version>/` and the test suite passes
-**Plans**: 2 plans
-
-Plans:
-- [x] 04-01-PLAN.md — strictAgentId scoping on the delegated recall call + Wave 0 unit tests (strict per-agent recall, single-store path assertion, full suite)
-- [x] 04-02-PLAN.md — deploy + restart, live two-session MEM-02 recall proof (human-verify)
-
-### Phase 5: Memory Projection & Capture
-**Goal**: Recent ClaudeClaw memories render into agentic-os daily `context/memory/*.md` as a derived projection (via the decryption-safe path), and terminal-session work is captured back into SQLite so the bot sees it.
-**Mode:** mvp
-**Depends on**: Phase 4
-**Requirements**: MEM-03, MEM-04, MEM-06
-**Success Criteria** (what must be TRUE):
-  1. A terminal Claude Code session started in the workspace reads a daily `context/memory/*.md` file that reflects recent ClaudeClaw memories
-  2. Work done in a terminal session (captured via a Stop hook) appears in ClaudeClaw memory and surfaces in a later bot conversation
-  3. The projection reads memory data through ClaudeClaw's own access/decryption path — never raw ciphertext reads of encrypted columns
-  4. The hook wiring is connected into the message/session lifecycle (hooks actually fire, not dead code) and the test suite passes
-**Plans**: 2 plans
-
-Plans:
-- [x] 05-01-PLAN.md — workspace-memory-key helper + delegation save/recall wiring + memory-projection.ts + capture-cli.ts + Wave 0 unit tests (MEM-03, MEM-04, MEM-06)
-- [x] 05-02-PLAN.md — build + symlink + agentic-os Stop hook + SessionStart loader edit + live terminal/bot round-trip (MEM-03, MEM-04 human-verify)
-
-### Phase 6: memsearch Retirement
-**Goal**: The agentic-os memsearch semantic index is retired so only one semantic index runs, and memory recall still works entirely through ClaudeClaw's embeddings.
-**Mode:** mvp
-**Depends on**: Phase 5
-**Requirements**: MEM-05, MEM-04 (re-opened, folded in)
-**Success Criteria** (what must be TRUE):
-  1. The memsearch index/cron no longer runs (no second semantic index process or nightly job firing)
-  2. Memory recall in both modes still returns relevant results using ClaudeClaw's embeddings only
-  3. A terminal session that previously relied on memsearch now gets equivalent recall from the SQLite-backed path or the markdown projection
-  4. No default-fleet regression and the test suite passes
-**Plans**: 3 plans
-
-Plans:
-- [x] 06-01-PLAN.md — recall-cli.ts + recallForWorkspace wrapper + Wave 0 single-index test + build (MEM-05)
-- [x] 06-02-PLAN.md — AGENTS.md Tier-1 rewrite + nightly cron disable + committed capture Stop hook (MEM-05, MEM-04)
-- [x] 06-03-PLAN.md — full-suite regression gate + live bidirectional round-trip proof (MEM-05, MEM-04, human-verify)
-
-### Phase 7: Single Scheduler
-**Goal**: ClaudeClaw's scheduler is the only job runner: it reads agentic-os `cron/jobs/*.md` definitions, fires them on schedule with status/log parity, and the agentic-os cron engine is disabled with no double-firing.
-**Mode:** mvp
-**Depends on**: Phase 6
-**Requirements**: SCH-01, SCH-02, SCH-03, SCH-04
-**Success Criteria** (what must be TRUE):
-  1. ClaudeClaw's scheduler loads a job defined in an agentic-os `cron/jobs/*.md` file (YAML frontmatter + prompt body) and runs it on schedule
-  2. A migrated job fires at its configured time and writes its result where the user expects (status/log parity with the old behavior)
-  3. The agentic-os cron engine no longer schedules or fires any jobs
-  4. A given job runs exactly once per trigger even with both a terminal workflow and the bot present (no double-fire), verified against the cross-process claim path
-  5. Any scheduler schema change ships as a versioned migration and the test suite passes
-**Plans**: 5 plans
-
-Plans:
-- [x] 07-01-PLAN.md — Versioned migration (aos-cron columns) + db.ts atomic claimDueTask + aos-row helpers
-- [x] 07-02-PLAN.md — src/aos-cron.ts: frontmatter+body parser, time/days->cron mapping, syncAosCronJobs lifecycle
-- [x] 07-03-PLAN.md — com.claudeclaw.aos launchd plist (spaces-safe /tmp logs, crash recovery)
-- [x] 07-04-PLAN.md — aos firing loop in scheduler.ts (atomic claim, prompt re-read, timeout/retry, notify, no preamble) + index.ts wiring
-- [x] 07-05-PLAN.md — Cutover + live proof: CRON_IN_PROCESS gate, migrate+restart, load aos service, no-double-fire human-verify (LAST)
-
-### Phase 8: Per-Agent Soul
-**Goal**: Introduce a per-agent `SOUL.md` that defines each named agent's personality/voice, loaded into its system prompt separately from its role (`CLAUDE.md`). Souls resolve like role files (`CLAUDECLAW_CONFIG/agents/<id>/SOUL.md` first, repo fallback), mirroring `resolveAgentClaudeMd` in `src/agent-config.ts`. The workspace agent's soul aligns with agentic-os `SOUL.md`; the existing named fleet (Bertha, Forge, Samantha, Sentinel, Skylar) each gain a distinct soul without losing role behavior.
-**Mode:** mvp
-**Depends on**: Phase 7
-**Requirements**: IDENT-01, IDENT-02, IDENT-03
-**Success Criteria** (what must be TRUE):
-  1. `agent-config.ts` loads a per-agent `SOUL.md` into the system prompt, resolved from `CLAUDECLAW_CONFIG/agents/<id>/SOUL.md` (repo fallback), distinct from and in addition to the role `CLAUDE.md`
-  2. The workspace agent's `SOUL.md` is sourced from / matches agentic-os `SOUL.md`, and its voice is observably consistent between a terminal session and a chat response for an equivalent prompt
-  3. Personality rules from an agent's `SOUL.md` (tone, no-em-dash, etc.) are observably applied in that agent's responses
-  4. `agents/_template/SOUL.md` scaffolds new agents; each existing named agent (Bertha, Forge, Samantha, Sentinel, Skylar) gets a distinct `SOUL.md`, and Skylar's existing inline `persona:` field is migrated into its `SOUL.md` with no role regression
-**Plans**: TBD
-
-### Phase 9: Command Centre Repoint
-**Goal**: The agentic-os Command Centre survives as a desktop cockpit reading ClaudeClaw's SQLite through the correct decryption path, with its own cron and memory engines disabled.
-**Mode:** mvp
-**Depends on**: Phase 8
-**Requirements**: CKPT-01, CKPT-02, CKPT-03
-**Success Criteria** (what must be TRUE):
-  1. The Command Centre displays current tasks and memory state read from ClaudeClaw's `store/claudeclaw.db` (through ClaudeClaw's decryption path, never raw ciphertext)
-  2. The Command Centre's own cron and memory engines are disabled so it never double-runs against ClaudeClaw
-  3. The Command Centre remains usable as a desktop view alongside the Slack/Telegram bot and terminal sessions
-  4. The test suite passes and the default fleet is unaffected
+  1. A user can view what the assistant knows about them, grouped by category (your business / your clients / how you like to work)
+  2. Each fact shows its provenance ("You told me" / "Learned from your work" / "Learned from email")
+  3. A user can edit or delete any fact in place, and a deleted fact is not silently re-derived
+  4. A user can add a fact, and a prominent assurance states it is stored on this machine
 **Plans**: TBD
 **UI hint**: yes
 
-### Phase 10: Compatibility Verification
-**Goal**: Prove the consolidation end-to-end — both modes behave as one assistant, the default fleet is unregressed, and the full test suite is green — and own the cross-cutting compatibility guarantees explicitly.
-**Mode:** mvp
-**Depends on**: Phase 9
-**Requirements**: COMPAT-01, COMPAT-02, COMPAT-03
+### Phase 7: Power Surfaces
+**Goal**: An operator can convene the team on a hard decision and get a converged recommendation, and see at a glance what the whole team is doing and where effort is going — both kept off the daily path.
+**Depends on**: Phase 3 (war-room decisions write back as actions through the permission gate; pulse reconciles spend with the autonomy/work pipeline)
+**Mode**: mvp
+**Requirements**: PWR-01, PWR-02
 **Success Criteria** (what must be TRUE):
-  1. A terminal Claude Code session in the workspace and the chat bot both respond correctly to the same task, sharing identity, skills, memory, and scheduled jobs
-  2. Existing ClaudeClaw behavior for agents NOT pointed at the workspace is verified unchanged (no default-fleet regression)
-  3. The existing ClaudeClaw test suite passes with the consolidation in place
-  4. There is exactly one scheduler and one memory store running across the whole system
+  1. A user can convene multiple teammates on a hard decision and every session forces a synthesis card with decision buttons ("Go with this" / "Hold firm" / "Dig deeper")
+  2. A war-room decision writes back as an action into the normal work pipeline and appears on Home and Activity
+  3. A user can see live team status — who is active, how hard each teammate is working — and where today's effort went by project
 **Plans**: TBD
+**UI hint**: yes
+
+### Phase 8: Billing & Licensing
+**Goal**: An operator runs the product on a flat per-seat subscription gated by a license key, and sees spend and outcomes rather than token telemetry.
+**Depends on**: Phase 1 (auth/account established in onboarding); informed by Phase 7 (pulse spend reconciles with billing)
+**Mode**: mvp
+**Requirements**: BILL-01, BILL-02
+**Success Criteria** (what must be TRUE):
+  1. A user runs the product on a flat per-seat subscription, gated by a valid license key
+  2. The product blocks or degrades when the license is missing or invalid
+  3. A user sees spend and outcomes ("142 tasks done, 6 routines running, $— this month"), not raw token telemetry, on a single billing screen
+**Plans**: TBD
+**UI hint**: yes
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
-
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Afternoon Win | 2/2 | Complete   | 2026-06-14 |
-| 2. Skills Over Chat | 2/2 | Complete   | 2026-06-15 |
-| 3. Skill Hardening | 1/1 | Complete   | 2026-06-15 |
-| 4. Memory Source of Record | 1/2 | In Progress|  |
-| 5. Memory Projection & Capture | 1/2 | In Progress|  |
-| 6. memsearch Retirement | 3/3 | Complete   | 2026-06-16 |
-| 7. Single Scheduler | 5/5 | Complete   | 2026-06-19 |
-| 8. Per-Agent Soul | 0/TBD | Not started | - |
-| 9. Command Centre Repoint | 0/TBD | Not started | - |
-| 10. Compatibility Verification | 0/TBD | Not started | - |
+| 1. Desktop Shell & Onboarding | 0/? | Not started | - |
+| 2. Routines | 0/? | Not started | - |
+| 3. Permissions & Autonomy | 0/? | Not started | - |
+| 4. Activity Feed | 0/? | Not started | - |
+| 5. Audit Log | 0/? | Not started | - |
+| 6. Memory Surface | 0/? | Not started | - |
+| 7. Power Surfaces | 0/? | Not started | - |
+| 8. Billing & Licensing | 0/? | Not started | - |
+
+## Backlog
+
+### Deferred from v1.0 — Agentic OS Consolidation
+
+Deferred 2026-06-22 when the project pivoted to the operator-product direction. These were planned
+but never executed under v1.0. Revisit in a future milestone if the consolidation is resumed.
+
+- **Per-Agent Soul** — Every agent gets its own SOUL.md (voice) separate from its role CLAUDE.md; workspace agent's soul aligns with agentic-os SOUL.md (was Phase 8)
+- **Command Centre Repoint** — Command Centre reads ClaudeClaw SQLite through the decryption path; its own cron/memory engines disabled (was Phase 9)
+- **Compatibility Verification** — Both modes proven working end-to-end, no default-fleet regression, full test suite green (was Phase 10)

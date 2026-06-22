@@ -1,4 +1,9 @@
-# Consolidate Agentic OS into ClaudeClaw
+# ClaudeClaw
+
+> **Milestone history:** v1.0 "Agentic OS Consolidation" (Phases 1-7) shipped 2026-06-19. The
+> project has since pivoted to the operator-product direction; v2.0 "Operator Product" is in
+> planning. The "What This Is" / "Core Value" below describe the v1.0 consolidation framing and are
+> evolved by `/gsd-new-milestone` for v2.0.
 
 ## What This Is
 
@@ -7,6 +12,23 @@ A consolidation of two of Shannon's personal-assistant projects into one tool. C
 ## Core Value
 
 A terminal Claude Code session in the agentic-os workspace and the ClaudeClaw chat bot must behave as one assistant: same identity, same skills, same memory, same scheduled jobs. No divergence between the two modes.
+
+## Current Milestone: v2.0 Operator Product
+
+**Goal:** Reframe ClaudeClaw into a local-first desktop product for business operators — an AI chief-of-staff that keeps work moving — packaged so a non-technical operator can install and run it.
+
+**Design source:** `specs/operator-product/` (README.md is the PRD; 11 docs cover foundations + per-surface specs). Locked decisions: D1 (auth: support both subscription OAuth and API keys, subscription-default), D4 (autonomy: four action tiers by reversibility, irreversible tier locked).
+
+**Already shipped (pre-GSD tracking):** onboarding, Home daily-loop (web + backend), Projects, Team roster.
+
+**Target features (this milestone):**
+- Routines — plain-language scheduled multi-step workflows
+- Permissions & settings — the autonomy tier model
+- Activity & audit — the trust chain (operator + admin views)
+- Memory reframe — "what your assistant knows" knowledge surface
+- War room + Team pulse — decision tool + live team status, reframed
+- Electron desktop shell — zero-terminal local-first install
+- Billing & licensing
 
 ## Requirements
 
@@ -25,19 +47,29 @@ A terminal Claude Code session in the agentic-os workspace and the ClaudeClaw ch
 - ✓ `[SEND_FILE:]` / `[SEND_PHOTO:]` markers deliver generated files over chat — existing
 - ✓ launchd deployment as a persistent service — existing (`launchd/`)
 
+<!-- Delivered in milestone v1.0 (Agentic OS Consolidation), Phases 1-7. -->
+
+- ✓ A ClaudeClaw agent points its `project_dir` at the agentic-os repo so the SDK auto-loads its CLAUDE.md/AGENTS.md, SOUL identity, brand_context, and `.claude/skills/` — v1.0 (Phase 1)
+- ✓ Agentic OS's ~22 methodology skills (mkt-*, str-*, viz-*, meta-*) are available and work end-to-end over Slack/Telegram — v1.0 (Phase 2)
+- ✓ Skills that assume the Command Centre, hooks, or auto-download degrade gracefully when run headless, or route file outputs through `[SEND_FILE:]` markers — v1.0 (Phase 3)
+- ✓ ClaudeClaw SQLite is the single source of record for memory; memsearch is retired — v1.0 (Phases 4, 6)
+- ✓ Agentic OS daily `context/memory/*.md` files are rendered as a derived projection from SQLite via hooks — v1.0 (Phase 5)
+- ✓ ClaudeClaw's scheduler is the single job runner and reads agentic-os `cron/jobs/*.md`; the agentic-os cron engine is disabled — v1.0 (Phase 7)
+- ✓ Shipped the "afternoon win" first (workspace + skills over chat) before bridge work — v1.0 (Phase 1)
+
 ### Active
 
-<!-- This consolidation. Hypotheses until shipped and validated. -->
+<!-- v2.0 (Operator Product) requirements are defined by /gsd-new-milestone from specs/operator-product/. -->
 
-- [ ] A ClaudeClaw agent points its `project_dir` at the agentic-os repo so the SDK auto-loads its CLAUDE.md/AGENTS.md, SOUL identity, brand_context, and `.claude/skills/`
-- [ ] Agentic OS's ~22 methodology skills (mkt-*, str-*, viz-*, meta-*) are available and work end-to-end over Slack/Telegram
-- [ ] Skills that assume the Command Centre, hooks, or auto-download degrade gracefully when run headless, or route file outputs through ClaudeClaw `[SEND_FILE:]` markers
-- [ ] ClaudeClaw SQLite is the single source of record for memory; memsearch is retired
-- [ ] Agentic OS daily `context/memory/*.md` files are rendered as a derived projection from SQLite (via SessionStart/Stop hooks) so terminal sessions stay informed
-- [ ] ClaudeClaw's scheduler is the single job runner and can read agentic-os `cron/jobs/*.md` definitions; the agentic-os cron engine is disabled
-- [ ] A single persona: the bot's identity is driven by the agentic-os SOUL.md rather than a separate ClaudeClaw CLAUDE.md persona
-- [ ] The Command Centre survives as a desktop cockpit, repointed to read ClaudeClaw's SQLite, with its own cron and memory engines disabled
-- [ ] An "afternoon win" milestone ships first: point an agent at the workspace + make skills available, testable over Slack, before any bridge work
+(Defining v2.0 requirements — see `specs/operator-product/`.)
+
+### Deferred (v1.0 cut — backlog)
+
+<!-- Planned under v1.0 but not executed; deferred at the pivot to the operator-product direction. -->
+
+- [ ] A single persona: the bot's identity is driven by the agentic-os SOUL.md rather than a separate ClaudeClaw CLAUDE.md persona (was Phase 8 — Per-Agent Soul)
+- [ ] The Command Centre survives as a desktop cockpit, repointed to read ClaudeClaw's SQLite, with its own cron and memory engines disabled (was Phase 9 — Command Centre Repoint)
+- [ ] Both modes proven working end-to-end, no default-fleet regression, full test suite green (was Phase 10 — Compatibility Verification)
 
 ### Out of Scope
 
@@ -97,4 +129,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-14 after initialization*
+*Last updated: 2026-06-22 after v1.0 (Agentic OS Consolidation) milestone close; pivoting to v2.0 Operator Product*
