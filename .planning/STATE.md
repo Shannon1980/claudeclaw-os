@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
-status: planning
-last_updated: "2026-06-22T14:29:54.009Z"
+status: executing
+last_updated: "2026-06-22T23:44:52.619Z"
 last_activity: 2026-06-22
 progress:
   total_phases: 8
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 4
+  completed_plans: 1
   percent: 0
 ---
 
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** A local-first desktop AI chief-of-staff for business operators — install with no terminal, runs the real Claude engine on the operator's own machine, keeps work moving and never lets anything fall through.
-**Current focus:** Phase 1 — Desktop Shell & Onboarding (the gating prerequisite: zero-terminal install)
+**Current focus:** Phase 01 — desktop-shell-onboarding
 
 ## Current Position
 
-Phase: Not started (roadmap drafted)
-Plan: —
-Status: Roadmap created, awaiting phase planning
-Last activity: 2026-06-22 — Milestone v2.0 roadmap created (8 phases)
+Phase: 01 (desktop-shell-onboarding) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-06-22
 
 ## Performance Metrics
 
@@ -49,6 +49,7 @@ Last activity: 2026-06-22 — Milestone v2.0 roadmap created (8 phases)
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01 P01 | 30 | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -62,6 +63,7 @@ Recent decisions affecting current work:
 - Build sequence is gated by what ships, not what is fun: Electron shell first (no product until a non-developer can install with no terminal), then Routines, then the trust chain.
 - Trust chain spine: Permissions (rules) → action → Activity (operator view) → Audit (technical truth), with Memory feeding the rules. Phases 3→4→5 build the chain in order; Phase 6 (Memory) depends on Phase 3.
 - The reframe is mostly a view layer over data the engine already produces (audit_log, hive_mind, memories, scheduled_tasks, token_usage). Most operator surfaces are UI→API→DB vertical slices (mvp mode).
+- [Phase ?]: A1 resolved: claude setup-token captures a token from a non-TTY Electron subprocess; plan 03 uses spawn+capture path.
 
 ### Pending Todos
 
@@ -87,7 +89,7 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-22
+Last session: 2026-06-22T23:44:41.687Z
 Stopped at: v2.0 roadmap created (8 phases)
 Resume file: None
 

@@ -18,9 +18,9 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 ### Packaging & Distribution (PKG)
 - [ ] **PKG-01**: A non-technical user can install ClaudeClaw as a desktop app by double-clicking an installer, with no terminal
 - [ ] **PKG-02**: The desktop app boots the existing Node service internally and opens the dashboard as its window
-- [ ] **PKG-03**: First run installs/sets up the Claude Code CLI and completes `claude login` without the user using a terminal
+- [x] **PKG-03**: First run installs/sets up the Claude Code CLI and completes `claude login` without the user using a terminal
 - [ ] **PKG-04**: The app registers as a login item and keeps running across reboots
-- [ ] **PKG-05**: A user can authenticate with their Claude subscription (OAuth) by default, with an API-key path available for heavy automation (D1)
+- [x] **PKG-05**: A user can authenticate with their Claude subscription (OAuth) by default, with an API-key path available for heavy automation (D1)
 
 ### Routines (RTN)
 - [ ] **RTN-01**: A user can create a routine by describing it in plain language; the assistant assembles the steps
@@ -71,9 +71,9 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 |--------|-------|--------|
 | PKG-01 | Phase 1 | Pending |
 | PKG-02 | Phase 1 | Pending |
-| PKG-03 | Phase 1 | Pending |
+| PKG-03 | Phase 1 | Complete |
 | PKG-04 | Phase 1 | Pending |
-| PKG-05 | Phase 1 | Pending |
+| PKG-05 | Phase 1 | Complete |
 | RTN-01 | Phase 2 | Pending |
 | RTN-02 | Phase 2 | Pending |
 | RTN-03 | Phase 2 | Pending |

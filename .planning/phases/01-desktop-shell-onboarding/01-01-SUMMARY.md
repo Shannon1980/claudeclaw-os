@@ -140,6 +140,10 @@ None for this plan beyond the one-time Claude sign-in already completed during t
 - **Cleanup carried forward:** plan 03 must delete or build-exclude `electron/spike-setup-token.cjs`.
 - No blockers.
 
+## Self-Check: PASSED
+
+All declared files exist on disk; all task commits (`95b6a91`, `a758378`, `3051107`) and the docs commit (`1f2fd8c`) are present in git history.
+
 ---
 *Phase: 01-desktop-shell-onboarding*
 *Completed: 2026-06-22*
