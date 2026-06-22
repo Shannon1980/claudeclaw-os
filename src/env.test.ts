@@ -139,3 +139,43 @@ describe('readEnvFile', () => {
     expect(result).toEqual({ KEY: 'value' });
   });
 });
+
+// In a packaged .app the bundle is read-only, so the service reads .env from a
+// writable per-user data dir the shell supplies via CLAUDECLAW_DATA_DIR. When
+// that env var is unset, readEnvFile falls back to process.cwd()/.env exactly
+// as before (the terminal/dev path is untouched).
+describe('readEnvFile honors CLAUDECLAW_DATA_DIR', () => {
+  const DATA_DIR = '/tmp/claudeclaw-datadir-env-test';
+  const DATA_ENV = path.join(DATA_DIR, '.env');
+  const savedDataDir = process.env.CLAUDECLAW_DATA_DIR;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try {
+      fs.rmSync(DATA_DIR, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+    if (savedDataDir === undefined) delete process.env.CLAUDECLAW_DATA_DIR;
+    else process.env.CLAUDECLAW_DATA_DIR = savedDataDir;
+  });
+
+  it('reads .env from CLAUDECLAW_DATA_DIR when set, not process.cwd()', () => {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(DATA_ENV, 'DB_ENCRYPTION_KEY=from-data-dir\n', 'utf-8');
+    // cwd points somewhere with no .env, proving the data-dir path is used.
+    vi.spyOn(process, 'cwd').mockReturnValue('/tmp/nonexistent-cwd-xyz');
+    process.env.CLAUDECLAW_DATA_DIR = DATA_DIR;
+    const result = readEnvFile(['DB_ENCRYPTION_KEY']);
+    expect(result).toEqual({ DB_ENCRYPTION_KEY: 'from-data-dir' });
+  });
+
+  it('falls back to process.cwd()/.env when CLAUDECLAW_DATA_DIR is unset', () => {
+    delete process.env.CLAUDECLAW_DATA_DIR;
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(path.join(DATA_DIR, '.env'), 'KEY=from-cwd\n', 'utf-8');
+    vi.spyOn(process, 'cwd').mockReturnValue(DATA_DIR);
+    const result = readEnvFile(['KEY']);
+    expect(result).toEqual({ KEY: 'from-cwd' });
+  });
+});
