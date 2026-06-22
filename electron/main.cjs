@@ -27,7 +27,26 @@ const cfg = require('./config.cjs');
 const APP_ROOT = app.isPackaged
   ? path.join(process.resourcesPath, 'app')
   : path.join(__dirname, '..');
-const ENV_PATH = path.join(APP_ROOT, '.env');
+
+// ── Writable data dir ──────────────────────────────────────────────────
+// In a signed .app, APP_ROOT (resourcesPath/app) is read-only under Gatekeeper,
+// so all writable state (.env, store/, db, migration backups) must live in a
+// writable per-user dir. Electron's app.getPath('userData') is the supported
+// location (~/Library/Application Support/ClaudeClaw). The service (src/config.ts
+// + src/env.ts) honors CLAUDECLAW_DATA_DIR; the migration runner honors its
+// dataDir arg. In dev (not packaged) we keep the old behavior (state under the
+// repo) so the terminal path is untouched.
+//   Secrets (DASHBOARD_TOKEN, DB_ENCRYPTION_KEY) written here survive app
+//   updates because the bundle is replaced but userData is not.
+const DATA_DIR = app.isPackaged ? app.getPath('userData') : APP_ROOT;
+
+// .env lives in the writable data dir (packaged) or the repo (dev). The service
+// reads it from the same place via CLAUDECLAW_DATA_DIR.
+const ENV_PATH = path.join(DATA_DIR, '.env');
+
+// Service logs: the Node service logs via pino to stdout/stderr only (no file
+// writes, no repo-relative logs/ dir — verified in src/logger.ts), so there is
+// nothing log-path-related to redirect for the launchd space-in-path trap (MED-2).
 
 // ── Derived dashboard config ──────────────────────────────────────────
 // Recomputed after onboarding writes config, so finish() can load the live
@@ -79,6 +98,10 @@ function startService() {
   const { cmd, args, runAsNode } = resolveServiceCommand();
   const childEnv = { ...process.env };
   if (runAsNode) childEnv.ELECTRON_RUN_AS_NODE = '1';
+  // Point the forked service at the writable data dir so its config.ts/env.ts
+  // resolve store/, db, and .env there (task 1). cwd stays APP_ROOT so the SDK
+  // still loads CLAUDE.md/skills from the code dir.
+  childEnv.CLAUDECLAW_DATA_DIR = DATA_DIR;
 
   serviceProc = spawn(cmd, args, {
     cwd: APP_ROOT,
@@ -132,6 +155,93 @@ function waitForDashboard(timeoutMs = 30000, intervalMs = 400) {
   });
 }
 
+// ── Migration gate (run BEFORE forking the service) ────────────────────
+// The service's checkPendingMigrations() calls process.exit(1) on pending
+// migrations; under Electron that silently kills the forked child and the
+// dashboard never binds (RESEARCH Pitfall 3 / T-02-02 DoS). So we apply
+// migrations here FIRST via the non-interactive runner (src/migrate-runner.ts),
+// which never reads stdin and never exits — it returns a status. Because there
+// is no prompt and no exit, the main process can never deadlock on a [y/N] with
+// no TTY behind it.
+//
+// The runner is ESM/TS; we run it in a short-lived child process that prints a
+// single JSON status line. Packaged: the compiled dist/migrate-runner.js with
+// Electron's bundled Node (ELECTRON_RUN_AS_NODE). Dev: the TS source via tsx.
+function resolveMigrationRunner() {
+  const distRunner = path.join(APP_ROOT, 'dist', 'migrate-runner.js');
+  if (fs.existsSync(distRunner)) {
+    return { cmd: process.execPath, runnerPath: distRunner, runAsNode: true };
+  }
+  const tsxBin = path.join(
+    APP_ROOT,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'tsx.cmd' : 'tsx',
+  );
+  // tsx can load the TS source directly in dev.
+  return { cmd: tsxBin, runnerPath: path.join(APP_ROOT, 'src', 'migrate-runner.ts'), runAsNode: false };
+}
+
+// Run migrations and resolve to a status object (never throws on a migration
+// failure — returns { status: 'failed', error }). Defensive: a spawn/parse
+// failure also resolves to 'failed' so the caller always gets a status.
+function runMigrationsStep() {
+  return new Promise((resolve) => {
+    const { cmd, runnerPath, runAsNode } = resolveMigrationRunner();
+    // A tiny driver that imports the runner, runs it against APP_ROOT/DATA_DIR,
+    // and prints exactly one JSON line prefixed so we can find it in the output.
+    const driver =
+      'import(process.env.__MIGRATE_RUNNER).then(async (m) => {' +
+      '  const r = await m.runMigrations({ assumeYes: true, projectRoot: process.env.__MIGRATE_ROOT, dataDir: process.env.__MIGRATE_DATA });' +
+      '  process.stdout.write("__MIGRATE_RESULT__" + JSON.stringify(r) + "\\n");' +
+      '}).catch((e) => {' +
+      '  process.stdout.write("__MIGRATE_RESULT__" + JSON.stringify({ status: "failed", error: String(e && e.message || e) }) + "\\n");' +
+      '});';
+    const childEnv = {
+      ...process.env,
+      __MIGRATE_RUNNER: runAsNode
+        ? require('url').pathToFileURL(runnerPath).href
+        : runnerPath,
+      __MIGRATE_ROOT: APP_ROOT,
+      __MIGRATE_DATA: DATA_DIR,
+    };
+    if (runAsNode) childEnv.ELECTRON_RUN_AS_NODE = '1';
+
+    let proc;
+    try {
+      // node/electron-node: pass the driver via --input-type=module + -e. tsx
+      // also accepts -e but loads the TS runner path from the env var.
+      const args = runAsNode
+        ? ['--input-type=module', '-e', driver]
+        : ['--eval', driver];
+      proc = spawn(cmd, args, { cwd: APP_ROOT, env: childEnv });
+    } catch (err) {
+      resolve({ status: 'failed', error: String(err) });
+      return;
+    }
+    let out = '';
+    proc.stdout.on('data', (b) => {
+      out += b.toString();
+    });
+    proc.stderr.on('data', (b) => process.stderr.write(`[migrate] ${b}`));
+    proc.on('error', (err) => resolve({ status: 'failed', error: String(err) }));
+    proc.on('exit', () => {
+      const marker = '__MIGRATE_RESULT__';
+      const idx = out.lastIndexOf(marker);
+      if (idx === -1) {
+        resolve({ status: 'failed', error: 'migration runner produced no status' });
+        return;
+      }
+      const line = out.slice(idx + marker.length).split('\n')[0];
+      try {
+        resolve(JSON.parse(line));
+      } catch (e) {
+        resolve({ status: 'failed', error: `could not parse migration status: ${String(e)}` });
+      }
+    });
+  });
+}
+
 function bootUrl(state, detail) {
   const file = path.join(__dirname, 'boot.html');
   const q = new URLSearchParams({ state });
@@ -169,6 +279,28 @@ function createWindow() {
 // configured-boot path and onboarding's finish().
 async function bootDashboard() {
   refreshConfig();
+
+  // Ensure the writable data dir exists before anything writes to it (migration
+  // backups, store/, .env). Recursive + idempotent.
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (err) {
+    console.error('[shell] could not create data dir:', err);
+  }
+
+  // Apply pending migrations BEFORE forking the service. Show a real "updating"
+  // state, not a spinner that dies. On failure, render a retry state instead of
+  // letting the service's process.exit(1) silently kill the boot.
+  if (mainWindow) await mainWindow.loadURL(bootUrl('migrating'));
+  const migration = await runMigrationsStep();
+  if (!mainWindow) return;
+  if (migration.status === 'failed') {
+    await mainWindow.loadURL(
+      bootUrl('migrating-failed', migration.error || 'A database update failed.'),
+    );
+    return;
+  }
+
   startService();
   const ready = await waitForDashboard();
   if (!mainWindow) return;
@@ -353,6 +485,15 @@ if (!gotLock) {
     }
 
     registerOnboardingHandlers();
+
+    // Boot-screen Retry for the migrating-failed state: re-run the migration
+    // gate + service boot. Returns nothing useful; bootDashboard drives the UI.
+    ipcMain.handle('boot:retryMigration', async () => {
+      await bootDashboard().catch((err) =>
+        console.error('[shell] retry bootDashboard:', err),
+      );
+      return { ok: true };
+    });
 
     boot().catch((err) => {
       console.error('[shell] boot failed:', err);

@@ -16,6 +16,17 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
+// Resolve the canonical .env path. In a packaged .app the shell sets
+// CLAUDECLAW_DATA_DIR to a writable per-user dir; the .env lives there (mirrors
+// src/env.ts so the desktop and service paths read the same file). Callers that
+// already know the path pass it explicitly; this is the fallback when they do
+// not (so config.cjs never accidentally reads the read-only bundle's .env).
+function resolveEnvPath() {
+  const dataDir = process.env.CLAUDECLAW_DATA_DIR;
+  if (dataDir) return path.join(dataDir, '.env');
+  return path.join(process.cwd(), '.env');
+}
+
 // Parse a .env file into a flat key→value map. Strips comments and surrounding
 // quotes, mirroring src/env.ts. Missing file → empty map.
 function parseEnvFile(envPath) {
@@ -46,7 +57,7 @@ function parseEnvFile(envPath) {
 
 // Read specific keys, preferring process.env then the .env file.
 function readEnv(envPath, keys) {
-  const fileVals = parseEnvFile(envPath);
+  const fileVals = parseEnvFile(envPath || resolveEnvPath());
   const out = {};
   for (const key of keys) out[key] = process.env[key] || fileVals[key] || '';
   return out;
@@ -57,6 +68,7 @@ function readEnv(envPath, keys) {
 // removed (used to clear ANTHROPIC_API_KEY when switching to OAuth). Secrets are
 // written 0600.
 function writeEnv(envPath, updates) {
+  envPath = envPath || resolveEnvPath();
   const existing = parseEnvFile(envPath);
   for (const [k, v] of Object.entries(updates)) {
     if (v === null || v === undefined || v === '') delete existing[k];
@@ -75,7 +87,7 @@ function writeEnv(envPath, updates) {
 // The service exits(1) without a transport, so that is the gate. The dashboard
 // token / encryption key are app-generated at finish() and not required here.
 function isConfigured(envPath) {
-  const e = parseEnvFile(envPath);
+  const e = parseEnvFile(envPath || resolveEnvPath());
   const slack = e.SLACK_BOT_TOKEN && e.SLACK_APP_TOKEN;
   const telegram = e.TELEGRAM_BOT_TOKEN;
   return Boolean(slack || telegram);
@@ -115,6 +127,7 @@ function generateHex(bytes = 32) {
 
 module.exports = {
   parseEnvFile,
+  resolveEnvPath,
   readEnv,
   writeEnv,
   isConfigured,

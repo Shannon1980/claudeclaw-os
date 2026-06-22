@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld('claudeclaw', {
   isDesktop: true,
   platform: process.platform,
 
+  // Boot-screen controls. The migrating-failed state offers a Retry that
+  // re-runs the migration gate + service boot from the main process.
+  boot: {
+    retryMigration: () => ipcRenderer.invoke('boot:retryMigration'),
+  },
+
   // First-run onboarding. Each call maps to an ipcMain handler in main.cjs.
   // The renderer drives the wizard one row/step at a time so failures surface
   // per row (spec 02-onboarding step 2), not as one opaque spinner.
