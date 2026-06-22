@@ -98,4 +98,44 @@ describe('readEnvFile', () => {
     const result = readEnvFile(['KEY', 'NOEQUALS']);
     expect(result).toEqual({ KEY: 'value' });
   });
+
+  // The desktop shell (electron/config.cjs:writeEnv) prepends a managed header
+  // whose lines all begin with '#'. readEnvFile must ignore them on re-read so
+  // the desktop-written .env round-trips cleanly through the service's reader.
+  it('ignores the managed-header lines config.cjs writeEnv produces', () => {
+    writeEnv(
+      '# ClaudeClaw — managed by the desktop app.\n' +
+        '# You can edit this, but the app may rewrite it.\n' +
+        '\n' +
+        'CLAUDE_CODE_OAUTH_TOKEN=tok-123\n' +
+        'TRANSPORT=slack\n'
+    );
+    mockCwd();
+    const result = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'TRANSPORT']);
+    expect(result).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'tok-123', TRANSPORT: 'slack' });
+  });
+
+  // A null-delete in writeEnv removes the line entirely; on re-read the key must
+  // be absent (not present as empty). This is the OAuth-clears-stale-key path.
+  it('returns nothing for a key that was deleted (null-delete round-trip)', () => {
+    // Simulates an .env after writeEnv({ ANTHROPIC_API_KEY: null }): the line
+    // is gone, only the surviving keys remain.
+    writeEnv(
+      '# ClaudeClaw — managed by the desktop app.\n' +
+        'CLAUDE_CODE_OAUTH_TOKEN=tok-123\n'
+    );
+    mockCwd();
+    const result = readEnvFile(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']);
+    expect(result).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(result).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'tok-123' });
+  });
+
+  // An empty-valued key (the value side of writeEnv would never produce this,
+  // but a hand-edited .env might) is treated as absent by readEnvFile.
+  it('omits keys with empty values', () => {
+    writeEnv('ANTHROPIC_API_KEY=\nKEY=value\n');
+    mockCwd();
+    const result = readEnvFile(['ANTHROPIC_API_KEY', 'KEY']);
+    expect(result).toEqual({ KEY: 'value' });
+  });
 });
