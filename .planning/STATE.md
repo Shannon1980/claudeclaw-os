@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-06-22T14:29:54.009Z"
 last_activity: 2026-06-22
 progress:
-  total_phases: 0
+  total_phases: 8
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,21 +17,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-14)
+See: .planning/PROJECT.md (updated 2026-06-22)
 
-**Core value:** A terminal Claude Code session in the agentic-os workspace and the ClaudeClaw chat bot behave as one assistant — same identity, skills, memory, and scheduled jobs, with no divergence between modes.
-**Current focus:** Phase 07 — single-scheduler
+**Core value:** A local-first desktop AI chief-of-staff for business operators — install with no terminal, runs the real Claude engine on the operator's own machine, keeps work moving and never lets anything fall through.
+**Current focus:** Phase 1 — Desktop Shell & Onboarding (the gating prerequisite: zero-terminal install)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started (roadmap drafted)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-22 — Milestone v2.0 started
-
-## Phase 6 Note
-
-MEM-04 was re-opened during Phase 6 research (capture Stop-hook was never committed to agentic-os settings.json) and folded into Phase 6 (D-07). Plan 06-02 wires + commits it; Plan 06-03 proves it. Execution sequencing: recall-CLI ships (06-01) → AGENTS.md rewrite + cron disable + capture hook (06-02) → regression gate + live bidirectional proof (06-03, blocking human-verify, LAST).
+Status: Roadmap created, awaiting phase planning
+Last activity: 2026-06-22 — Milestone v2.0 roadmap created (8 phases)
 
 ## Performance Metrics
 
@@ -53,12 +49,6 @@ MEM-04 was re-opened during Phase 6 research (capture Stop-hook was never commit
 - Trend: -
 
 *Updated after each plan completion*
-| Phase 06 P01 | 10m | 2 tasks | 3 files |
-| Phase 06 P02 | 2m | 2 tasks | 3 files |
-| Phase 07 P01 | 5m | 2 tasks | 6 files |
-| Phase 07 P03 | 1m | 1 tasks | 1 files |
-| Phase 07 P02 | 6m | 2 tasks | 2 files |
-| Phase 07 P04 | 6m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -67,15 +57,11 @@ MEM-04 was re-opened during Phase 6 research (capture Stop-hook was never commit
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- ClaudeClaw is the host; agentic-os is the consumed workspace (point an agent's `project_dir` at it; SDK `settingSources:['project','user']` auto-loads its context + skills)
-- SQLite = memory source of record; markdown = derived projection; memsearch is retired
-- Afternoon win (workspace + skills over chat) ships first to derisk before any bridge work
-- [Phase ?]: recallForWorkspace skips buildMemoryContext to avoid consolidation/team-activity cross-agent leak; recall-cli uses positional args not stdin to avoid hanging
-- [Phase ?]: Phase 6: agentic-os recall repointed at ClaudeClaw recall-cli.js over symlink; memsearch index cron disabled; capture-cli.js Stop hook wired+committed in agentic-os (MEM-04 durable)
-- [Phase ?]: Phase 7: aos-cron columns ship as versioned migration v1.1.1; mirrored in db.ts runMigrations (not createSchema) for test parity; claimDueTask is the SCH-04 atomic cross-process backstop
-- [Phase 07]: aos launchd plist forces /tmp/claudeclaw-aos.log log paths (no spaces) to avoid launchd exit 78; WorkingDirectory keeps __PROJECT_DIR__ placeholder for the spaces-safe symlink; service left unloaded for 07-05 cutover
-- [Phase ?]: [Phase 07]: aos-cron sync borrows proven parse/translate/orphan logic from superseded cron-sync.ts branch, adapted to 07-01 db.ts helpers; toCron emits plain cron strings into the single computeNextRun engine (no second scheduler); job id = slugified frontmatter name for idempotent upsert
-- [Phase ?]: [Phase 07]: aos firing fires source='aos-cron' rows via claimDueTask (atomic exactly-once, SCH-04), re-reads the .md body at fire time (D-07), honors per-job timeout/retry (D-10/D-11), suppresses the preamble (D-12), and gates Slack by notify (D-03); aos runs rows directly via runAgent in the aos process (not delegateToAgent) since aos is a standalone service with agent_id='aos' rows
+- D1 (locked): support both subscription OAuth and API-key auth, subscription-default; the app owns auth precedence (stale ANTHROPIC_API_KEY silently wins over OAuth — the known crash-loop trap) and shows the active source in Settings > Account. Belongs to Phase 1 (Desktop Shell & Onboarding).
+- D4 (locked): four autonomy tiers by reversibility; modes shift the line between tiers 1/2/3; Tier 4 (irreversible) is locked to Ask-first in every mode. Belongs to Phase 3 (Permissions & Autonomy).
+- Build sequence is gated by what ships, not what is fun: Electron shell first (no product until a non-developer can install with no terminal), then Routines, then the trust chain.
+- Trust chain spine: Permissions (rules) → action → Activity (operator view) → Audit (technical truth), with Memory feeding the rules. Phases 3→4→5 build the chain in order; Phase 6 (Memory) depends on Phase 3.
+- The reframe is mostly a view layer over data the engine already produces (audit_log, hive_mind, memories, scheduled_tasks, token_usage). Most operator surfaces are UI→API→DB vertical slices (mvp mode).
 
 ### Pending Todos
 
@@ -83,11 +69,10 @@ None yet.
 
 ### Blockers/Concerns
 
-[From codebase concerns audit — relevant to upcoming phases]
-
-- Phase 5/9: Encrypted columns (`wa_messages`/`slack_messages`) need ClaudeClaw's decryption path; `memories`/`conversation_log` are plaintext, so a markdown projection can read `summary`/`raw_text` directly (MEM-06 / CKPT-01).
-- Phase 5: `src/hooks.ts` is built but never wired into the message pipeline — must be connected for the Stop-hook capture and projection to fire.
-- Phase 7: Scheduler has no cross-process DB claim lock and no path to load jobs from external `.md` files — both must be added (atomic `UPDATE ... RETURNING`, plus a `source`/`prompt_file` column) for SCH-02/SCH-04.
+- Phase 1 (highest risk): the desktop app must own the `claude` CLI dependency — bundle/auto-install the CLI and drive `claude login` (browser OAuth) through an Electron window. The slickest installer still dead-ends at a terminal if this is not solved.
+- Phase 1: Electron login-item registration replaces hand-written launchd plists; if any plist is still generated, keep StandardOutPath/StandardErrorPath free of spaces (launchd exits code 78 on spaces) and use a spaces-safe symlink for WorkingDirectory.
+- Phase 3: the permission gate sits at the Agent SDK tool-call layer — before any external/irreversible tool runs it must consult the model, log the decision, and proceed/queue/block. New surface, not just a view.
+- Phase 5: audit_log is encryption-adjacent and append-only; reads of any encrypted columns must go through ClaudeClaw's decryption path, not raw better-sqlite3 reads of ciphertext.
 - All phases: schema changes go through versioned migrations (`migrations/<version>/`, `add-migration` skill) — never inline-edit the schema.
 
 ## Deferred Items
@@ -96,15 +81,16 @@ Items acknowledged and carried forward:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| Multi-client | MC-01/MC-02: per-client workspaces → per-client agents | Deferred to v2 | Roadmap creation |
-| Cleanup | CLN-01/CLN-02: remove dead agentic-os code paths, unify dashboard story | Deferred to v2 | Roadmap creation |
+| v1.0 consolidation | Per-Agent Soul (was v1.0 Phase 8) | Deferred to future milestone | v1.0 pivot 2026-06-22 |
+| v1.0 consolidation | Command Centre Repoint (was v1.0 Phase 9) | Deferred to future milestone | v1.0 pivot 2026-06-22 |
+| v1.0 consolidation | Compatibility Verification (was v1.0 Phase 10) | Deferred to future milestone | v1.0 pivot 2026-06-22 |
 
 ## Session Continuity
 
-Last session: 2026-06-17T21:32:24.173Z
-Stopped at: Completed 07-03-PLAN.md
+Last session: 2026-06-22
+Stopped at: v2.0 roadmap created (8 phases)
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan the first phase with /gsd-plan-phase 1

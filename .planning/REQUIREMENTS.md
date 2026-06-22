@@ -69,4 +69,27 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| (filled by roadmapper) | | |
+| PKG-01 | Phase 1 | Pending |
+| PKG-02 | Phase 1 | Pending |
+| PKG-03 | Phase 1 | Pending |
+| PKG-04 | Phase 1 | Pending |
+| PKG-05 | Phase 1 | Pending |
+| RTN-01 | Phase 2 | Pending |
+| RTN-02 | Phase 2 | Pending |
+| RTN-03 | Phase 2 | Pending |
+| RTN-04 | Phase 2 | Pending |
+| RTN-05 | Phase 2 | Pending |
+| PERM-01 | Phase 3 | Pending |
+| PERM-02 | Phase 3 | Pending |
+| PERM-03 | Phase 3 | Pending |
+| PERM-04 | Phase 3 | Pending |
+| TRUST-01 | Phase 4 | Pending |
+| TRUST-02 | Phase 4 | Pending |
+| AUD-01 | Phase 5 | Pending |
+| AUD-02 | Phase 5 | Pending |
+| MEM-01 | Phase 6 | Pending |
+| MEM-02 | Phase 6 | Pending |
+| PWR-01 | Phase 7 | Pending |
+| PWR-02 | Phase 7 | Pending |
+| BILL-01 | Phase 8 | Pending |
+| BILL-02 | Phase 8 | Pending |
