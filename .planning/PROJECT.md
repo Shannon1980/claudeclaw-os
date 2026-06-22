@@ -13,6 +13,23 @@ A consolidation of two of Shannon's personal-assistant projects into one tool. C
 
 A terminal Claude Code session in the agentic-os workspace and the ClaudeClaw chat bot must behave as one assistant: same identity, same skills, same memory, same scheduled jobs. No divergence between the two modes.
 
+## Current Milestone: v2.0 Operator Product
+
+**Goal:** Reframe ClaudeClaw into a local-first desktop product for business operators — an AI chief-of-staff that keeps work moving — packaged so a non-technical operator can install and run it.
+
+**Design source:** `specs/operator-product/` (README.md is the PRD; 11 docs cover foundations + per-surface specs). Locked decisions: D1 (auth: support both subscription OAuth and API keys, subscription-default), D4 (autonomy: four action tiers by reversibility, irreversible tier locked).
+
+**Already shipped (pre-GSD tracking):** onboarding, Home daily-loop (web + backend), Projects, Team roster.
+
+**Target features (this milestone):**
+- Routines — plain-language scheduled multi-step workflows
+- Permissions & settings — the autonomy tier model
+- Activity & audit — the trust chain (operator + admin views)
+- Memory reframe — "what your assistant knows" knowledge surface
+- War room + Team pulse — decision tool + live team status, reframed
+- Electron desktop shell — zero-terminal local-first install
+- Billing & licensing
+
 ## Requirements
 
 ### Validated
