@@ -1,0 +1,72 @@
+# Requirements: v2.0 Operator Product
+
+**Milestone:** v2.0 — Operator Product
+**Defined:** 2026-06-22
+**Source:** `specs/operator-product/` (README.md is the PRD; per-surface specs 01-10)
+**Locked decisions:** D1 (auth: both subscription OAuth + API key, subscription-default), D4 (autonomy: four action tiers, irreversible tier locked)
+
+## Already Delivered (pre-GSD tracking — context only)
+
+Shipped to `main` before this milestone existed; not re-scoped here:
+- Onboarding first-run flow
+- Home daily-loop (web + backend)
+- Projects (scoped daily loop)
+- Team roster (operator-facing agent management)
+
+## v2.0 Requirements
+
+### Packaging & Distribution (PKG)
+- [ ] **PKG-01**: A non-technical user can install ClaudeClaw as a desktop app by double-clicking an installer, with no terminal
+- [ ] **PKG-02**: The desktop app boots the existing Node service internally and opens the dashboard as its window
+- [ ] **PKG-03**: First run installs/sets up the Claude Code CLI and completes `claude login` without the user using a terminal
+- [ ] **PKG-04**: The app registers as a login item and keeps running across reboots
+- [ ] **PKG-05**: A user can authenticate with their Claude subscription (OAuth) by default, with an API-key path available for heavy automation (D1)
+
+### Routines (RTN)
+- [ ] **RTN-01**: A user can create a routine by describing it in plain language; the assistant assembles the steps
+- [ ] **RTN-02**: A routine runs multi-step work on a plain-language schedule with no cron syntax shown in the operator UI
+- [ ] **RTN-03**: A user can review and edit a routine's ordered steps, each assigned to a named teammate
+- [ ] **RTN-04**: A user can turn a routine on/off and run it now
+- [ ] **RTN-05**: Routine run history shows success, degraded, and failed runs honestly, and the user is notified when a routine breaks or degrades
+
+### Permissions & Autonomy (PERM)
+- [ ] **PERM-01**: A user can set a global autonomy mode (Cautious / Balanced / Autonomous)
+- [ ] **PERM-02**: A user can override what the team may do per action (Always / Ask first)
+- [ ] **PERM-03**: Irreversible actions (send money, sign, delete) are locked to Ask-first and cannot be set to Always in any mode (D4)
+- [ ] **PERM-04**: A gated action is prepared and queued as a "Needs you" item for one-tap approval
+
+### Activity & Audit (TRUST)
+- [ ] **TRUST-01**: A user can see an activity feed of what the team did, each item tagged autonomous vs approved
+- [ ] **TRUST-02**: A user can undo a reversible action from the activity feed (D9)
+- [ ] **AUD-01**: An admin can view a complete, read-only, append-only audit log of every event with technical detail
+- [ ] **AUD-02**: An admin can export the audit log (CSV/JSON); log retention is bounded and configurable (D10)
+
+### Memory (MEM)
+- [ ] **MEM-01**: A user can view what the assistant knows about them, grouped by category
+- [ ] **MEM-02**: Each remembered fact shows its provenance and can be edited or deleted in place
+
+### Power Surfaces (PWR)
+- [ ] **PWR-01**: A user can convene multiple teammates on a hard decision and get a converged recommendation with decision buttons (war room)
+- [ ] **PWR-02**: A user can see live team status and where the team's effort is going (team pulse)
+
+### Billing & Licensing (BILL)
+- [ ] **BILL-01**: A user runs the product on a flat per-seat subscription, gated by a license key
+- [ ] **BILL-02**: A user sees spend and outcomes (not token telemetry) in billing
+
+## Future Requirements (deferred)
+
+- Managed cloud-box hosting tier (premium "done-for-you" deployment)
+- OAuth connect-buttons for every integration beyond the initial set
+- Formal enterprise security audit surface (SSO-gated access, tamper-evidence) — build when going upmarket
+
+## Out of Scope
+
+- Hosted SaaS execution — kills the local-first differentiator and adds liability/compute cost
+- Metered/usage-based pricing — incompatible with local-first compute the vendor doesn't pay for
+- Developer-facing toys as primary surfaces (3D brain graph, raw token telemetry, memory-decay viz) — Labs only
+
+## Traceability
+
+| REQ-ID | Phase | Status |
+|--------|-------|--------|
+| (filled by roadmapper) | | |
