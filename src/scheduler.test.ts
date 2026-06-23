@@ -10,8 +10,16 @@ import {
   deleteScheduledTask,
   pauseScheduledTask,
   resumeScheduledTask,
+  claimDueTask,
+  isAgentPaused,
+  setAgentPaused,
 } from './db.js';
 import type { ScheduledTask } from './db.js';
+// ── Phase 2 Routines (Wave 0 RED) ──
+// runRoutineOnce does not exist yet — 02-02 lands it. The routine branch test
+// below is RED until then. Closes the CONCERNS.md gap: scheduler did not test
+// the routine double-claim scenario.
+import { runRoutineOnce } from './routine-runner.js';
 
 describe('task state machine', () => {
   beforeEach(() => {
@@ -372,5 +380,53 @@ describe('task state machine', () => {
 
       expect(getAllScheduledTasks()).toHaveLength(0);
     });
+  });
+});
+
+// ── Phase 2 Routines: source='routine' branch (Wave 0 RED) ──────────────────
+// Pins the load-bearing claim-once invariant and paused-owner skip for the
+// routine firing path. RED until 02-02 adds runRoutineOnce + the source branch.
+describe('routine scheduler branch', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+  });
+
+  it('routine: a source="routine" due task is claimed exactly once (claim-once / no double-fire)', () => {
+    const past = Math.floor(Date.now() / 1000) - 60;
+    const nextRun = Math.floor(Date.now() / 1000) + 300;
+    // A routine row owned by main (per A1: routines own agent_id='main').
+    createScheduledTask('rt-1', 'morning brief', '0 8 * * 1-5', past, 'main');
+
+    // First claim wins; a concurrent second claim of the same row loses.
+    expect(claimDueTask('rt-1', nextRun)).toBe(true);
+    expect(claimDueTask('rt-1', nextRun)).toBe(false);
+
+    // While claimed (status='running'), the row is invisible to getDueTasks.
+    expect(getDueTasks('main')).toHaveLength(0);
+  });
+
+  it('routine: a paused owner agent skips the routine (no run)', async () => {
+    setAgentPaused('main', true);
+    expect(isAgentPaused('main')).toBe(true);
+
+    const delegateToAgent = vi.fn(async () => ({ text: 'should not run', aborted: false }));
+    // The runner / scheduler branch must not delegate when the owner is paused.
+    const steps = [
+      { id: 1, routine_id: 'rt-2', step_order: 0, action: 'A', agent_id: 'main', on_error: 'continue', created_at: 0 },
+    ];
+    await runRoutineOnce(
+      { id: 'rt-2', schedule: '0 8 * * *', source: 'routine', agent_id: 'main' } as any,
+      steps as any,
+      Math.floor(Date.now() / 1000) + 300,
+      {
+        sender: vi.fn(async () => {}),
+        delegateToAgent: delegateToAgent as any,
+        isAgentPaused: (id: string) => isAgentPaused(id),
+        getLastRoutineOutcome: () => null,
+      } as any,
+    );
+
+    expect(delegateToAgent).not.toHaveBeenCalled();
+    setAgentPaused('main', false);
   });
 });
