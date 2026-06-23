@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import { RoutineRow } from '@/components/RoutineRow';
+import { RoutineBuilderPanel } from '@/components/RoutineBuilderPanel';
 import type { TeammateOption } from '@/components/StepRow';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiPut, apiDelete } from '@/lib/api';
@@ -156,7 +157,11 @@ export function Routines() {
       <div class="flex-1 overflow-y-auto">
         <div class="max-w-[900px] mx-auto px-6 py-5 space-y-2">
           {builderOpen && (
-            <BuilderSlot teammates={teammates} onClose={() => setBuilderOpen(false)} onSaved={() => { setBuilderOpen(false); refresh(); }} />
+            <RoutineBuilderPanel
+              teammates={teammates}
+              onClose={() => setBuilderOpen(false)}
+              onSaved={() => { setBuilderOpen(false); refresh(); }}
+            />
           )}
           {routines.map((r) => (
             <RoutineRow
@@ -187,20 +192,6 @@ export function Routines() {
         confirmLabel="Delete"
         destructive
       />
-    </div>
-  );
-}
-
-// Placeholder for the embedded builder; the real RoutineBuilderPanel is wired in
-// the next task. Kept inline so the page compiles and the "New routine" button
-// has a target.
-function BuilderSlot({ teammates, onClose, onSaved }: { teammates: TeammateOption[]; onClose: () => void; onSaved: () => void }) {
-  void teammates;
-  void onSaved;
-  return (
-    <div class="border border-dashed border-[var(--color-border-strong)] rounded-lg px-3 py-3 text-[12px] text-[var(--color-text-muted)] flex items-center justify-between">
-      <span>Routine builder loads here.</span>
-      <button type="button" onClick={onClose} class="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]">Close</button>
     </div>
   );
 }
