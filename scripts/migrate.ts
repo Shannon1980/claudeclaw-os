@@ -4,6 +4,10 @@ import path from 'path';
 import readline from 'readline';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { runMigrations } from '../src/migrate-runner.js';
+// Single source of truth for semver comparison (IN-01): the runner already
+// imports compareSemver from src/migrations.ts, so reuse it here instead of
+// maintaining a byte-identical copy that could silently drift.
+import { compareSemver } from '../src/migrations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,20 +33,6 @@ interface MigrationModule {
 interface PathWarning {
   line: number;
   text: string;
-}
-
-function parseSemver(v: string): [number, number, number] {
-  const match = v.match(/^v?(\d+)\.(\d+)\.(\d+)$/);
-  if (!match) throw new Error(`Invalid semver: ${v}`);
-  return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
-}
-
-function compareSemver(a: string, b: string): number {
-  const [aMaj, aMin, aPatch] = parseSemver(a);
-  const [bMaj, bMin, bPatch] = parseSemver(b);
-  if (aMaj !== bMaj) return aMaj - bMaj;
-  if (aMin !== bMin) return aMin - bMin;
-  return aPatch - bPatch;
 }
 
 const PATH_SCAN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
