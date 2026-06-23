@@ -25,7 +25,19 @@ findings:
   warning: 6
   info: 4
   total: 12
-status: issues_found
+status: resolved
+resolution: "All 12 findings addressed by gsd-code-fixer. CR-01 (token redaction) + CR-02 (file-only auth precedence) fixed and verified; WR-01..06 fixed; IN-02/IN-04/IN-01(partial) fixed; IN-01(cross-parser test) + IN-03 skipped as non-blocking with documented reason. Typecheck clean, build clean, 706/707 tests pass (1 pre-existing unrelated failure)."
+resolved_at: 2026-06-22T00:00:00Z
+fix_commits:
+  - 9a7393c  # CR-01
+  - 78da079  # CR-02, WR-01
+  - f9ebd91  # WR-02, WR-03
+  - 7f8c417  # WR-04
+  - 881765e  # WR-05
+  - ca2d808  # WR-06
+  - b49392d  # IN-02
+  - 9af8b55  # IN-04
+  - 6b6ed42  # IN-01 (partial)
 ---
 
 # Phase 1: Code Review Report
