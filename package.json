@@ -87,6 +87,10 @@
     "appId": "com.claudeclaw.app",
     "productName": "ClaudeClaw",
     "afterSign": "build/notarize.cjs",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "asar": false,
     "files": [
       "electron/**",
       "dist/**"
