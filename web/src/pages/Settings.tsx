@@ -1,11 +1,15 @@
 import { useState } from 'preact/hooks';
-import { Check, Pipette, RotateCcw } from 'lucide-preact';
+import { Check, Pipette, RotateCcw, ChevronDown, ChevronRight, Lock } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { Toggle } from '@/components/Toggle';
+import { AutonomyModeSelector, type Mode } from '@/components/AutonomyModeSelector';
+import { ActionOverrideRow, type OverrideValue } from '@/components/ActionOverrideRow';
+import { LockedActionRow } from '@/components/LockedActionRow';
 import { useFetch } from '@/lib/useFetch';
-import { apiPost } from '@/lib/api';
+import { apiPost, apiPut } from '@/lib/api';
 import { pushToast } from '@/lib/toasts';
+import { term } from '@/lib/vocabulary';
 import {
   theme, themeMeta, setTheme, type ThemeName,
   customAccent, setCustomAccent,
@@ -74,6 +78,8 @@ export function Settings() {
 
       {health.data && (
         <div class="flex-1 overflow-y-auto p-6 space-y-5 max-w-3xl">
+
+          <PermissionsSection />
 
           <Section
             title="Workspace"
@@ -463,6 +469,167 @@ function ReadOnlyRow({ label, value }: { label: string; value: string }) {
     <div class="flex items-center justify-between py-1.5">
       <span class="text-[13px] text-[var(--color-text-muted)]">{label}</span>
       <span class="font-mono text-[12.5px] text-[var(--color-text)] tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+// ── Permissions (Phase 3, PERM-01/02/03) ──────────────────────────────
+
+interface Permissions { mode: Mode; overrides: Record<string, OverrideValue> }
+
+// The editable (non-locked) override rows. Each maps a capability key to its
+// label, tier badge, and the mode-derived default so an explicit override can
+// be marked. The locked Tier 4 capability (send-money) is rendered separately
+// as a LockedActionRow and never appears here.
+const OVERRIDE_ROWS: { key: string; label: string; tier: number }[] = [
+  { key: 'prepare', label: 'Research and prepare', tier: 1 },
+  { key: 'draft', label: 'Draft messages and docs', tier: 1 },
+  { key: 'send', label: 'Send emails and messages', tier: 3 },
+  { key: 'book', label: 'Book or move meetings', tier: 3 },
+  { key: 'post', label: 'Post publicly', tier: 3 },
+];
+
+const LOCKED_ROWS: { label: string; reason: string }[] = [
+  { label: 'Send money or pay invoices', reason: 'Money movement cannot be undone. Always asks.' },
+  { label: 'Sign or commit to contracts', reason: 'A signature is binding. Always asks.' },
+  { label: 'Permanently delete data', reason: 'Deletion cannot be reversed. Always asks.' },
+];
+
+// The mode default (auto = "always" silent, ask = "ask first") for a tier,
+// mirroring the gate's TIER_DEFAULT matrix so the UI shows the same behavior.
+function modeDefault(mode: Mode, tier: number): OverrideValue {
+  if (tier === 1) return 'always';
+  if (tier === 2) return mode === 'cautious' ? 'ask' : 'always';
+  if (tier === 3) return mode === 'autonomous' ? 'always' : 'ask';
+  return 'ask'; // tier 4 — always asks
+}
+
+function PermissionsSection() {
+  const perms = useFetch<Permissions>('/api/permissions', 0);
+  const [busy, setBusy] = useState(false);
+
+  const mode = perms.data?.mode ?? 'balanced';
+  const overrides = perms.data?.overrides ?? {};
+
+  async function save(nextMode: Mode, nextOverrides: Record<string, OverrideValue>) {
+    setBusy(true);
+    try {
+      await apiPut('/api/permissions', { mode: nextMode, overrides: nextOverrides });
+      perms.refresh();
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Could not save', description: err?.message || String(err), durationMs: 6000 });
+      perms.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function setModeValue(next: Mode) {
+    const label = next.charAt(0).toUpperCase() + next.slice(1);
+    pushToast({ tone: 'success', title: 'Mode set', description: `Mode set to ${label}.` });
+    void save(next, overrides);
+  }
+
+  function setOverrideValue(key: string, value: OverrideValue) {
+    void save(mode, { ...overrides, [key]: value });
+  }
+
+  function resetOverride(key: string) {
+    const next = { ...overrides };
+    delete next[key];
+    void save(mode, next);
+  }
+
+  return (
+    <Section title={term('page.permissions')} subtitle="What your team can do on its own.">
+      {perms.error && <PageState error={perms.error} />}
+      {perms.loading && !perms.data && <PageState loading />}
+      {perms.data && (
+        <div class="space-y-4">
+          <Card>
+            <AutonomyModeSelector value={mode} onChange={setModeValue} busy={busy} />
+            <div class="mt-3 pt-3 border-t border-[var(--color-border)]">
+              <TierLegend mode={mode} />
+            </div>
+          </Card>
+
+          <Card>
+            <div class="section-label mb-1">Fine-tune by action</div>
+            <div class="text-[11px] text-[var(--color-text-faint)] mb-2">Most people never need this.</div>
+            {OVERRIDE_ROWS.map((row, i) => {
+              const value = overrides[row.key] ?? modeDefault(mode, row.tier);
+              const isOverridden = overrides[row.key] !== undefined && overrides[row.key] !== modeDefault(mode, row.tier);
+              return (
+                <div key={row.key}>
+                  {i > 0 && <Divider />}
+                  <ActionOverrideRow
+                    label={row.label}
+                    tierLabel={row.tier === 1 ? 'Prepare' : 'Send'}
+                    value={value}
+                    isOverridden={isOverridden}
+                    onChange={(v) => setOverrideValue(row.key, v)}
+                    onReset={() => resetOverride(row.key)}
+                    busy={busy}
+                  />
+                </div>
+              );
+            })}
+          </Card>
+
+          <Card>
+            <div class="section-label mb-2 flex items-center gap-1">
+              <Lock size={11} class="text-[var(--color-text-muted)]" /> Always asks
+            </div>
+            {LOCKED_ROWS.map((row, i) => (
+              <div key={row.label}>
+                {i > 0 && <Divider />}
+                <LockedActionRow label={row.label} reason={row.reason} />
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+// A collapsed-by-default educational legend: what each tier means and how the
+// current mode treats it. Body text only, no controls.
+function TierLegend({ mode }: { mode: Mode }) {
+  const [open, setOpen] = useState(false);
+  const rows: { name: string; what: string; tier: number }[] = [
+    { name: 'Read and prepare', what: 'Research, read, draft, summarize.', tier: 1 },
+    { name: 'Low-stakes saves', what: 'Labels, save to drive, internal notes.', tier: 2 },
+    { name: 'Send and post', what: 'Emails, messages, public posts, meetings.', tier: 3 },
+    { name: 'Money, signing, deletion', what: 'Irreversible actions.', tier: 4 },
+  ];
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        class="inline-flex items-center gap-1 text-[11.5px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />} How modes work
+      </button>
+      {open && (
+        <div class="mt-2 space-y-1.5">
+          {rows.map((r) => {
+            const behavior = r.tier === 4 ? 'asks' : modeDefault(mode, r.tier) === 'always' ? 'on its own' : 'asks';
+            return (
+              <div key={r.name} class="flex items-start gap-2 text-[11px] leading-snug">
+                <div class="flex-1 min-w-0">
+                  <span class="text-[var(--color-text-muted)]">{r.name}.</span>{' '}
+                  <span class="text-[var(--color-text-faint)]">{r.what}</span>
+                </div>
+                <span class="shrink-0 text-[var(--color-text-faint)] inline-flex items-center gap-1">
+                  {r.tier === 4 && <Lock size={10} />}{behavior}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

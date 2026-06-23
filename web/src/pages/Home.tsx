@@ -23,6 +23,7 @@ import { Drawer } from '@/components/Modal';
 import { type ProjectLite } from '@/components/ProjectTaskAttach';
 import { CreateTaskModal, HistoryList, type MissionTask, type Agent } from '@/components/TaskModals';
 import { LoopZones, NeedsYouCard, type HomeSummary } from '@/components/DailyLoop';
+import { type Approval } from '@/components/ApprovalItem';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost } from '@/lib/api';
 import { term } from '@/lib/vocabulary';
@@ -54,6 +55,7 @@ export function Home() {
   const summary = useFetch<HomeSummary>('/api/home/summary', 15_000);
   const agents = useFetch<{ agents: Agent[] }>('/api/agents', 60_000);
   const projects = useFetch<{ projects: ProjectLite[] }>('/api/projects', 60_000);
+  const approvals = useFetch<{ approvals: Approval[] }>('/api/approvals', 15_000);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -75,8 +77,9 @@ export function Home() {
   const waiting = data?.waiting ?? [];
   const shipped = data?.shipped ?? [];
   const today = data?.today ?? [];
-  const hasAnyWork = data?.status.hasAnyWork ?? false;
-  const refresh = () => summary.refresh();
+  const pendingApprovals = approvals.data?.approvals ?? [];
+  const hasAnyWork = (data?.status.hasAnyWork ?? false) || pendingApprovals.length > 0;
+  const refresh = () => { summary.refresh(); approvals.refresh(); };
 
   function focusCapture(prefill?: string) {
     if (prefill !== undefined) setCapture(prefill);
@@ -164,6 +167,7 @@ export function Home() {
             <NeedsYouCard
               variant="home"
               needsYou={needsYou}
+              approvals={pendingApprovals}
               today={today}
               starters={STARTER_SUGGESTIONS}
               agents={agents.data?.agents ?? []}
