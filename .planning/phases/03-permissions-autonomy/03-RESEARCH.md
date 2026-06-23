@@ -503,7 +503,9 @@ CREATE INDEX IF NOT EXISTS idx_approval_agent ON approval_queue(agent_id, create
 | A4 | `interrupt:false` deny lets the turn continue and the model reports "queued for approval" gracefully | deny semantics | If the model instead errors or retries the tool, UX degrades. Mitigation: clear `message` text; tested via integration. CITED by docs, not yet observed in this codebase. |
 | A5 | Mode + overrides fit in `dashboard_settings` (k/v) rather than a dedicated table | storage | Low risk — the override set is ~6 capabilities; JSON in one key is sufficient. |
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All three are resolved by planner decisions: Q1 → keyword-pattern classification + safe Tier-3 default (no plan depends on literal MCP names; a verify-against-live-tools task is included); Q2 → plan 04 scopes the two-track replay (MCP direct-call + minimal Bash/Write executor, honest reject for others); Q3 → plan 04 resolves inline-ask to Slack interactive yes/no with a parsed-text fallback and bounded timeout.
 
 1. **Exact MCP tool names for the connected integrations (QuickBooks, Gmail, Calendar, Drive, Slack).**
    - What we know: tool names are `mcp__<server>__<tool>`; classification is by keyword pattern.
