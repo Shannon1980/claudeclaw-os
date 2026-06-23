@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
-status: planning
-last_updated: "2026-06-23T18:24:43.112Z"
+status: "Phase 2 (Routines) shipped — PR #60 (Shannon1980/claudeclaw-os)"
+last_updated: "2026-06-23T18:32:35.135Z"
 last_activity: 2026-06-23
 progress:
   total_phases: 8
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 Phase: 2
 Plan: Not started
-Status: Ready to plan
+Status: Phase 2 (Routines) shipped — PR #60 (Shannon1980/claudeclaw-os)
 Last activity: 2026-06-23
 
 ## Performance Metrics
