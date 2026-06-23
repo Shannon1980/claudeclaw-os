@@ -24,7 +24,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ### 🚧 v2.0 Operator Product
 
-- [ ] **Phase 1: Desktop Shell & Onboarding** - Zero-terminal install: Electron shell boots the service and drives Claude login/auth
+- [x] **Phase 1: Desktop Shell & Onboarding** - Zero-terminal install: Electron shell boots the service and drives Claude login/auth (completed 2026-06-23)
 - [ ] **Phase 2: Routines** - Plain-language scheduled multi-step workflows the operator builds by describing
 - [ ] **Phase 3: Permissions & Autonomy** - The four-tier autonomy model that gates every external action
 - [ ] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo
@@ -51,7 +51,7 @@ Plans:
 - [x] 01-01-PLAN.md — Auth-precedence/env helpers (tested) + setup-token spike (A1) + smoke checklist
 - [x] 01-02-PLAN.md — Writable-state redirect, migration-before-fork, native-ABI rebuild in build
 - [x] 01-03-PLAN.md — Native CLI installer + setup-token capture + auth precedence + login item
-- [ ] 01-04-PLAN.md — Sign/notarize/package the .dmg + clean-machine end-to-end smoke
+- [x] 01-04-PLAN.md — Sign/notarize/package the .dmg + clean-machine end-to-end smoke
 **UI hint**: yes
 
 ### Phase 2: Routines
@@ -147,7 +147,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Desktop Shell & Onboarding | 3/4 | In Progress|  |
+| 1. Desktop Shell & Onboarding | 4/4 | Complete   | 2026-06-23 |
 | 2. Routines | 0/? | Not started | - |
 | 3. Permissions & Autonomy | 0/? | Not started | - |
 | 4. Activity Feed | 0/? | Not started | - |
