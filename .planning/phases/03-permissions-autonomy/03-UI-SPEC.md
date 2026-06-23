@@ -73,16 +73,16 @@ Exceptions:
 
 ## Typography
 
-System base is **13px / line-height 1.5 / Inter**. Match the small, dense scale exactly. Three sizes + one uppercase-label treatment (the existing `.section-label`), two weights.
+System base is **13px / line-height 1.5 / Inter**. Match the small, dense scale exactly. Three sizes + one uppercase-label treatment (the existing `.section-label`). **This phase declares exactly two font weights: `400` (regular) and `500` (emphasis).**
 
 | Role | Size | Weight | Line Height |
 |------|------|--------|-------------|
-| Heading (section / card title) | 13–14px | 600 (semibold) — matches Settings `Section` `<h2>` and `NeedsYouCard` title | 1.4 |
-| Body / mode name / override label / approval summary | 12.5–13px | 500 (medium) for names/mode titles, 400 for body + hints | 1.5 |
-| Meta / explainer / timestamp / tier note | 11–11.5px | 400 | 1.5 (`leading-snug`) |
-| Section label (uppercase) | 10px | 500 | 1.5, `letter-spacing: 0.08em`, `text-transform: uppercase`, `--color-text-faint` (the existing `.section-label` helper) |
+| Heading (section / card title) | 13–14px | *inherited* — rendered by the existing `Section` `<h2>` / `NeedsYouCard` title components; do not set a weight | 1.4 |
+| Body / mode name / override label / approval summary | 12.5–13px | `500` (emphasis) for names/mode titles; `400` for body + hints | 1.5 |
+| Meta / explainer / timestamp / tier note | 11–11.5px | `400` | 1.5 (`leading-snug`) |
+| Section label (uppercase) | 10px | `500` | 1.5, `letter-spacing: 0.08em`, `text-transform: uppercase`, `--color-text-faint` (the existing `.section-label` helper) |
 
-Weights: exactly **two tiers** — `400` (regular body/hints) and a single **emphasis tier** that is `500` everywhere except section/card titles which keep the existing `600`. Treat `500`/`600` as one emphasis tier; do NOT introduce a third visual weight. No bold beyond 600. Numerals in timestamps and the "Needs you" count use `tabular-nums` (existing convention). Mono is NOT used anywhere in the operator permissions path.
+Weights — **two declared weights only: `400` (regular body/hints) and `500` (emphasis: mode names, override labels, section labels).** New components introduced this phase use ONLY these two. Section and card titles are NOT styled by this phase — they reuse the existing `Section`/`NeedsYouCard` components, which already carry their own heading weight (an inherited system value, not a third weight declared here). Do NOT add any new weight. No bold. Numerals in timestamps and the "Needs you" count use `tabular-nums` (existing convention). Mono is NOT used anywhere in the operator permissions path.
 
 ---
 
