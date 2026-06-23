@@ -65,7 +65,12 @@ Plans:
   3. A user can review and edit a routine's ordered steps, each assigned to a named teammate
   4. A user can turn a routine on/off and run it now
   5. Run history shows success, degraded, and failed runs honestly, and the user is notified when a routine breaks or degrades
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 02-01-PLAN.md — Wave 0 test scaffolding: failing tests pinning RTN-01..05 (deriveOutcome, claim-once, notify-transition, draft-no-persist)
+- [ ] 02-02-PLAN.md — Slice A (data + engine): routine_steps/routine_runs tables + autonomy column (dual-write migration), routine-runner + scheduler branch
+- [ ] 02-03-PLAN.md — Slice B (creation): routine-draft NL→steps assembler + /api/routines* CRUD/draft/run-now/history
+- [ ] 02-04-PLAN.md — Slice C (UI): Routines page list/detail/builder + autonomy selector + route entry (human-verify)
 **UI hint**: yes
 
 ### Phase 3: Permissions & Autonomy
@@ -148,7 +153,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
-| 2. Routines | 0/? | Not started | - |
+| 2. Routines | 0/4 | Planned | - |
 | 3. Permissions & Autonomy | 0/? | Not started | - |
 | 4. Activity Feed | 0/? | Not started | - |
 | 5. Audit Log | 0/? | Not started | - |
