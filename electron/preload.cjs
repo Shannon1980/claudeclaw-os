@@ -25,14 +25,20 @@ contextBridge.exposeInMainWorld('claudeclaw', {
     getState: () => ipcRenderer.invoke('onb:getState'),
     // { ok, version }
     checkCli: () => ipcRenderer.invoke('onb:checkCli'),
-    // installs @anthropic-ai/claude-code globally → { ok, version, error }
+    // installs the CLI via the native installer (~/.local/bin/claude) → { ok, version, error }
     installCli: () => ipcRenderer.invoke('onb:installCli'),
     // { loggedIn }
     checkLogin: () => ipcRenderer.invoke('onb:checkLogin'),
-    // drives `claude login` (opens its own browser) → { ok, error }
+    // drives `claude setup-token` (opens its own browser, captures a 1-year
+    // CLAUDE_CODE_OAUTH_TOKEN) → { ok, error }
     claudeLogin: () => ipcRenderer.invoke('onb:claudeLogin'),
-    // mode: 'oauth' clears any stored key; 'apikey' stores it → { ok, error }
+    // mode: 'oauth' clears any stored key; 'apikey' stores it; both via the
+    // tested never-coexist precedence helper → { ok, error }
     saveAuth: (payload) => ipcRenderer.invoke('onb:saveAuth', payload),
+    // which auth source is live (D1) → { ok, source: 'oauth'|'apikey'|'none' }
+    getAuthSource: () => ipcRenderer.invoke('onb:getAuthSource'),
+    // prove the credential actually authenticates a spawned claude (MED-3) → { ok, error }
+    verifyAuth: () => ipcRenderer.invoke('onb:verifyAuth'),
     // persist transport choice + tokens → { ok, error }
     saveTransport: (payload) => ipcRenderer.invoke('onb:saveTransport', payload),
     // finalize: ensure dashboard token + db key, then boot into the dashboard

@@ -341,21 +341,57 @@ function sendLog(line) {
   }
 }
 
-// Spawn a command, stream stdout+stderr to the wizard, resolve on exit.
+// Lazily load getScrubbedSdkEnv from the compiled ESM dist/security.js (same
+// CJS→ESM interop reason as config.cjs's auth helpers: package.json is
+// "type":"module" so a bare require would throw ERR_REQUIRE_ESM). Used by
+// onb:verifyAuth to build the SDK subprocess env exactly as the live service
+// does (src/agent.ts), so only the chosen auth var reaches the spawned claude.
+let _securityPromise = null;
+function loadSecurity() {
+  if (!_securityPromise) {
+    const compiled = path.join(APP_ROOT, 'dist', 'security.js');
+    _securityPromise = require('url').pathToFileURL(compiled).href;
+    _securityPromise = import(_securityPromise);
+  }
+  return _securityPromise;
+}
+
+// Spawn a command, stream stdout+stderr to the wizard, and ALSO capture stdout
+// so callers that need to parse output (e.g. setup-token) can read it. Resolves
+// on exit with { code, stdout, error? }.
+//   SECURITY: stdout may contain a credential (the setup-token). The captured
+//   string is returned to the caller for parsing only — it is never logged in
+//   full here; the live-log stream shows the CLI's own prompts, and the token
+//   line is the CLI's responsibility (we do not echo the parsed token anywhere).
 function runStreaming(cmd, args) {
   return new Promise((resolve) => {
     let proc;
     try {
       proc = spawn(cmd, args, { cwd: APP_ROOT, env: { ...process.env } });
     } catch (err) {
-      resolve({ code: -1, error: String(err) });
+      resolve({ code: -1, stdout: '', error: String(err) });
       return;
     }
-    proc.stdout.on('data', (b) => sendLog(b.toString()));
+    let stdout = '';
+    proc.stdout.on('data', (b) => {
+      const s = b.toString();
+      stdout += s;
+      sendLog(s);
+    });
     proc.stderr.on('data', (b) => sendLog(b.toString()));
-    proc.on('error', (err) => resolve({ code: -1, error: String(err) }));
-    proc.on('exit', (code) => resolve({ code: code ?? -1 }));
+    proc.on('error', (err) => resolve({ code: -1, stdout, error: String(err) }));
+    proc.on('exit', (code) => resolve({ code: code ?? -1, stdout }));
   });
+}
+
+// Extract a CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token` stdout. The CLI
+// prints the 1-year token (prefix sk-ant-oat01…) on its own line. Match the
+// token shape rather than a label so we are robust to surrounding prose.
+//   SECURITY: the matched token is returned to the caller; never logged.
+function extractOauthToken(stdout) {
+  if (!stdout) return '';
+  const m = stdout.match(/sk-ant-oat[0-9A-Za-z._-]+/);
+  return m ? m[0] : '';
 }
 
 function registerOnboardingHandlers() {
@@ -365,19 +401,20 @@ function registerOnboardingHandlers() {
       configured: cfg.isConfigured(ENV_PATH),
       hasCli: cli.ok,
       cliVersion: cli.version,
-      loggedIn: cfg.checkLogin(),
+      loggedIn: cfg.checkLogin(ENV_PATH),
     };
   });
 
   ipcMain.handle('onb:checkCli', () => cfg.checkClaudeCli());
 
+  // Install the CLI via the native installer (curl-based, lands ~/.local/bin/claude
+  // and auto-updates) — NOT the deprecated `npm i -g @anthropic-ai/claude-code`,
+  // which needs a global npm/Node the operator may not have. Per-row retry stays
+  // the wizard's contract (it re-invokes this on failure).
   ipcMain.handle('onb:installCli', async () => {
     sendLog('Installing Claude Code…\n');
-    const res = await runStreaming('npm', [
-      'install',
-      '-g',
-      '@anthropic-ai/claude-code',
-    ]);
+    const { cmd, args } = cfg.nativeInstallCommand();
+    const res = await runStreaming(cmd, args);
     const cli = cfg.checkClaudeCli();
     return {
       ok: cli.ok,
@@ -386,35 +423,139 @@ function registerOnboardingHandlers() {
     };
   });
 
-  ipcMain.handle('onb:checkLogin', () => ({ loggedIn: cfg.checkLogin() }));
+  ipcMain.handle('onb:checkLogin', () => ({ loggedIn: cfg.checkLogin(ENV_PATH) }));
 
+  // Sign in via `claude setup-token` (A1: spawn+capture works from a non-TTY
+  // Electron subprocess). The CLI walks the user through browser OAuth and prints
+  // a 1-year CLAUDE_CODE_OAUTH_TOKEN to stdout; we capture it and persist it via
+  // the tested precedence helper. Success = token captured, NOT a filesystem
+  // heuristic (creds otherwise live in the encrypted macOS Keychain).
+  //   SECURITY: the token is never logged; only the OAuth prompts stream to the
+  //   wizard log, and the parsed token goes straight to writeEnv (0600).
   ipcMain.handle('onb:claudeLogin', async () => {
-    // `claude login` opens its own browser OAuth flow and exits when done.
     sendLog('Opening Claude sign-in…\n');
-    const res = await runStreaming('claude', ['login']);
-    const loggedIn = cfg.checkLogin();
-    return {
-      ok: loggedIn,
-      error: loggedIn
-        ? ''
-        : res.error || 'Sign-in did not complete. Try again.',
-    };
+    const bin = cfg.claudeBinaryPath();
+    const res = await runStreaming(bin, ['setup-token']);
+    const token = extractOauthToken(res.stdout);
+    if (!token) {
+      return {
+        ok: false,
+        error: res.error || 'Sign-in did not complete — no token was captured. Try again.',
+      };
+    }
+    try {
+      const delta = await cfg.resolveAuthWrite('oauth', token);
+      cfg.writeEnv(ENV_PATH, delta);
+    } catch (err) {
+      return { ok: false, error: `Captured the token but could not save it: ${String(err)}` };
+    }
+    return { ok: true };
   });
 
   // Own auth precedence: OAuth and an API key must never both be active, or a
   // stale ANTHROPIC_API_KEY silently wins over the login (the crash-loop trap).
-  ipcMain.handle('onb:saveAuth', (_e, payload) => {
+  // Delegate ENTIRELY to the tested resolveAuthWrite so the never-coexist
+  // invariant has one source of truth.
+  ipcMain.handle('onb:saveAuth', async (_e, payload) => {
     try {
-      if (payload && payload.mode === 'apikey' && payload.key) {
-        cfg.writeEnv(ENV_PATH, { ANTHROPIC_API_KEY: payload.key.trim() });
-      } else {
-        // OAuth path — clear any stored key so the login is the active source.
-        cfg.writeEnv(ENV_PATH, { ANTHROPIC_API_KEY: null });
-      }
+      const p = payload || {};
+      const mode = p.mode === 'apikey' ? 'apikey' : 'oauth';
+      const credential = mode === 'apikey' ? (p.key || '').trim() : undefined;
+      const delta = await cfg.resolveAuthWrite(mode, credential);
+      cfg.writeEnv(ENV_PATH, delta);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  });
+
+  // Which auth source is live, for Settings > Account confirmation (D1).
+  // 'apikey' | 'oauth' | 'none'.
+  ipcMain.handle('onb:getAuthSource', async () => {
+    try {
+      const env = cfg.readEnv(ENV_PATH, [
+        'ANTHROPIC_API_KEY',
+        'CLAUDE_CODE_OAUTH_TOKEN',
+      ]);
+      const source = await cfg.activeAuthSource(env);
+      return { ok: true, source };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  // Prove the captured credential ACTUALLY authenticates (MED-3): read the
+  // credential from the data-dir .env, build the SDK subprocess env via
+  // getScrubbedSdkEnv (so only the chosen auth var is present, exactly like
+  // src/agent.ts), spawn the native `claude` binary on a trivial non-interactive
+  // prompt, and return ok only if it returns a model reply — not merely if a
+  // token string exists. On failure return the stderr reason.
+  //   SECURITY: the token is never logged; getScrubbedSdkEnv strips every other
+  //   secret from the subprocess env so a compromised prompt can't read them.
+  ipcMain.handle('onb:verifyAuth', async () => {
+    let getScrubbedSdkEnv;
+    try {
+      ({ getScrubbedSdkEnv } = await loadSecurity());
+    } catch (err) {
+      return { ok: false, error: `Could not load auth verifier: ${String(err)}` };
+    }
+    const secrets = cfg.readEnv(ENV_PATH, [
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_API_KEY',
+    ]);
+    if (!secrets.CLAUDE_CODE_OAUTH_TOKEN && !secrets.ANTHROPIC_API_KEY) {
+      return { ok: false, error: 'No credential to verify. Sign in first.' };
+    }
+    const sdkEnv = getScrubbedSdkEnv({
+      CLAUDE_CODE_OAUTH_TOKEN: secrets.CLAUDE_CODE_OAUTH_TOKEN || undefined,
+      ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY || undefined,
+    });
+    const bin = cfg.claudeBinaryPath();
+    sendLog('Checking your sign-in…\n');
+    return await new Promise((resolve) => {
+      let proc;
+      try {
+        proc = spawn(bin, ['-p', 'reply with the single word: ok'], {
+          cwd: APP_ROOT,
+          env: sdkEnv,
+        });
+      } catch (err) {
+        resolve({ ok: false, error: String(err) });
+        return;
+      }
+      let out = '';
+      let errOut = '';
+      const timer = setTimeout(() => {
+        try {
+          proc.kill();
+        } catch {
+          /* gone */
+        }
+        resolve({ ok: false, error: 'Verification timed out. Check your connection and try again.' });
+      }, 60000);
+      proc.stdout.on('data', (b) => {
+        out += b.toString();
+      });
+      proc.stderr.on('data', (b) => {
+        errOut += b.toString();
+      });
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        resolve({ ok: false, error: String(err) });
+      });
+      proc.on('exit', (code) => {
+        clearTimeout(timer);
+        if (code === 0 && out.trim()) {
+          resolve({ ok: true });
+        } else {
+          resolve({
+            ok: false,
+            error:
+              (errOut.trim() || 'Sign-in could not be verified.').slice(0, 400),
+          });
+        }
+      });
+    });
   });
 
   ipcMain.handle('onb:saveTransport', (_e, payload) => {
@@ -478,7 +619,12 @@ if (!gotLock) {
   app.whenReady().then(() => {
     if (app.isPackaged) {
       try {
-        app.setLoginItemSettings({ openAtLogin: true });
+        // PKG-04 reboot persistence. A5: on macOS 13+ the registration is more
+        // reliable with type:'mainAppService' (Electron routes it through the
+        // SMAppService API); on older macOS the param is ignored. We pin the
+        // minimum supported macOS at 13.0 (Ventura) — recorded in the SUMMARY —
+        // so the mainAppService path is always the one in effect for this build.
+        app.setLoginItemSettings({ openAtLogin: true, type: 'mainAppService' });
       } catch (err) {
         console.warn('[shell] could not set login item:', err);
       }

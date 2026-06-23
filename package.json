@@ -104,7 +104,8 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg"
+      "target": "dmg",
+      "minimumSystemVersion": "13.0"
     },
     "win": {
       "target": "nsis"
