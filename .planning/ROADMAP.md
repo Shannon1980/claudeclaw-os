@@ -153,7 +153,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
-| 2. Routines | 0/4 | Planned | - |
+| 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 0/? | Not started | - |
 | 4. Activity Feed | 0/? | Not started | - |
 | 5. Audit Log | 0/? | Not started | - |
