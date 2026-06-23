@@ -436,7 +436,11 @@ function runStreaming(cmd, args) {
 //   SECURITY: the matched token is returned to the caller; never logged.
 function extractOauthToken(stdout) {
   if (!stdout) return '';
-  const m = stdout.match(/sk-ant-oat[0-9A-Za-z._-]+/);
+  // Drop '.' from the class (IN-02): the OAuth token format does not contain
+  // dots, so including it would swallow a trailing period from surrounding prose
+  // (e.g. "...token sk-ant-oat01abc.") into the captured value, producing an
+  // invalid token that later fails verifyAuth with a confusing error.
+  const m = stdout.match(/sk-ant-oat[0-9A-Za-z_-]+/);
   return m ? m[0] : '';
 }
 
