@@ -76,7 +76,7 @@ The system base is **13px / line-height 1.5 / Inter**. The type scale is small a
 | Meta / schedule / count line / timestamps | 11px–11.5px | 400 | 1.5 |
 | Section label (uppercase) | 10px | 500 | 1.5, `letter-spacing: 0.08em`, `text-transform: uppercase`, `--color-text-faint` (the `.section-label` helper / pattern used in ScheduleBuilder) |
 
-Weights: **400 (regular)** and **500/600 (medium–semibold)** only — the system never uses bold beyond 600. Numerals in schedule/countdown/timestamps use `tabular-nums` (existing convention).
+Weights: exactly **two tiers** — `400` (regular body) and a single **emphasis tier** that is `500` everywhere except the `PageHeader` title, which keeps its existing `600`. Treat `500`/`600` as one emphasis tier; do NOT introduce a third visual weight level. The system never uses bold beyond 600. Numerals in schedule/countdown/timestamps use `tabular-nums` (existing convention).
 Mono (`--font-mono`, ~11px) is reserved for the raw-cron escape hatch and raw run output only — never for operator-facing schedule or copy.
 
 ---
