@@ -1,5 +1,5 @@
 import {
-  LayoutGrid, FolderKanban, ListTodo, Users, MessageSquare,
+  LayoutGrid, FolderKanban, Repeat, Users, MessageSquare,
   Brain, Network, Activity, ShieldCheck,
   Swords,
   Settings,
@@ -27,7 +27,7 @@ export interface RouteDef {
 export const ROUTES: RouteDef[] = [
   { path: '/mission',    label: 'Mission Control', vocabKey: 'nav.home',      section: 'workspace',    icon: LayoutGrid,    shortcut: 'g m' },
   { path: '/projects',   label: 'Projects',        vocabKey: 'nav.projects',  section: 'workspace',    icon: FolderKanban,  shortcut: 'g p' },
-  { path: '/scheduled',  label: 'Scheduled',       vocabKey: 'nav.routines',  section: 'workspace',    icon: ListTodo,      shortcut: 'g s' },
+  { path: '/routines',   label: 'Routines',        vocabKey: 'nav.routines',  section: 'workspace',    icon: Repeat,        shortcut: 'g s' },
   { path: '/agents',     label: 'Agents',          vocabKey: 'nav.team',      section: 'workspace',    icon: Users,         shortcut: 'g a' },
   { path: '/chat',       label: 'Chat',            vocabKey: 'nav.chat',      section: 'workspace',    icon: MessageSquare, shortcut: 'g c' },
 

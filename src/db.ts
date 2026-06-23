@@ -82,6 +82,35 @@ function createSchema(database: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_tasks_next_run ON scheduled_tasks(status, next_run);
 
+    -- Routines (Phase 2, RTN-03/05). Companion tables to scheduled_tasks: a
+    -- routine row IS a scheduled_tasks row (source='routine'); its ordered steps
+    -- and run history live here. FK + ON DELETE CASCADE mirror the
+    -- warroom_meetings/warroom_transcript pair so deleting a routine wipes its
+    -- steps and runs in one shot.
+    CREATE TABLE IF NOT EXISTS routine_steps (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      routine_id  TEXT NOT NULL,
+      step_order  INTEGER NOT NULL,
+      action      TEXT NOT NULL,
+      agent_id    TEXT NOT NULL DEFAULT 'main',
+      on_error    TEXT NOT NULL DEFAULT 'continue',   -- 'continue' | 'stop' (D-01)
+      created_at  INTEGER NOT NULL,
+      FOREIGN KEY (routine_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_routine_steps ON routine_steps(routine_id, step_order);
+
+    CREATE TABLE IF NOT EXISTS routine_runs (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      routine_id   TEXT NOT NULL,
+      outcome      TEXT NOT NULL,                       -- 'ok' | 'degraded' | 'failed' (D-02)
+      detail       TEXT NOT NULL DEFAULT '',            -- honest reason for RTN-05 history
+      output       TEXT,                                -- combined per-run output / link target
+      step_results TEXT NOT NULL DEFAULT '[]',          -- JSON [{stepId, ok, output, teammate, skipped?}]
+      ran_at       INTEGER NOT NULL,
+      FOREIGN KEY (routine_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_routine_runs ON routine_runs(routine_id, ran_at DESC);
+
     CREATE TABLE IF NOT EXISTS sessions (
       chat_id    TEXT NOT NULL,
       agent_id   TEXT NOT NULL DEFAULT 'main',
@@ -538,6 +567,15 @@ function runMigrations(database: Database.Database): void {
   addColumnIfMissing(database, 'scheduled_tasks', 'timeout', `TEXT`);
   addColumnIfMissing(database, 'scheduled_tasks', 'notify', `TEXT`);
   addColumnIfMissing(database, 'scheduled_tasks', 'retry', `INTEGER NOT NULL DEFAULT 0`);
+
+  // Routines (Phase 2, D-07). The autonomy choice ('unattended' | 'queue_approval')
+  // is STORED here and threaded into step-execution context; enforcement is Phase 3
+  // (D-08) — do not read this as an enforced guarantee. Dual-written via the
+  // versioned migration migrations/v1.2.2/add-routine-tables.ts for the production
+  // DB; mirrored here so the in-memory test DB reaches column parity. Skipping the
+  // versioned file crash-loops the live service (checkPendingMigrations) — see
+  // CLAUDE.md / MEMORY.md.
+  addColumnIfMissing(database, 'scheduled_tasks', 'autonomy', `TEXT NOT NULL DEFAULT 'unattended'`);
 
   // ── Memory V2 migration ──────────────────────────────────────────────
   // Detect old schema (has 'sector' column but no 'importance') and migrate.
@@ -1288,6 +1326,9 @@ export interface ScheduledTask {
   timeout: string | null;
   notify: string | null;
   retry: number;
+  // Routines (Phase 2, D-07). Stored autonomy mode ('unattended' | 'queue_approval');
+  // threaded into step-execution context, NOT enforced here (Phase 3 / D-08).
+  autonomy: string;
 }
 
 export function createScheduledTask(
@@ -1296,12 +1337,17 @@ export function createScheduledTask(
   schedule: string,
   nextRun: number,
   agentId = 'main',
+  // Routines (Phase 2, D-07): a routine row IS a scheduled_tasks row with
+  // source='routine' and a persisted autonomy mode. Both default to the
+  // hand-created-task values so every existing caller is unchanged.
+  source = 'user',
+  autonomy = 'unattended',
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id)
-     VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-  ).run(id, prompt, schedule, nextRun, now, agentId);
+    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id, source, autonomy)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+  ).run(id, prompt, schedule, nextRun, now, agentId, source, autonomy);
 }
 
 export function getDueTasks(agentId = 'main'): ScheduledTask[] {
@@ -1432,6 +1478,129 @@ export function pauseScheduledTask(id: string): void {
 
 export function resumeScheduledTask(id: string): void {
   db.prepare(`UPDATE scheduled_tasks SET status = 'active' WHERE id = ?`).run(id);
+}
+
+// ── Routines (Phase 2, RTN-03/05) ────────────────────────────────────
+// routine_steps / routine_runs are companion tables to scheduled_tasks. A
+// routine row IS a scheduled_tasks row (source='routine'); its ordered steps
+// and run history hang off the routine_id FK. Every statement is a parameterized
+// better-sqlite3 prepared statement — operator step text / routine names are
+// NEVER string-concatenated into SQL (V5 / SQLi, threat T-02-03).
+
+export interface RoutineStep {
+  id: number;
+  routine_id: string;
+  step_order: number;
+  action: string;
+  agent_id: string;
+  on_error: string; // 'continue' | 'stop' (D-01)
+  created_at: number;
+}
+
+/** An editable step shape (no id/routine_id/created_at — those are assigned on save). */
+export interface RoutineStepInput {
+  step_order: number;
+  action: string;
+  agent_id: string;
+  on_error: string;
+}
+
+export interface RoutineRun {
+  id: number;
+  routine_id: string;
+  outcome: string; // 'ok' | 'degraded' | 'failed' (D-02)
+  detail: string;
+  output: string | null;
+  step_results: string; // JSON string
+  ran_at: number;
+}
+
+/** Ordered steps for a routine, soonest step_order first. */
+export function getRoutineSteps(routineId: string): RoutineStep[] {
+  return db
+    .prepare(
+      `SELECT * FROM routine_steps WHERE routine_id = ? ORDER BY step_order ASC`,
+    )
+    .all(routineId) as RoutineStep[];
+}
+
+/**
+ * Replace a routine's full ordered step list (RTN-03 edit/reorder). Delete-then-
+ * insert inside a single transaction so a partial write can never leave a routine
+ * with a torn step list. on_error defaults to 'continue' (D-01) and agent_id to
+ * 'main' when the input omits them.
+ */
+export function saveRoutineSteps(routineId: string, steps: RoutineStepInput[]): void {
+  const now = Math.floor(Date.now() / 1000);
+  const del = db.prepare(`DELETE FROM routine_steps WHERE routine_id = ?`);
+  const ins = db.prepare(
+    `INSERT INTO routine_steps (routine_id, step_order, action, agent_id, on_error, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  const tx = db.transaction((rows: RoutineStepInput[]) => {
+    del.run(routineId);
+    for (const s of rows) {
+      ins.run(
+        routineId,
+        s.step_order,
+        s.action,
+        s.agent_id ?? 'main',
+        s.on_error ?? 'continue',
+        now,
+      );
+    }
+  });
+  tx(steps);
+}
+
+/**
+ * Persist a single routine run (RTN-05 history). step_results is JSON-serialized;
+ * outcome is the derived 'ok' | 'degraded' | 'failed' (D-02). output is capped to
+ * mirror updateTaskAfterRun's 4000-char slice.
+ */
+export function saveRoutineRun(
+  routineId: string,
+  outcome: string,
+  stepResults: unknown[],
+  detail: string,
+  output: string | null = null,
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `INSERT INTO routine_runs (routine_id, outcome, detail, output, step_results, ran_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    routineId,
+    outcome,
+    (detail ?? '').slice(0, 4000),
+    output === null ? null : output.slice(0, 4000),
+    JSON.stringify(stepResults ?? []),
+    now,
+  );
+}
+
+/** Run history for a routine, most recent first. */
+export function getRoutineRuns(routineId: string, limit = 50): RoutineRun[] {
+  return db
+    .prepare(
+      `SELECT * FROM routine_runs WHERE routine_id = ? ORDER BY ran_at DESC, id DESC LIMIT ?`,
+    )
+    .all(routineId, limit) as RoutineRun[];
+}
+
+/**
+ * The outcome of the most recent run, or null when the routine has never run.
+ * Drives the D-10 state-change notification (alert only on the ok→broken edge).
+ */
+export function getLastRoutineOutcome(routineId: string): string | null {
+  const row = db
+    .prepare(
+      // id DESC breaks ties when two runs land in the same wall-clock second
+      // (ran_at is second-granularity) so "most recent" is deterministic.
+      `SELECT outcome FROM routine_runs WHERE routine_id = ? ORDER BY ran_at DESC, id DESC LIMIT 1`,
+    )
+    .get(routineId) as { outcome: string } | undefined;
+  return row ? row.outcome : null;
 }
 
 // ── aos-cron row sync (Phase 7, SCH-02/SCH-03) ───────────────────────

@@ -37,6 +37,12 @@ import {
   getPausedAgents,
   isAgentPaused,
   setAgentPaused,
+  // ── Phase 2 Routines (Wave 0 RED — these do not exist yet) ──
+  getRoutineSteps,
+  saveRoutineSteps,
+  saveRoutineRun,
+  getRoutineRuns,
+  getLastRoutineOutcome,
 } from './db.js';
 import path from 'path';
 import { STORE_DIR, PROJECT_ROOT, TRANSPORT } from './config.js';
@@ -606,6 +612,58 @@ describe('database', () => {
       setAgentPaused('ops', true);
       const roster = getTeamRoster();
       expect(roster.ops?.paused).toBe(true);
+    });
+  });
+
+  // ── Phase 2 Routines: routine_steps / routine_runs / autonomy ─────
+  // RED (Wave 0): the CRUD fns + companion tables + autonomy column do not
+  // exist yet — 02-02 lands them. Uses _initTestDatabase() real in-memory SQLite.
+  describe('routine persistence', () => {
+    it('routine_steps round-trip: insert ordered steps, read back by step_order with agent_id + on_error', () => {
+      createScheduledTask('rt-1', 'morning brief', '0 8 * * 1-5', 9_999_999_999, 'main');
+      saveRoutineSteps('rt-1', [
+        { step_order: 0, action: 'send calendar brief', agent_id: 'research', on_error: 'continue' },
+        { step_order: 1, action: 'chase overdue invoices', agent_id: 'comms', on_error: 'stop' },
+      ]);
+
+      const steps = getRoutineSteps('rt-1');
+      expect(steps).toHaveLength(2);
+      expect(steps[0].step_order).toBe(0);
+      expect(steps[0].agent_id).toBe('research');
+      expect(steps[0].on_error).toBe('continue');
+      expect(steps[1].step_order).toBe(1);
+      expect(steps[1].agent_id).toBe('comms');
+      expect(steps[1].on_error).toBe('stop');
+    });
+
+    it('routine_runs round-trip: saveRoutineRun then read outcome + step_results + output + ran_at', () => {
+      createScheduledTask('rt-2', 'invoice chase', '0 9 * * *', 9_999_999_999, 'main');
+      const stepResults = [
+        { stepId: 1, ok: true, output: 'sent', teammate: 'comms' },
+      ];
+      saveRoutineRun('rt-2', 'degraded', stepResults, 'partial: calendar not connected');
+
+      const runs = getRoutineRuns('rt-2');
+      expect(runs).toHaveLength(1);
+      expect(runs[0].outcome).toBe('degraded');
+      expect(runs[0].ran_at).toBeGreaterThan(0);
+      const parsed = JSON.parse(runs[0].step_results);
+      expect(parsed[0]).toMatchObject({ ok: true, teammate: 'comms' });
+    });
+
+    it('autonomy column round-trips a stored value (default "unattended")', () => {
+      createScheduledTask('rt-3', 'auto routine', '0 7 * * *', 9_999_999_999, 'main');
+      const [row] = getAllScheduledTasks('main').filter((t) => t.id === 'rt-3') as any[];
+      expect(row.autonomy).toBe('unattended');
+    });
+
+    it('getLastRoutineOutcome returns most recent run by ran_at DESC, null when none', () => {
+      createScheduledTask('rt-4', 'history routine', '0 6 * * *', 9_999_999_999, 'main');
+      expect(getLastRoutineOutcome('rt-4')).toBeNull();
+
+      saveRoutineRun('rt-4', 'ok', [], '');
+      saveRoutineRun('rt-4', 'failed', [], 'broke');
+      expect(getLastRoutineOutcome('rt-4')).toBe('failed');
     });
   });
 });

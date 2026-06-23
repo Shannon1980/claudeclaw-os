@@ -282,6 +282,50 @@ describe('GET /api/tasks (scheduled)', () => {
   });
 });
 
+// ── Phase 2 Routines (Wave 0 RED) ────────────────────────────────────────────
+// The /api/routines* routes do not exist yet — 02-03 lands them. Until then
+// these assertions are RED (404 / wrong shape). They pin the route shapes, the
+// existing-token auth gate, and the load-bearing draft-does-not-persist
+// invariant (D-05): POST /api/routines/draft returns JSON and writes NO rows.
+describe('routines API contract', () => {
+  it('GET /api/routines returns { routines: [...] } and is auth-gated', async () => {
+    const noTok = await getNoToken('/api/routines');
+    expect(noTok.status).toBe(401);
+
+    const res = await get('/api/routines');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ routines: expect.any(Array) });
+  });
+
+  it('POST /api/routines/draft returns a draft and writes NO rows (D-05 draft-does-not-persist)', async () => {
+    const before = await jsonOf(await get('/api/routines'));
+    const beforeCount = (before.routines ?? []).length;
+
+    const res = await app.request('/api/routines/draft' + Q, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ description: 'every weekday at 8 send me a brief then chase invoices' }),
+    });
+    // Shape: a JSON draft (cron + ordered steps), regardless of LLM content.
+    const draft = await jsonOf(res);
+    expect(draft).toBeTruthy();
+
+    const after = await jsonOf(await get('/api/routines'));
+    const afterCount = (after.routines ?? []).length;
+    expect(afterCount).toBe(beforeCount); // nothing persisted by the draft call
+  });
+
+  it('POST /api/routines/:id/run returns 409 when the routine is already claimed/running', async () => {
+    const res = await app.request('/api/routines/already-running/run' + Q, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(409);
+  });
+});
+
 describe('GET /api/mission/tasks', () => {
   it('returns { tasks: [] }', async () => {
     const res = await get('/api/mission/tasks');
