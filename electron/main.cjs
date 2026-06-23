@@ -84,6 +84,14 @@ function resolveServiceCommand() {
   if (fs.existsSync(distEntry)) {
     return { cmd: process.execPath, args: [distEntry], runAsNode: true };
   }
+  // In a packaged build the tsx fallback is never valid (node_modules is not
+  // shipped), so a missing dist/ is a build error, not a dev situation. Fail
+  // with a clear message instead of spawning a nonexistent tsx (IN-04).
+  if (app.isPackaged) {
+    throw new Error(
+      `Build incomplete: ${distEntry} is missing from the packaged app. Rebuild with \`npm run build\`.`,
+    );
+  }
   const tsxBin = path.join(
     APP_ROOT,
     'node_modules',
@@ -172,6 +180,14 @@ function resolveMigrationRunner() {
   if (fs.existsSync(distRunner)) {
     return { cmd: process.execPath, runnerPath: distRunner, runAsNode: true };
   }
+  // Packaged builds ship dist/ but not node_modules, so the tsx fallback can
+  // only resolve a nonexistent binary and fail with an opaque spawn error.
+  // Treat a missing dist/ runner as a hard build error in packaged mode (IN-04).
+  if (app.isPackaged) {
+    throw new Error(
+      `Build incomplete: ${distRunner} is missing from the packaged app. Rebuild with \`npm run build\`.`,
+    );
+  }
   const tsxBin = path.join(
     APP_ROOT,
     'node_modules',
@@ -187,7 +203,16 @@ function resolveMigrationRunner() {
 // failure also resolves to 'failed' so the caller always gets a status.
 function runMigrationsStep() {
   return new Promise((resolve) => {
-    const { cmd, runnerPath, runAsNode } = resolveMigrationRunner();
+    let cmd, runnerPath, runAsNode;
+    try {
+      ({ cmd, runnerPath, runAsNode } = resolveMigrationRunner());
+    } catch (err) {
+      // Preserve the "always resolves to a status" contract (IN-04): a packaged
+      // build-incomplete error must surface as a failed migration state, not an
+      // unhandled rejection that crashes the boot.
+      resolve({ status: 'failed', error: String(err && err.message || err) });
+      return;
+    }
     // A tiny driver that imports the runner, runs it against APP_ROOT/DATA_DIR,
     // and prints exactly one JSON line prefixed so we can find it in the output.
     const driver =
