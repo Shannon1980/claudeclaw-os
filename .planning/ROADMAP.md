@@ -147,7 +147,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Desktop Shell & Onboarding | 4/4 | Complete   | 2026-06-23 |
+| 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 0/? | Not started | - |
 | 3. Permissions & Autonomy | 0/? | Not started | - |
 | 4. Activity Feed | 0/? | Not started | - |

@@ -16,7 +16,7 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 ## v2.0 Requirements
 
 ### Packaging & Distribution (PKG)
-- [ ] **PKG-01**: A non-technical user can install ClaudeClaw as a desktop app by double-clicking an installer, with no terminal
+- [x] **PKG-01**: A non-technical user can install ClaudeClaw as a desktop app by double-clicking an installer, with no terminal
 - [x] **PKG-02**: The desktop app boots the existing Node service internally and opens the dashboard as its window
 - [x] **PKG-03**: First run installs/sets up the Claude Code CLI and completes `claude login` without the user using a terminal
 - [x] **PKG-04**: The app registers as a login item and keeps running across reboots
@@ -69,7 +69,7 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| PKG-01 | Phase 1 | Pending |
+| PKG-01 | Phase 1 | Complete |
 | PKG-02 | Phase 1 | Complete |
 | PKG-03 | Phase 1 | Complete |
 | PKG-04 | Phase 1 | Complete |
