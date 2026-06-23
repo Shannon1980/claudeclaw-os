@@ -29,6 +29,7 @@ import { apiPost } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { term, vocabMode } from '@/lib/vocabulary';
 import { pushToast } from '@/lib/toasts';
+import { teammateColor } from '@/lib/teammate';
 
 export interface Agent {
   id: string;
@@ -51,18 +52,6 @@ interface TeammateRollup {
 }
 
 interface Template { id: string; name: string; description: string; }
-
-// Fixed teammate accent colors (spec): Research purple, Comms teal, Content
-// coral, Ops amber. Matched on id substring so renamed teammates keep their
-// color; anything unmatched falls back to the app accent.
-function teammateColor(id: string): string {
-  const k = id.toLowerCase();
-  if (k.includes('research')) return '#a78bfa';
-  if (k.includes('comms')) return '#2dd4bf';
-  if (k.includes('content')) return '#fb7185';
-  if (k.includes('ops')) return '#f59e0b';
-  return 'var(--color-accent)';
-}
 
 export function Team() {
   const { data, loading, error, refresh } = useFetch<{ agents: Agent[] }>('/api/agents', 30_000);
