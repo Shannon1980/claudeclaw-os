@@ -1,5 +1,6 @@
 {
   "migrations": {
-    "v1.2.1": ["add-aos-cron-scheduled-task-columns"]
+    "v1.2.1": ["add-aos-cron-scheduled-task-columns"],
+    "v1.2.2": ["add-routine-tables"]
   }
 }
