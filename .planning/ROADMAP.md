@@ -83,7 +83,12 @@ Plans:
   2. A user can override individual actions between Always and Ask first
   3. Irreversible actions (send money, sign, delete) are visibly locked to Ask-first and cannot be set to Always in any mode (D4)
   4. A gated action is fully prepared and queued as a "Needs you" item for one-tap approval
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 03-01-PLAN.md — Wave 0 failing tests pinning PERM-01..04 (gate/config/queue/contract/gate-wiring)
+- [ ] 03-02-PLAN.md — Slice A engine core: gate.ts (classify/resolve/Tier4 lock/audit) + permissions-config
+- [ ] 03-03-PLAN.md — Slice B queue + wiring: approval_queue (v1.2.3) + canUseTool replaces bypass, gate threaded through all runs + routine seam
+- [ ] 03-04-PLAN.md — Slice C surfaces: /api/permissions + /api/approvals, Settings Permissions section, Home approval item, inline chat ask (human-verify)
 **UI hint**: yes
 
 ### Phase 4: Activity Feed
@@ -154,7 +159,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
-| 3. Permissions & Autonomy | 0/? | Not started | - |
+| 3. Permissions & Autonomy | 0/4 | Planned | - |
 | 4. Activity Feed | 0/? | Not started | - |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
