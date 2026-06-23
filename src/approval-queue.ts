@@ -17,6 +17,7 @@
  */
 
 import { getDb } from './db.js';
+import { summarize, type Tier } from './gate.js';
 
 /** A row as stored, with tool_input already parsed back to an object. */
 export interface ApprovalRow {
@@ -85,6 +86,36 @@ export function enqueueApproval(input: EnqueueApprovalInput): number {
       now,
     );
   return Number(result.lastInsertRowid);
+}
+
+/**
+ * Adapter matching the gate's `GateContext.enqueue` signature
+ * (`{toolName,input,tier,mode,agentId,chatId,runId}` → id). Maps the gate's
+ * field names onto enqueueApproval and derives a plain-language summary that
+ * carries ONLY the tool name + tier (never the input params — L-4). Wired into
+ * runAgent as the default background enqueue path.
+ */
+export function gateEnqueue(item: {
+  toolName: string;
+  input: Record<string, unknown>;
+  tier: Tier;
+  mode: string;
+  agentId?: string;
+  chatId?: string;
+  runId?: string;
+  routineId?: string;
+}): number {
+  return enqueueApproval({
+    toolName: item.toolName,
+    toolInput: item.input,
+    tier: item.tier,
+    modeAtDecision: item.mode,
+    summary: summarize(item.toolName, item.tier),
+    agentId: item.agentId,
+    chatId: item.chatId,
+    runId: item.runId,
+    routineId: item.routineId,
+  });
 }
 
 /** Defensively parse a stored tool_input JSON string; never eval (ASVS V5). */

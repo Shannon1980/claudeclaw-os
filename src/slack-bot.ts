@@ -5,6 +5,7 @@ import boltPkg from '@slack/bolt';
 import { WebClient } from '@slack/web-api';
 
 import { runAgent } from './agent.js';
+import type { GateContext } from './gate.js';
 import { getSlackChannelMap, resolveAgentRuntime, type AgentRuntime } from './agent-config.js';
 import {
   SLACK_BOT_TOKEN,
@@ -289,6 +290,11 @@ async function summarizeToHive(sessionToSummarize: string, chatId: string, agent
       undefined,
       undefined,
       summaryAbort,
+      undefined, // onStreamText
+      undefined, // mcpAllowlist
+      undefined, // cwd
+      // Phase 3: background-safe gate ctx (P-5). Internal Tier-1 summary turn.
+      { attended: false, agentId, chatId } as GateContext,
     );
     clearTimeout(summaryTimer);
     const summary = result.text?.trim();

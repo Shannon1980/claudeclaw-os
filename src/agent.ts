@@ -9,6 +9,8 @@ import { classifyError, AgentError } from './errors.js';
 import { logger } from './logger.js';
 import { getScrubbedSdkEnv } from './security.js';
 import { requireEnabled } from './kill-switches.js';
+import { makeCanUseTool, type GateContext } from './gate.js';
+import { gateEnqueue } from './approval-queue.js';
 
 // ── MCP server loading ──────────────────────────────────────────────
 // The Agent SDK's settingSources loads CLAUDE.md and permissions from
@@ -176,6 +178,44 @@ async function* singleTurn(text: string): AsyncGenerator<{
  *                   the process-global agentCwd (the running agent) or
  *                   PROJECT_ROOT. Pass a sub-agent's dir to run it in-process.
  */
+/**
+ * The SAFE default gate context for any caller that omits one (P-5).
+ *
+ * It is a BACKGROUND context (`attended:false`) with NO `requestInline`, so an
+ * "ask" outcome routes to enqueue+deny — never silent-allow. A missed caller
+ * therefore fails to the queue, never bypasses the gate. The real attended
+ * chat context (with `requestInline`) is supplied by message-core in plan 04.
+ */
+function safeBackgroundGateCtx(): GateContext {
+  return { attended: false, enqueue: gateEnqueue };
+}
+
+/**
+ * Build the permission-relevant SDK query options for a single agent turn.
+ *
+ * Exported (and unit-pinned by agent.test "gate wired") so the contract is
+ * explicit: the agent NEVER bypasses permissions. `permissionMode` is
+ * `'default'` and `canUseTool` is the per-turn gate from makeCanUseTool. An
+ * omitted gateCtx defaults to the safe background context (P-5). The gate's
+ * `enqueue` slot is always wired to the real approval-queue so a background
+ * "ask" persists a pending row.
+ */
+export function buildAgentQueryOptions(params: {
+  gateCtx?: GateContext;
+}): {
+  permissionMode: 'default';
+  canUseTool: ReturnType<typeof makeCanUseTool>;
+} {
+  const ctx: GateContext = params.gateCtx ?? safeBackgroundGateCtx();
+  // Always ensure a background enqueue path exists even if a caller built a
+  // partial ctx without one — the background "ask" branch must be able to queue.
+  if (!ctx.enqueue) ctx.enqueue = gateEnqueue;
+  return {
+    permissionMode: 'default',
+    canUseTool: makeCanUseTool(ctx),
+  };
+}
+
 export async function runAgent(
   message: string,
   sessionId: string | undefined,
@@ -186,6 +226,7 @@ export async function runAgent(
   onStreamText?: (accumulatedText: string) => void,
   mcpAllowlist?: string[],
   cwd?: string,
+  gateCtx?: GateContext,
 ): Promise<AgentResult> {
   // Centralized kill-switch enforcement. Throws KillSwitchDisabledError if
   // LLM_SPAWN_ENABLED has been flipped off — caller is expected to surface
@@ -257,9 +298,14 @@ export async function runAgent(
         // 'project' loads CLAUDE.md from cwd; 'user' loads ~/.claude/skills/ and user settings
         settingSources: ['project', 'user'],
 
-        // Skip all permission prompts — this is a trusted personal bot on your own machine
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
+        // Permission gate (Phase 3, PERM-01/02/03/04). The gate fires on EVERY
+        // tool call: classify→resolve against the operator's mode+overrides,
+        // allow Tier-appropriate actions, and for "ask" outcomes either prompt
+        // inline (attended chat, plan 04) or enqueue+deny (background runs). The
+        // old bypassPermissions / allowDangerouslySkipPermissions are GONE — a
+        // bypass would silently re-open the boundary (T-03-bypass-noop). An
+        // omitted gateCtx defaults to a SAFE background context (P-5).
+        ...buildAgentQueryOptions({ gateCtx }),
 
         // Cap agentic turns to prevent runaway tool-use loops (e.g. retrying
         // stale cookies 40+ times). Configurable via AGENT_MAX_TURNS in .env.
@@ -478,6 +524,7 @@ export async function runAgentWithRetry(
   fallbackModels?: string[],
   mcpAllowlist?: string[],
   cwd?: string,
+  gateCtx?: GateContext,
 ): Promise<AgentResult> {
   let lastError: AgentError | undefined;
 
@@ -492,7 +539,7 @@ export async function runAgentWithRetry(
       return await runAgent(
         message, sessionId, onTyping, onProgress,
         currentModel, abortController, onStreamText,
-        mcpAllowlist, cwd,
+        mcpAllowlist, cwd, gateCtx,
       );
     } catch (err) {
       if (!(err instanceof AgentError)) throw err;

@@ -418,6 +418,12 @@ export async function processUserMessage(
       MODEL_FALLBACK_CHAIN.length > 0 ? MODEL_FALLBACK_CHAIN : undefined,
       effectiveMcpAllowlist,
       effectiveCwd,
+      // Phase 3 permission gate. This IS the live operator chat path, so it is
+      // conceptually attended — but the inline yes/no resolver (requestInline)
+      // is wired in plan 04. Until then pass a background-safe ctx (attended:false,
+      // no requestInline) so an "ask" enqueues + denies rather than silent-allows
+      // (P-5). Plan 04 replaces this with `{ attended:true, requestInline, ... }`.
+      { attended: false, agentId, chatId: chatIdStr },
     );
 
     clearTimeout(timeoutId);

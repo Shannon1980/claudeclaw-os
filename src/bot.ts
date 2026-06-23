@@ -4,6 +4,7 @@ import os from 'os';
 import { Api, Bot, Context, InputFile, RawApi } from 'grammy';
 
 import { runAgent, runAgentWithRetry, UsageInfo, AgentProgressEvent } from './agent.js';
+import type { GateContext } from './gate.js';
 import { AgentError } from './errors.js';
 import { processUserMessage, clearSessionBaseline, type TransportCallbacks } from './message-core.js';
 import { splitMessage, extractFileMarkers, type FileMarker, type ExtractResult } from './format.js';
@@ -465,6 +466,12 @@ export function createBot(): Bot {
             undefined,
             undefined,
             summaryAbort,
+            undefined, // onStreamText
+            undefined, // mcpAllowlist
+            undefined, // cwd
+            // Phase 3: background-safe gate ctx (P-5). This internal summary
+            // turn is Tier-1 read-only; any "ask" would enqueue+deny, never bypass.
+            { attended: false, agentId: AGENT_ID, chatId: chatIdStr } as GateContext,
           );
           clearTimeout(summaryTimer);
 
@@ -1139,6 +1146,11 @@ async function processDashboardMessage(
       abortCtrl,
       undefined, // no streaming for dashboard
       agentMcpAllowlist,
+      undefined, // cwd
+      // Phase 3: dashboard chat is conceptually attended, but requestInline is
+      // wired in plan 04. Until then a background-safe ctx (attended:false, no
+      // requestInline) routes an "ask" to enqueue+deny, never silent-allow (P-5).
+      { attended: false, agentId: AGENT_ID, chatId: chatIdStr } as GateContext,
     );
 
     clearTimeout(dashTimeout);

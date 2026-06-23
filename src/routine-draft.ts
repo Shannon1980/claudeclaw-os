@@ -163,6 +163,14 @@ export async function assembleRoutineDraft(
     () => {},
     undefined,
     DRAFT_MODEL,
+    undefined, // abortController
+    undefined, // onStreamText
+    undefined, // mcpAllowlist
+    undefined, // cwd
+    // Phase 3: background-safe gate ctx (P-5). The draft turn asks the model to
+    // emit JSON only — no external tools — but pass an explicit safe ctx so this
+    // caller never relies on an implicit bypass.
+    { attended: false },
   );
   const text = result?.text ?? '';
 

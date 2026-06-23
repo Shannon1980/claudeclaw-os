@@ -8,6 +8,7 @@ import {
   type ScheduledTask,
 } from './db.js';
 import { delegateToAgent as delegateToAgentFn } from './orchestrator.js';
+import type { GateContext } from './gate.js';
 import { logger } from './logger.js';
 import { TASK_TIMEOUT_MS } from './scheduler.js';
 
@@ -91,9 +92,19 @@ export async function runRoutineOnce(
   const persistRun = deps.saveRoutineRun ?? saveRoutineRun;
   const persistTask = deps.updateTaskAfterRun ?? updateTaskAfterRun;
 
-  // Forward-compatible autonomy context (D-07). Carried into each step's run; no
-  // gate is built on it here (D-08 — enforcement is Phase 3).
+  // Autonomy context (D-07). Carried into each step's run. Phase 3 (D-06) now
+  // threads this into the permission gate: each routine step enters the gate as
+  // a BACKGROUND run (attended:false → ask/queue, never inline) carrying its
+  // stored autonomy. Background "ask" enqueues + denies (P-2) — a routine step
+  // never blocks for hours awaiting the operator.
   const execContext = { autonomy: task.autonomy ?? 'unattended' };
+  const stepGateCtx: GateContext = {
+    attended: false,
+    routineId: task.id,
+    routineAutonomy: execContext.autonomy as 'unattended' | 'queue_approval',
+    chatId: ALLOWED_CHAT_ID || 'routine',
+    runId: task.id,
+  };
 
   const results: StepResult[] = [];
   let halted = false;
@@ -126,6 +137,8 @@ export async function runRoutineOnce(
         'main',
         undefined,
         TASK_TIMEOUT_MS,
+        undefined, // no external abort controller
+        stepGateCtx, // D-06: step carries its routine autonomy into the gate
       );
       const output = (r.text ?? '').trim();
       results.push({
