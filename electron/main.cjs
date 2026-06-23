@@ -360,9 +360,14 @@ function loadSecurity() {
 // so callers that need to parse output (e.g. setup-token) can read it. Resolves
 // on exit with { code, stdout, error? }.
 //   SECURITY: stdout may contain a credential (the setup-token). The captured
-//   string is returned to the caller for parsing only — it is never logged in
-//   full here; the live-log stream shows the CLI's own prompts, and the token
-//   line is the CLI's responsibility (we do not echo the parsed token anywhere).
+//   string is returned to the caller for parsing only; before any chunk reaches
+//   the renderer log it is run through redactTokens so a sk-ant-oat/api token
+//   never lands in the visible #log element or renderer memory (CR-01). The raw
+//   (unredacted) stdout is still accumulated for extractOauthToken.
+const TOKEN_RE = /sk-ant-(?:oat|api)[0-9A-Za-z._-]+/g;
+function redactTokens(s) {
+  return s.replace(TOKEN_RE, 'sk-ant-***redacted***');
+}
 function runStreaming(cmd, args) {
   return new Promise((resolve) => {
     let proc;
@@ -375,10 +380,10 @@ function runStreaming(cmd, args) {
     let stdout = '';
     proc.stdout.on('data', (b) => {
       const s = b.toString();
-      stdout += s;
-      sendLog(s);
+      stdout += s; // keep raw for extractOauthToken
+      sendLog(redactTokens(s)); // never stream the raw token to the renderer
     });
-    proc.stderr.on('data', (b) => sendLog(b.toString()));
+    proc.stderr.on('data', (b) => sendLog(redactTokens(b.toString())));
     proc.on('error', (err) => resolve({ code: -1, stdout, error: String(err) }));
     proc.on('exit', (code) => resolve({ code: code ?? -1, stdout }));
   });
