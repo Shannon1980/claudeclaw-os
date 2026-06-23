@@ -382,9 +382,17 @@ function sendLog(line) {
 let _securityPromise = null;
 function loadSecurity() {
   if (!_securityPromise) {
-    const compiled = path.join(APP_ROOT, 'dist', 'security.js');
-    _securityPromise = require('url').pathToFileURL(compiled).href;
-    _securityPromise = import(_securityPromise);
+    const url = require('url').pathToFileURL(
+      path.join(APP_ROOT, 'dist', 'security.js'),
+    ).href;
+    // Cache only on success (WR-05): if import() rejects (e.g. dist/security.js
+    // missing in a partial build) we clear the cache so a later verifyAuth can
+    // retry once the file appears, instead of permanently re-returning the same
+    // rejected promise.
+    _securityPromise = import(url).catch((e) => {
+      _securityPromise = null;
+      throw e;
+    });
   }
   return _securityPromise;
 }
