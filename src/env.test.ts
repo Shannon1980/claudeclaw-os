@@ -98,4 +98,84 @@ describe('readEnvFile', () => {
     const result = readEnvFile(['KEY', 'NOEQUALS']);
     expect(result).toEqual({ KEY: 'value' });
   });
+
+  // The desktop shell (electron/config.cjs:writeEnv) prepends a managed header
+  // whose lines all begin with '#'. readEnvFile must ignore them on re-read so
+  // the desktop-written .env round-trips cleanly through the service's reader.
+  it('ignores the managed-header lines config.cjs writeEnv produces', () => {
+    writeEnv(
+      '# ClaudeClaw — managed by the desktop app.\n' +
+        '# You can edit this, but the app may rewrite it.\n' +
+        '\n' +
+        'CLAUDE_CODE_OAUTH_TOKEN=tok-123\n' +
+        'TRANSPORT=slack\n'
+    );
+    mockCwd();
+    const result = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'TRANSPORT']);
+    expect(result).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'tok-123', TRANSPORT: 'slack' });
+  });
+
+  // A null-delete in writeEnv removes the line entirely; on re-read the key must
+  // be absent (not present as empty). This is the OAuth-clears-stale-key path.
+  it('returns nothing for a key that was deleted (null-delete round-trip)', () => {
+    // Simulates an .env after writeEnv({ ANTHROPIC_API_KEY: null }): the line
+    // is gone, only the surviving keys remain.
+    writeEnv(
+      '# ClaudeClaw — managed by the desktop app.\n' +
+        'CLAUDE_CODE_OAUTH_TOKEN=tok-123\n'
+    );
+    mockCwd();
+    const result = readEnvFile(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']);
+    expect(result).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(result).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 'tok-123' });
+  });
+
+  // An empty-valued key (the value side of writeEnv would never produce this,
+  // but a hand-edited .env might) is treated as absent by readEnvFile.
+  it('omits keys with empty values', () => {
+    writeEnv('ANTHROPIC_API_KEY=\nKEY=value\n');
+    mockCwd();
+    const result = readEnvFile(['ANTHROPIC_API_KEY', 'KEY']);
+    expect(result).toEqual({ KEY: 'value' });
+  });
+});
+
+// In a packaged .app the bundle is read-only, so the service reads .env from a
+// writable per-user data dir the shell supplies via CLAUDECLAW_DATA_DIR. When
+// that env var is unset, readEnvFile falls back to process.cwd()/.env exactly
+// as before (the terminal/dev path is untouched).
+describe('readEnvFile honors CLAUDECLAW_DATA_DIR', () => {
+  const DATA_DIR = '/tmp/claudeclaw-datadir-env-test';
+  const DATA_ENV = path.join(DATA_DIR, '.env');
+  const savedDataDir = process.env.CLAUDECLAW_DATA_DIR;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    try {
+      fs.rmSync(DATA_DIR, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+    if (savedDataDir === undefined) delete process.env.CLAUDECLAW_DATA_DIR;
+    else process.env.CLAUDECLAW_DATA_DIR = savedDataDir;
+  });
+
+  it('reads .env from CLAUDECLAW_DATA_DIR when set, not process.cwd()', () => {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(DATA_ENV, 'DB_ENCRYPTION_KEY=from-data-dir\n', 'utf-8');
+    // cwd points somewhere with no .env, proving the data-dir path is used.
+    vi.spyOn(process, 'cwd').mockReturnValue('/tmp/nonexistent-cwd-xyz');
+    process.env.CLAUDECLAW_DATA_DIR = DATA_DIR;
+    const result = readEnvFile(['DB_ENCRYPTION_KEY']);
+    expect(result).toEqual({ DB_ENCRYPTION_KEY: 'from-data-dir' });
+  });
+
+  it('falls back to process.cwd()/.env when CLAUDECLAW_DATA_DIR is unset', () => {
+    delete process.env.CLAUDECLAW_DATA_DIR;
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(path.join(DATA_DIR, '.env'), 'KEY=from-cwd\n', 'utf-8');
+    vi.spyOn(process, 'cwd').mockReturnValue(DATA_DIR);
+    const result = readEnvFile(['KEY']);
+    expect(result).toEqual({ KEY: 'from-cwd' });
+  });
 });

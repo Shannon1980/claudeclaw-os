@@ -23,16 +23,11 @@ export function compareSemver(a: string, b: string): number {
   return aPatch - bPatch;
 }
 
-// codeRoot holds the read-only migration definitions (shipped in the bundle).
-// dataDir holds the writable state — the .applied.json marker and store/. They
-// differ only in the packaged desktop app (bundle is read-only); everywhere
-// else dataDir defaults to codeRoot, preserving the original single-root paths.
-export function checkPendingMigrations(codeRoot: string, dataDir: string = codeRoot): void {
-  const migrationsDir = path.join(codeRoot, 'migrations');
+export function checkPendingMigrations(projectRoot: string): void {
+  const migrationsDir = path.join(projectRoot, 'migrations');
   const versionFile = path.join(migrationsDir, 'version.json');
-  const appliedDir = path.join(dataDir, 'migrations');
-  const appliedFile = path.join(appliedDir, '.applied.json');
-  const storeDir = path.join(dataDir, 'store');
+  const appliedFile = path.join(migrationsDir, '.applied.json');
+  const storeDir = path.join(projectRoot, 'store');
 
   try {
     const registry: VersionRegistry = JSON.parse(fs.readFileSync(versionFile, 'utf-8'));
@@ -49,7 +44,6 @@ export function checkPendingMigrations(codeRoot: string, dataDir: string = codeR
       // Fresh clone — store/ hasn't been created yet, so the bot has never run.
       // Write .applied.json now so subsequent starts (after store/ is created) don't
       // mistake this for a pre-migration install.
-      fs.mkdirSync(appliedDir, { recursive: true });
       fs.writeFileSync(appliedFile, JSON.stringify({ lastApplied: latest }, null, 2) + '\n');
       return;
     }

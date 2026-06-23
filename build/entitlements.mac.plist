@@ -2,18 +2,36 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Electron / V8 require JIT and writable+executable memory. -->
-  <key>com.apple.security.cs.allow-jit</key>
-  <true/>
-  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-  <true/>
-  <!-- The shell spawns the bundled Node service via ELECTRON_RUN_AS_NODE and
-       launches `claude`/`npm` as children; both need dyld env vars allowed. -->
-  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
-  <true/>
-  <!-- Loading the better-sqlite3 native .node and the spawned node/CLI binaries
-       trips library validation under hardened runtime without this. -->
-  <key>com.apple.security.cs.disable-library-validation</key>
-  <true/>
+	<!--
+	  Hardened-runtime entitlements for the ClaudeClaw Electron app.
+
+	  These are required because the main process forks a Node service and
+	  spawns the `claude` CLI subprocess (which itself runs as node via
+	  ELECTRON_RUN_AS_NODE). Under a notarized hardened runtime, the V8 JIT
+	  and the forked child's env-var injection are denied by default and must
+	  be explicitly allowed here.
+
+	  Scoped to the minimum Electron + child-process needs (threat T-04-03,
+	  disposition: accept). No network/file entitlements beyond the default.
+	-->
+
+	<!-- Electron's V8 needs writable+executable JIT memory. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+
+	<!-- V8 maps unsigned executable pages for compiled JS. -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+
+	<!-- The forked child is launched with ELECTRON_RUN_AS_NODE and a scrubbed
+	     env (getScrubbedSdkEnv); hardened runtime otherwise strips DYLD_* and
+	     blocks env-driven dylib loading the spawned node/claude relies on. -->
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<true/>
+
+	<!-- Allow loading the unsigned/3rd-party libraries the spawned claude CLI
+	     and native node addons (better-sqlite3 .node) bring in. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
 </dict>
 </plist>

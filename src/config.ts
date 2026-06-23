@@ -142,20 +142,19 @@ const __dirname = path.dirname(__filename);
 // and all global skills from ~/.claude/skills/ via settingSources.
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-// ── Writable data directory ───────────────────────────────────────────
-// DATA_DIR holds everything the service writes at runtime: store/ (the DB,
-// pid files, backups, avatars), the managed .env, and uploads. It defaults
-// to PROJECT_ROOT so the launchd service and dev (which run from a writable
-// checkout) are completely unchanged. The packaged desktop app sets
-// CLAUDECLAW_DATA_DIR to a per-user writable location (Electron's userData)
-// because the app bundle in /Applications is read-only — the code root
-// (PROJECT_ROOT) stays read-only and only DATA_DIR is written.
-// (expandHome is a hoisted function declaration below, so it's usable here.)
-export const DATA_DIR = process.env.CLAUDECLAW_DATA_DIR
-  ? path.resolve(expandHome(process.env.CLAUDECLAW_DATA_DIR))
-  : PROJECT_ROOT;
-export const STORE_DIR = path.resolve(DATA_DIR, 'store');
-export const ENV_PATH = path.resolve(DATA_DIR, '.env');
+// ── Writable data dir (packaged-app redirect) ────────────────────────────
+// In a signed .app, PROJECT_ROOT (resourcesPath/app) is read-only under
+// Gatekeeper, so the desktop shell sets CLAUDECLAW_DATA_DIR to a writable
+// per-user dir (app.getPath('userData')) and forks the service with it. When
+// set, all writable state (store/, db, .env) lives under it; PROJECT_ROOT
+// itself does NOT move — it stays the code/CLAUDE.md/skills dir the SDK loads.
+// Read from the shell env only (no .env fallback): it must be known before the
+// .env is even located. Unset => behavior is byte-identical to the dev/terminal
+// path (STORE_DIR under PROJECT_ROOT).
+const dataDir = process.env.CLAUDECLAW_DATA_DIR;
+export const STORE_DIR = dataDir
+  ? path.join(dataDir, 'store')
+  : path.resolve(PROJECT_ROOT, 'store');
 
 // ── External config directory ────────────────────────────────────────
 // Personal config files (CLAUDE.md, agent.yaml, agent CLAUDE.md) can live

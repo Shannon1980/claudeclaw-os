@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { execSync, spawn } from 'child_process';
 import yaml from 'js-yaml';
 
-import { CLAUDECLAW_CONFIG, PROJECT_ROOT, STORE_DIR, ENV_PATH } from './config.js';
+import { CLAUDECLAW_CONFIG, PROJECT_ROOT, STORE_DIR } from './config.js';
 import { listAgentIds, loadAgentConfig, resolveAgentDir, refreshWarRoomRoster } from './agent-config.js';
 import { refreshAgentRegistry } from './orchestrator.js';
 import { atomicEnvWrite } from './env-write.js';
@@ -360,7 +360,7 @@ export async function createAgent(opts: CreateAgentOpts): Promise<CreateAgentRes
   // agents skip both (nothing to run standalone, nothing to store).
   let plistPath: string | null = null;
   if (botToken && envKey) {
-    const envPath = ENV_PATH;
+    const envPath = path.join(PROJECT_ROOT, '.env');
     writeBotTokenToEnv(envPath, envKey, botToken, id);
     plistPath = generateServiceConfig(id);
   }
@@ -754,7 +754,7 @@ export function deleteAgent(agentId: string): { ok: boolean; error?: string } {
     if (fs.existsSync(plistTemplate)) fs.unlinkSync(plistTemplate);
 
     // Remove token from .env
-    removeBotTokenFromEnv(ENV_PATH, envKey, agentId);
+    removeBotTokenFromEnv(path.join(PROJECT_ROOT, '.env'), envKey, agentId);
 
     // Remove log files (both the legacy in-project location and the new
     // ~/Library/Logs/claudeclaw location written by activateLaunchd).

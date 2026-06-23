@@ -1,14 +1,15 @@
 import fs from 'fs';
 import https from 'https';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-import { DATA_DIR } from './config.js';
 import { logger } from './logger.js';
 
-// Directory where all media is saved. Lives under DATA_DIR so the packaged
-// app writes to its per-user data dir (the bundle is read-only); defaults to
-// the checkout for the launchd/dev service. See DATA_DIR in config.ts.
-export const UPLOADS_DIR = path.resolve(DATA_DIR, 'workspace', 'uploads');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Directory where all Telegram media is saved
+export const UPLOADS_DIR = path.resolve(__dirname, '..', 'workspace', 'uploads');
 
 // Ensure uploads dir exists on module load
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });

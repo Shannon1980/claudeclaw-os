@@ -207,7 +207,7 @@
               </div>
               <div class="row" id="row-cli">
                 <span class="status pending" id="st-cli"><span class="spin"></span></span>
-                <div class="label">Claude Code<div class="sub" id="cli-sub">Checking…</div></div>
+                <div class="label">Claude Code<div class="sub" id="cli-sub">Checking for the Claude engine…</div></div>
               </div>
             </div>
             <div class="log" id="log"></div>`;
@@ -223,6 +223,7 @@
             <p>ClaudeClaw uses your existing Claude subscription. No API keys, no extra per-message cost.</p>
             <button class="primary" id="login-btn">Sign in with Claude</button>
             <div class="confirm hidden" id="login-ok">Signed in.</div>
+            <div class="note hidden" id="verify-msg" style="margin-top:8px"></div>
             <p style="margin-top:18px"><a class="link" id="apikey-toggle">Use an API key instead</a></p>
             <div id="apikey-box" class="hidden">
               <p class="note">Recommended if you run heavy automation around the clock. Your key is stored locally.</p>
@@ -234,15 +235,45 @@
           setFooter({ next: 'Continue', disabled: !li });
           if (li) $('login-ok').classList.remove('hidden');
 
+          // Confirm the live source (D1), then prove it actually authenticates
+          // (MED-3). Continue stays disabled until the real round-trip succeeds,
+          // so the wizard never advances on a token that does not authenticate.
+          async function confirmAndVerify(fallbackLabel) {
+            const msg = $('verify-msg');
+            msg.classList.remove('hidden');
+            const src = await api.getAuthSource();
+            const label =
+              src && src.ok && src.source === 'apikey'
+                ? 'Using your API key'
+                : src && src.ok && src.source === 'oauth'
+                  ? 'Signed in with your Claude subscription'
+                  : fallbackLabel;
+            $('login-ok').textContent = label;
+            $('login-ok').classList.remove('hidden');
+            msg.textContent = 'Checking your sign-in…';
+            const v = await api.verifyAuth();
+            if (v && v.ok) {
+              msg.textContent = '';
+              msg.classList.add('hidden');
+              nextBtn.disabled = false;
+              return true;
+            }
+            nextBtn.disabled = true;
+            msg.textContent =
+              (v && v.error) ||
+              'That sign-in could not be verified. Try signing in again.';
+            return false;
+          }
+
           $('login-btn').onclick = async () => {
             $('login-btn').textContent = 'Opening sign-in…';
             $('login-btn').disabled = true;
             const res = await api.claudeLogin();
             if (res.ok) {
-              await api.saveAuth({ mode: 'oauth' });
               state.auth = 'oauth';
-              $('login-ok').classList.remove('hidden');
-              nextBtn.disabled = false;
+              $('login-btn').textContent = 'Sign in with Claude';
+              $('login-btn').disabled = false;
+              await confirmAndVerify('Signed in with your Claude subscription');
             } else {
               $('login-btn').textContent = 'Try again';
               $('login-btn').disabled = false;
@@ -258,7 +289,7 @@
             if (res.ok) {
               state.auth = 'apikey';
               $('apikey-ok').classList.remove('hidden');
-              nextBtn.disabled = false;
+              await confirmAndVerify('Using your API key');
             } else {
               alert(res.error || 'Could not save key.');
             }
@@ -432,7 +463,15 @@
         if (name === 'done') {
           nextBtn.disabled = true;
           nextBtn.textContent = 'Starting…';
-          await api.finish();
+          const r = await api.finish();
+          if (!r || !r.ok) {
+            // A failed finish (e.g. secret write failed) would otherwise leave
+            // the wizard stuck on "Starting…" forever with no error surfaced.
+            alert((r && r.error) || 'Could not finish setup. Please try again.');
+            nextBtn.disabled = false;
+            nextBtn.textContent = 'Open dashboard';
+            return;
+          }
           return; // main navigates to the dashboard
         }
         await go(step + 1);

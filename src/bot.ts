@@ -31,7 +31,7 @@ import {
   PROTECTED_ENV_VARS,
   DAILY_COST_BUDGET,
   HOURLY_TOKEN_BUDGET,
-  ENV_PATH,
+  PROJECT_ROOT,
 } from './config.js';
 import { clearSession, getRecentConversation, getRecentMemories, getRecentTaskOutputs, getSession, getSessionConversation, logToHiveMind, pinMemory, unpinMemory, setSession, lookupWaChatId, saveWaMessageMap, saveTokenUsage, saveCompactionEvent, getCompactionCount } from './db.js';
 import { logger } from './logger.js';
@@ -238,7 +238,7 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
 
   // First-run setup: auto-save the chat ID and restart
   if (!ALLOWED_CHAT_ID) {
-    const envPath = ENV_PATH;
+    const envPath = path.join(PROJECT_ROOT, '.env');
     try {
       let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
       if (envContent.includes('ALLOWED_CHAT_ID=')) {

@@ -28,19 +28,25 @@ const APP_ROOT = app.isPackaged
   ? path.join(process.resourcesPath, 'app')
   : path.join(__dirname, '..');
 
-// Writable data dir. The packaged bundle (APP_ROOT) is read-only in
-// /Applications, so the service's writable state (.env, store/, uploads) goes
-// to Electron's per-user userData dir instead. The service honours this via the
-// CLAUDECLAW_DATA_DIR env var (see DATA_DIR in src/config.ts); APP_ROOT stays
-// the code root so bundled agents/migrations/warroom still resolve from cwd.
-// In dev, DATA_DIR == APP_ROOT (the checkout), so behaviour is unchanged.
+// ── Writable data dir ──────────────────────────────────────────────────
+// In a signed .app, APP_ROOT (resourcesPath/app) is read-only under Gatekeeper,
+// so all writable state (.env, store/, db, migration backups) must live in a
+// writable per-user dir. Electron's app.getPath('userData') is the supported
+// location (~/Library/Application Support/ClaudeClaw). The service (src/config.ts
+// + src/env.ts) honors CLAUDECLAW_DATA_DIR; the migration runner honors its
+// dataDir arg. In dev (not packaged) we keep the old behavior (state under the
+// repo) so the terminal path is untouched.
+//   Secrets (DASHBOARD_TOKEN, DB_ENCRYPTION_KEY) written here survive app
+//   updates because the bundle is replaced but userData is not.
 const DATA_DIR = app.isPackaged ? app.getPath('userData') : APP_ROOT;
-try {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-} catch (err) {
-  console.error('[shell] could not create data dir:', err);
-}
+
+// .env lives in the writable data dir (packaged) or the repo (dev). The service
+// reads it from the same place via CLAUDECLAW_DATA_DIR.
 const ENV_PATH = path.join(DATA_DIR, '.env');
+
+// Service logs: the Node service logs via pino to stdout/stderr only (no file
+// writes, no repo-relative logs/ dir — verified in src/logger.ts), so there is
+// nothing log-path-related to redirect for the launchd space-in-path trap (MED-2).
 
 // ── Derived dashboard config ──────────────────────────────────────────
 // Recomputed after onboarding writes config, so finish() can load the live
@@ -78,6 +84,14 @@ function resolveServiceCommand() {
   if (fs.existsSync(distEntry)) {
     return { cmd: process.execPath, args: [distEntry], runAsNode: true };
   }
+  // In a packaged build the tsx fallback is never valid (node_modules is not
+  // shipped), so a missing dist/ is a build error, not a dev situation. Fail
+  // with a clear message instead of spawning a nonexistent tsx (IN-04).
+  if (app.isPackaged) {
+    throw new Error(
+      `Build incomplete: ${distEntry} is missing from the packaged app. Rebuild with \`npm run build\`.`,
+    );
+  }
   const tsxBin = path.join(
     APP_ROOT,
     'node_modules',
@@ -92,8 +106,9 @@ function startService() {
   const { cmd, args, runAsNode } = resolveServiceCommand();
   const childEnv = { ...process.env };
   if (runAsNode) childEnv.ELECTRON_RUN_AS_NODE = '1';
-  // Tell the service where to read/write its data (.env, store/). Matches the
-  // dir onboarding wrote the .env to above.
+  // Point the forked service at the writable data dir so its config.ts/env.ts
+  // resolve store/, db, and .env there (task 1). cwd stays APP_ROOT so the SDK
+  // still loads CLAUDE.md/skills from the code dir.
   childEnv.CLAUDECLAW_DATA_DIR = DATA_DIR;
 
   serviceProc = spawn(cmd, args, {
@@ -148,6 +163,143 @@ function waitForDashboard(timeoutMs = 30000, intervalMs = 400) {
   });
 }
 
+// ── Migration gate (run BEFORE forking the service) ────────────────────
+// The service's checkPendingMigrations() calls process.exit(1) on pending
+// migrations; under Electron that silently kills the forked child and the
+// dashboard never binds (RESEARCH Pitfall 3 / T-02-02 DoS). So we apply
+// migrations here FIRST via the non-interactive runner (src/migrate-runner.ts),
+// which never reads stdin and never exits — it returns a status. Because there
+// is no prompt and no exit, the main process can never deadlock on a [y/N] with
+// no TTY behind it.
+//
+// The runner is ESM/TS; we run it in a short-lived child process that prints a
+// single JSON status line. Packaged: the compiled dist/migrate-runner.js with
+// Electron's bundled Node (ELECTRON_RUN_AS_NODE). Dev: the TS source via tsx.
+function resolveMigrationRunner() {
+  const distRunner = path.join(APP_ROOT, 'dist', 'migrate-runner.js');
+  if (fs.existsSync(distRunner)) {
+    return { cmd: process.execPath, runnerPath: distRunner, runAsNode: true };
+  }
+  // Packaged builds ship dist/ but not node_modules, so the tsx fallback can
+  // only resolve a nonexistent binary and fail with an opaque spawn error.
+  // Treat a missing dist/ runner as a hard build error in packaged mode (IN-04).
+  if (app.isPackaged) {
+    throw new Error(
+      `Build incomplete: ${distRunner} is missing from the packaged app. Rebuild with \`npm run build\`.`,
+    );
+  }
+  const tsxBin = path.join(
+    APP_ROOT,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'tsx.cmd' : 'tsx',
+  );
+  // tsx can load the TS source directly in dev.
+  return { cmd: tsxBin, runnerPath: path.join(APP_ROOT, 'src', 'migrate-runner.ts'), runAsNode: false };
+}
+
+// Run migrations and resolve to a status object (never throws on a migration
+// failure — returns { status: 'failed', error }). Defensive: a spawn/parse
+// failure also resolves to 'failed' so the caller always gets a status.
+function runMigrationsStep() {
+  return new Promise((resolve) => {
+    let cmd, runnerPath, runAsNode;
+    try {
+      ({ cmd, runnerPath, runAsNode } = resolveMigrationRunner());
+    } catch (err) {
+      // Preserve the "always resolves to a status" contract (IN-04): a packaged
+      // build-incomplete error must surface as a failed migration state, not an
+      // unhandled rejection that crashes the boot.
+      resolve({ status: 'failed', error: String(err && err.message || err) });
+      return;
+    }
+    // A tiny driver that imports the runner, runs it against APP_ROOT/DATA_DIR,
+    // and prints exactly one JSON line prefixed so we can find it in the output.
+    const driver =
+      'import(process.env.__MIGRATE_RUNNER).then(async (m) => {' +
+      '  const r = await m.runMigrations({ assumeYes: true, projectRoot: process.env.__MIGRATE_ROOT, dataDir: process.env.__MIGRATE_DATA });' +
+      '  process.stdout.write("__MIGRATE_RESULT__" + JSON.stringify(r) + "\\n");' +
+      '}).catch((e) => {' +
+      '  process.stdout.write("__MIGRATE_RESULT__" + JSON.stringify({ status: "failed", error: String(e && e.message || e) }) + "\\n");' +
+      '});';
+    // Pass a MINIMAL env to the migration child (WR-04): migrations run
+    // arbitrary code, so they must not inherit the whole Electron parent
+    // environment (ANTHROPIC_API_KEY and other secrets). Allowlist only the
+    // process plumbing needed to launch (PATH/HOME/locale/runtime dir) plus the
+    // DB credential migrations legitimately need to open the encrypted store.
+    // This mirrors the scrubbing discipline getScrubbedSdkEnv applies to the
+    // verify spawn.
+    const ENV_ALLOWLIST = [
+      'PATH',
+      'HOME',
+      'TMPDIR',
+      'LANG',
+      'LC_ALL',
+      'LC_CTYPE',
+      'USER',
+      'LOGNAME',
+      'SHELL',
+      'XDG_RUNTIME_DIR',
+      'NODE_PATH',
+      'NODE_OPTIONS',
+      'SystemRoot', // Windows: required for child process startup
+      'TEMP',
+      'TMP',
+    ];
+    const childEnv = {
+      __MIGRATE_RUNNER: runAsNode
+        ? require('url').pathToFileURL(runnerPath).href
+        : runnerPath,
+      __MIGRATE_ROOT: APP_ROOT,
+      __MIGRATE_DATA: DATA_DIR,
+      // The migration runner resolves writable state under CLAUDECLAW_DATA_DIR.
+      CLAUDECLAW_DATA_DIR: DATA_DIR,
+    };
+    for (const key of ENV_ALLOWLIST) {
+      if (process.env[key] !== undefined) childEnv[key] = process.env[key];
+    }
+    // DB_ENCRYPTION_KEY is the one secret migrations need (to open the encrypted
+    // DB). Source it from the managed .env, not the inherited process env, so a
+    // stale exported value can't leak in.
+    const dbKey = cfg.readEnvFromFile(ENV_PATH, ['DB_ENCRYPTION_KEY']).DB_ENCRYPTION_KEY;
+    if (dbKey) childEnv.DB_ENCRYPTION_KEY = dbKey;
+    if (runAsNode) childEnv.ELECTRON_RUN_AS_NODE = '1';
+
+    let proc;
+    try {
+      // node/electron-node: pass the driver via --input-type=module + -e. tsx
+      // also accepts -e but loads the TS runner path from the env var.
+      const args = runAsNode
+        ? ['--input-type=module', '-e', driver]
+        : ['--eval', driver];
+      proc = spawn(cmd, args, { cwd: APP_ROOT, env: childEnv });
+    } catch (err) {
+      resolve({ status: 'failed', error: String(err) });
+      return;
+    }
+    let out = '';
+    proc.stdout.on('data', (b) => {
+      out += b.toString();
+    });
+    proc.stderr.on('data', (b) => process.stderr.write(`[migrate] ${b}`));
+    proc.on('error', (err) => resolve({ status: 'failed', error: String(err) }));
+    proc.on('exit', () => {
+      const marker = '__MIGRATE_RESULT__';
+      const idx = out.lastIndexOf(marker);
+      if (idx === -1) {
+        resolve({ status: 'failed', error: 'migration runner produced no status' });
+        return;
+      }
+      const line = out.slice(idx + marker.length).split('\n')[0];
+      try {
+        resolve(JSON.parse(line));
+      } catch (e) {
+        resolve({ status: 'failed', error: `could not parse migration status: ${String(e)}` });
+      }
+    });
+  });
+}
+
 function bootUrl(state, detail) {
   const file = path.join(__dirname, 'boot.html');
   const q = new URLSearchParams({ state });
@@ -185,6 +337,28 @@ function createWindow() {
 // configured-boot path and onboarding's finish().
 async function bootDashboard() {
   refreshConfig();
+
+  // Ensure the writable data dir exists before anything writes to it (migration
+  // backups, store/, .env). Recursive + idempotent.
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (err) {
+    console.error('[shell] could not create data dir:', err);
+  }
+
+  // Apply pending migrations BEFORE forking the service. Show a real "updating"
+  // state, not a spinner that dies. On failure, render a retry state instead of
+  // letting the service's process.exit(1) silently kill the boot.
+  if (mainWindow) await mainWindow.loadURL(bootUrl('migrating'));
+  const migration = await runMigrationsStep();
+  if (!mainWindow) return;
+  if (migration.status === 'failed') {
+    await mainWindow.loadURL(
+      bootUrl('migrating-failed', migration.error || 'A database update failed.'),
+    );
+    return;
+  }
+
   startService();
   const ready = await waitForDashboard();
   if (!mainWindow) return;
@@ -225,21 +399,74 @@ function sendLog(line) {
   }
 }
 
-// Spawn a command, stream stdout+stderr to the wizard, resolve on exit.
+// Lazily load getScrubbedSdkEnv from the compiled ESM dist/security.js (same
+// CJS→ESM interop reason as config.cjs's auth helpers: package.json is
+// "type":"module" so a bare require would throw ERR_REQUIRE_ESM). Used by
+// onb:verifyAuth to build the SDK subprocess env exactly as the live service
+// does (src/agent.ts), so only the chosen auth var reaches the spawned claude.
+let _securityPromise = null;
+function loadSecurity() {
+  if (!_securityPromise) {
+    const url = require('url').pathToFileURL(
+      path.join(APP_ROOT, 'dist', 'security.js'),
+    ).href;
+    // Cache only on success (WR-05): if import() rejects (e.g. dist/security.js
+    // missing in a partial build) we clear the cache so a later verifyAuth can
+    // retry once the file appears, instead of permanently re-returning the same
+    // rejected promise.
+    _securityPromise = import(url).catch((e) => {
+      _securityPromise = null;
+      throw e;
+    });
+  }
+  return _securityPromise;
+}
+
+// Spawn a command, stream stdout+stderr to the wizard, and ALSO capture stdout
+// so callers that need to parse output (e.g. setup-token) can read it. Resolves
+// on exit with { code, stdout, error? }.
+//   SECURITY: stdout may contain a credential (the setup-token). The captured
+//   string is returned to the caller for parsing only; before any chunk reaches
+//   the renderer log it is run through redactTokens so a sk-ant-oat/api token
+//   never lands in the visible #log element or renderer memory (CR-01). The raw
+//   (unredacted) stdout is still accumulated for extractOauthToken.
+const TOKEN_RE = /sk-ant-(?:oat|api)[0-9A-Za-z._-]+/g;
+function redactTokens(s) {
+  return s.replace(TOKEN_RE, 'sk-ant-***redacted***');
+}
 function runStreaming(cmd, args) {
   return new Promise((resolve) => {
     let proc;
     try {
       proc = spawn(cmd, args, { cwd: APP_ROOT, env: { ...process.env } });
     } catch (err) {
-      resolve({ code: -1, error: String(err) });
+      resolve({ code: -1, stdout: '', error: String(err) });
       return;
     }
-    proc.stdout.on('data', (b) => sendLog(b.toString()));
-    proc.stderr.on('data', (b) => sendLog(b.toString()));
-    proc.on('error', (err) => resolve({ code: -1, error: String(err) }));
-    proc.on('exit', (code) => resolve({ code: code ?? -1 }));
+    let stdout = '';
+    proc.stdout.on('data', (b) => {
+      const s = b.toString();
+      stdout += s; // keep raw for extractOauthToken
+      sendLog(redactTokens(s)); // never stream the raw token to the renderer
+    });
+    proc.stderr.on('data', (b) => sendLog(redactTokens(b.toString())));
+    proc.on('error', (err) => resolve({ code: -1, stdout, error: String(err) }));
+    proc.on('exit', (code) => resolve({ code: code ?? -1, stdout }));
   });
+}
+
+// Extract a CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token` stdout. The CLI
+// prints the 1-year token (prefix sk-ant-oat01…) on its own line. Match the
+// token shape rather than a label so we are robust to surrounding prose.
+//   SECURITY: the matched token is returned to the caller; never logged.
+function extractOauthToken(stdout) {
+  if (!stdout) return '';
+  // Drop '.' from the class (IN-02): the OAuth token format does not contain
+  // dots, so including it would swallow a trailing period from surrounding prose
+  // (e.g. "...token sk-ant-oat01abc.") into the captured value, producing an
+  // invalid token that later fails verifyAuth with a confusing error.
+  const m = stdout.match(/sk-ant-oat[0-9A-Za-z_-]+/);
+  return m ? m[0] : '';
 }
 
 function registerOnboardingHandlers() {
@@ -249,19 +476,20 @@ function registerOnboardingHandlers() {
       configured: cfg.isConfigured(ENV_PATH),
       hasCli: cli.ok,
       cliVersion: cli.version,
-      loggedIn: cfg.checkLogin(),
+      loggedIn: cfg.checkLogin(ENV_PATH),
     };
   });
 
   ipcMain.handle('onb:checkCli', () => cfg.checkClaudeCli());
 
+  // Install the CLI via the native installer (curl-based, lands ~/.local/bin/claude
+  // and auto-updates) — NOT the deprecated `npm i -g @anthropic-ai/claude-code`,
+  // which needs a global npm/Node the operator may not have. Per-row retry stays
+  // the wizard's contract (it re-invokes this on failure).
   ipcMain.handle('onb:installCli', async () => {
     sendLog('Installing Claude Code…\n');
-    const res = await runStreaming('npm', [
-      'install',
-      '-g',
-      '@anthropic-ai/claude-code',
-    ]);
+    const { cmd, args } = cfg.nativeInstallCommand();
+    const res = await runStreaming(cmd, args);
     const cli = cfg.checkClaudeCli();
     return {
       ok: cli.ok,
@@ -270,35 +498,150 @@ function registerOnboardingHandlers() {
     };
   });
 
-  ipcMain.handle('onb:checkLogin', () => ({ loggedIn: cfg.checkLogin() }));
+  ipcMain.handle('onb:checkLogin', () => ({ loggedIn: cfg.checkLogin(ENV_PATH) }));
 
+  // Sign in via `claude setup-token` (A1: spawn+capture works from a non-TTY
+  // Electron subprocess). The CLI walks the user through browser OAuth and prints
+  // a 1-year CLAUDE_CODE_OAUTH_TOKEN to stdout; we capture it and persist it via
+  // the tested precedence helper. Success = token captured, NOT a filesystem
+  // heuristic (creds otherwise live in the encrypted macOS Keychain).
+  //   SECURITY: the token is never logged; only the OAuth prompts stream to the
+  //   wizard log, and the parsed token goes straight to writeEnv (0600).
   ipcMain.handle('onb:claudeLogin', async () => {
-    // `claude login` opens its own browser OAuth flow and exits when done.
     sendLog('Opening Claude sign-in…\n');
-    const res = await runStreaming('claude', ['login']);
-    const loggedIn = cfg.checkLogin();
-    return {
-      ok: loggedIn,
-      error: loggedIn
-        ? ''
-        : res.error || 'Sign-in did not complete. Try again.',
-    };
+    const bin = cfg.claudeBinaryPath();
+    const res = await runStreaming(bin, ['setup-token']);
+    const token = extractOauthToken(res.stdout);
+    if (!token) {
+      return {
+        ok: false,
+        error: res.error || 'Sign-in did not complete — no token was captured. Try again.',
+      };
+    }
+    try {
+      const delta = await cfg.resolveAuthWrite('oauth', token);
+      cfg.writeEnv(ENV_PATH, delta);
+    } catch (err) {
+      return { ok: false, error: `Captured the token but could not save it: ${String(err)}` };
+    }
+    return { ok: true };
   });
 
   // Own auth precedence: OAuth and an API key must never both be active, or a
   // stale ANTHROPIC_API_KEY silently wins over the login (the crash-loop trap).
-  ipcMain.handle('onb:saveAuth', (_e, payload) => {
+  // Delegate ENTIRELY to the tested resolveAuthWrite so the never-coexist
+  // invariant has one source of truth.
+  ipcMain.handle('onb:saveAuth', async (_e, payload) => {
     try {
-      if (payload && payload.mode === 'apikey' && payload.key) {
-        cfg.writeEnv(ENV_PATH, { ANTHROPIC_API_KEY: payload.key.trim() });
-      } else {
-        // OAuth path — clear any stored key so the login is the active source.
-        cfg.writeEnv(ENV_PATH, { ANTHROPIC_API_KEY: null });
-      }
+      const p = payload || {};
+      const mode = p.mode === 'apikey' ? 'apikey' : 'oauth';
+      const credential = mode === 'apikey' ? (p.key || '').trim() : undefined;
+      const delta = await cfg.resolveAuthWrite(mode, credential);
+      cfg.writeEnv(ENV_PATH, delta);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  });
+
+  // Which auth source is live, for Settings > Account confirmation (D1).
+  // 'apikey' | 'oauth' | 'none'.
+  ipcMain.handle('onb:getAuthSource', async () => {
+    try {
+      // File-only read (CR-02): the app owns auth precedence (D1), so a stale
+      // exported ANTHROPIC_API_KEY in the Electron parent env must never outrank
+      // the credential the wizard actually wrote to the .env.
+      const env = cfg.readEnvFromFile(ENV_PATH, [
+        'ANTHROPIC_API_KEY',
+        'CLAUDE_CODE_OAUTH_TOKEN',
+      ]);
+      const source = await cfg.activeAuthSource(env);
+      return { ok: true, source };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+
+  // Prove the captured credential ACTUALLY authenticates (MED-3): read the
+  // credential from the data-dir .env, build the SDK subprocess env via
+  // getScrubbedSdkEnv (so only the chosen auth var is present, exactly like
+  // src/agent.ts), spawn the native `claude` binary on a trivial non-interactive
+  // prompt, and return ok only if it returns a model reply — not merely if a
+  // token string exists. On failure return the stderr reason.
+  //   SECURITY: the token is never logged; getScrubbedSdkEnv strips every other
+  //   secret from the subprocess env so a compromised prompt can't read them.
+  ipcMain.handle('onb:verifyAuth', async () => {
+    let getScrubbedSdkEnv;
+    try {
+      ({ getScrubbedSdkEnv } = await loadSecurity());
+    } catch (err) {
+      return { ok: false, error: `Could not load auth verifier: ${String(err)}` };
+    }
+    // File-only read (CR-02): verification must authenticate with the credential
+    // the operator chose (written to the .env), never a stale ANTHROPIC_API_KEY
+    // inherited from the Electron parent environment.
+    const secrets = cfg.readEnvFromFile(ENV_PATH, [
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_API_KEY',
+    ]);
+    if (!secrets.CLAUDE_CODE_OAUTH_TOKEN && !secrets.ANTHROPIC_API_KEY) {
+      return { ok: false, error: 'No credential to verify. Sign in first.' };
+    }
+    // Enforce the never-coexist invariant at the spawn boundary (WR-01): resolve
+    // the single active source and forward ONLY that var, so a hand-edited or
+    // contaminated .env can never push both credentials into the SDK subprocess.
+    const source = await cfg.activeAuthSource(secrets); // 'apikey' | 'oauth' | 'none'
+    const sdkEnv = getScrubbedSdkEnv(
+      source === 'apikey'
+        ? { ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY }
+        : { CLAUDE_CODE_OAUTH_TOKEN: secrets.CLAUDE_CODE_OAUTH_TOKEN },
+    );
+    const bin = cfg.claudeBinaryPath();
+    sendLog('Checking your sign-in…\n');
+    return await new Promise((resolve) => {
+      let proc;
+      try {
+        proc = spawn(bin, ['-p', 'reply with the single word: ok'], {
+          cwd: APP_ROOT,
+          env: sdkEnv,
+        });
+      } catch (err) {
+        resolve({ ok: false, error: String(err) });
+        return;
+      }
+      let out = '';
+      let errOut = '';
+      const timer = setTimeout(() => {
+        try {
+          proc.kill();
+        } catch {
+          /* gone */
+        }
+        resolve({ ok: false, error: 'Verification timed out. Check your connection and try again.' });
+      }, 60000);
+      proc.stdout.on('data', (b) => {
+        out += b.toString();
+      });
+      proc.stderr.on('data', (b) => {
+        errOut += b.toString();
+      });
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        resolve({ ok: false, error: String(err) });
+      });
+      proc.on('exit', (code) => {
+        clearTimeout(timer);
+        if (code === 0 && out.trim()) {
+          resolve({ ok: true });
+        } else {
+          resolve({
+            ok: false,
+            error:
+              (errOut.trim() || 'Sign-in could not be verified.').slice(0, 400),
+          });
+        }
+      });
+    });
   });
 
   ipcMain.handle('onb:saveTransport', (_e, payload) => {
@@ -362,13 +705,27 @@ if (!gotLock) {
   app.whenReady().then(() => {
     if (app.isPackaged) {
       try {
-        app.setLoginItemSettings({ openAtLogin: true });
+        // PKG-04 reboot persistence. A5: on macOS 13+ the registration is more
+        // reliable with type:'mainAppService' (Electron routes it through the
+        // SMAppService API); on older macOS the param is ignored. We pin the
+        // minimum supported macOS at 13.0 (Ventura) — recorded in the SUMMARY —
+        // so the mainAppService path is always the one in effect for this build.
+        app.setLoginItemSettings({ openAtLogin: true, type: 'mainAppService' });
       } catch (err) {
         console.warn('[shell] could not set login item:', err);
       }
     }
 
     registerOnboardingHandlers();
+
+    // Boot-screen Retry for the migrating-failed state: re-run the migration
+    // gate + service boot. Returns nothing useful; bootDashboard drives the UI.
+    ipcMain.handle('boot:retryMigration', async () => {
+      await bootDashboard().catch((err) =>
+        console.error('[shell] retry bootDashboard:', err),
+      );
+      return { ok: true };
+    });
 
     boot().catch((err) => {
       console.error('[shell] boot failed:', err);
