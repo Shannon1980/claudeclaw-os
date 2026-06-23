@@ -84,9 +84,14 @@
   "build": {
     "appId": "com.claudeclaw.app",
     "productName": "ClaudeClaw",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "asar": false,
     "files": [
       "electron/**",
-      "dist/**"
+      "dist/**",
+      "package.json"
     ],
     "extraResources": [
       {
@@ -103,7 +108,14 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg"
+      "target": "dmg",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": {
+        "teamId": "${env.APPLE_TEAM_ID}"
+      }
     },
     "win": {
       "target": "nsis"

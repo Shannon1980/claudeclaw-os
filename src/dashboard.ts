@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server';
 
 import fs from 'fs';
 import path from 'path';
-import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_URL, PROJECT_ROOT, STORE_DIR, WHATSAPP_ENABLED, SLACK_USER_TOKEN, CONTEXT_LIMIT, agentDefaultModel, CLAUDECLAW_CONFIG } from './config.js';
+import { AGENT_ID, ALLOWED_CHAT_ID, DASHBOARD_PORT, DASHBOARD_TOKEN, DASHBOARD_URL, PROJECT_ROOT, STORE_DIR, ENV_PATH, WHATSAPP_ENABLED, SLACK_USER_TOKEN, CONTEXT_LIMIT, agentDefaultModel, CLAUDECLAW_CONFIG } from './config.js';
 import { isValidClaudeModel } from './models.js';
 import crypto from 'crypto';
 import {
@@ -3165,7 +3165,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       return c.json({ error: 'unknown kill switch: ' + key }, 400);
     }
     try {
-      const envPath = path.join(PROJECT_ROOT, '.env');
+      const envPath = ENV_PATH;
       const { setEnvKey } = await import('./env-write.js');
       setEnvKey(envPath, key, enabled ? 'true' : 'false');
       logger.info({ key, enabled }, 'Kill switch toggled via dashboard');

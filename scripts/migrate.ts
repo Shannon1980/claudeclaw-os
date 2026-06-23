@@ -7,10 +7,21 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+// Read-only migration definitions ship with the code (PROJECT_ROOT). Writable
+// state — the .applied.json marker, store/, and backups — lives under DATA_DIR,
+// which mirrors config.ts: CLAUDECLAW_DATA_DIR when set (the packaged app's
+// writable per-user dir), else PROJECT_ROOT (the checkout, unchanged).
+const rawDataDir = process.env.CLAUDECLAW_DATA_DIR;
+const DATA_DIR = rawDataDir
+  ? path.resolve(rawDataDir.startsWith('~/') || rawDataDir === '~'
+      ? path.join(process.env.HOME || '', rawDataDir.slice(1))
+      : rawDataDir)
+  : PROJECT_ROOT;
 const MIGRATIONS_DIR = path.join(PROJECT_ROOT, 'migrations');
 const VERSION_FILE = path.join(MIGRATIONS_DIR, 'version.json');
-const APPLIED_FILE = path.join(MIGRATIONS_DIR, '.applied.json');
-const STORE_DIR = path.join(PROJECT_ROOT, 'store');
+const APPLIED_FILE = path.join(DATA_DIR, 'migrations', '.applied.json');
+const STORE_DIR = path.join(DATA_DIR, 'store');
 
 interface VersionRegistry {
   migrations: Record<string, string[]>;
@@ -101,6 +112,7 @@ async function main(): Promise<void> {
     // Fresh clone — store/ has never been created, bot has never run.
     // Auto-initialise .applied.json to the latest version; nothing to migrate.
     if (latest) {
+      fs.mkdirSync(path.dirname(APPLIED_FILE), { recursive: true });
       fs.writeFileSync(APPLIED_FILE, JSON.stringify({ lastApplied: latest }, null, 2) + '\n');
     }
     console.log(`Fresh install detected. Initialised migrations at ${latest ?? 'none'}.`);
@@ -263,6 +275,7 @@ async function main(): Promise<void> {
 
     // Write lastApplied after each version fully succeeds
     const state: AppliedState = { lastApplied: version };
+    fs.mkdirSync(path.dirname(APPLIED_FILE), { recursive: true });
     fs.writeFileSync(APPLIED_FILE, JSON.stringify(state, null, 2) + '\n');
   }
 

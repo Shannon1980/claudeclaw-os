@@ -6,7 +6,7 @@ import { createBot } from './bot.js';
 import { createSlackBot, createSlackSender, type SlackBot, type SlackSender } from './slack-bot.js';
 import { splitMessage } from './format.js';
 import { checkPendingMigrations } from './migrations.js';
-import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
+import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, DATA_DIR, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
 import { startDashboard } from './dashboard.js';
 import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
 import { initSecurity, setAuditCallback } from './security.js';
@@ -117,7 +117,7 @@ function releaseLock(): void {
 
 async function main(): Promise<void> {
   
-  checkPendingMigrations(PROJECT_ROOT);
+  checkPendingMigrations(PROJECT_ROOT, DATA_DIR);
 
   if (AGENT_ID === 'main') {
     showBanner();

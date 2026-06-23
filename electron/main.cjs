@@ -27,7 +27,20 @@ const cfg = require('./config.cjs');
 const APP_ROOT = app.isPackaged
   ? path.join(process.resourcesPath, 'app')
   : path.join(__dirname, '..');
-const ENV_PATH = path.join(APP_ROOT, '.env');
+
+// Writable data dir. The packaged bundle (APP_ROOT) is read-only in
+// /Applications, so the service's writable state (.env, store/, uploads) goes
+// to Electron's per-user userData dir instead. The service honours this via the
+// CLAUDECLAW_DATA_DIR env var (see DATA_DIR in src/config.ts); APP_ROOT stays
+// the code root so bundled agents/migrations/warroom still resolve from cwd.
+// In dev, DATA_DIR == APP_ROOT (the checkout), so behaviour is unchanged.
+const DATA_DIR = app.isPackaged ? app.getPath('userData') : APP_ROOT;
+try {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+} catch (err) {
+  console.error('[shell] could not create data dir:', err);
+}
+const ENV_PATH = path.join(DATA_DIR, '.env');
 
 // ── Derived dashboard config ──────────────────────────────────────────
 // Recomputed after onboarding writes config, so finish() can load the live
@@ -79,6 +92,9 @@ function startService() {
   const { cmd, args, runAsNode } = resolveServiceCommand();
   const childEnv = { ...process.env };
   if (runAsNode) childEnv.ELECTRON_RUN_AS_NODE = '1';
+  // Tell the service where to read/write its data (.env, store/). Matches the
+  // dir onboarding wrote the .env to above.
+  childEnv.CLAUDECLAW_DATA_DIR = DATA_DIR;
 
   serviceProc = spawn(cmd, args, {
     cwd: APP_ROOT,

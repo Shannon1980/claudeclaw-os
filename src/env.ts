@@ -1,5 +1,22 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+
+// Resolve the .env location. Mirrors DATA_DIR in config.ts but is inlined
+// here because config.ts imports this module (importing it back would be a
+// cycle). When CLAUDECLAW_DATA_DIR is set (the packaged desktop app), .env
+// lives in that writable dir; otherwise it stays at process.cwd() as before
+// (the launchd service runs with cwd = the checkout, where .env already is).
+function envFilePath(): string {
+  const dir = process.env.CLAUDECLAW_DATA_DIR;
+  if (dir) {
+    const expanded = dir.startsWith('~/') || dir === '~'
+      ? path.join(os.homedir(), dir.slice(1))
+      : dir;
+    return path.join(path.resolve(expanded), '.env');
+  }
+  return path.join(process.cwd(), '.env');
+}
 
 /**
  * Parse the .env file and return values for the requested keys.
@@ -8,7 +25,7 @@ import path from 'path';
  * so they don't leak to child processes.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
-  const envFile = path.join(process.cwd(), '.env');
+  const envFile = envFilePath();
   let content: string;
   try {
     content = fs.readFileSync(envFile, 'utf-8');

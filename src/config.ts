@@ -141,7 +141,21 @@ const __dirname = path.dirname(__filename);
 // The SDK uses this as cwd, which causes Claude Code to load our CLAUDE.md
 // and all global skills from ~/.claude/skills/ via settingSources.
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+
+// ── Writable data directory ───────────────────────────────────────────
+// DATA_DIR holds everything the service writes at runtime: store/ (the DB,
+// pid files, backups, avatars), the managed .env, and uploads. It defaults
+// to PROJECT_ROOT so the launchd service and dev (which run from a writable
+// checkout) are completely unchanged. The packaged desktop app sets
+// CLAUDECLAW_DATA_DIR to a per-user writable location (Electron's userData)
+// because the app bundle in /Applications is read-only — the code root
+// (PROJECT_ROOT) stays read-only and only DATA_DIR is written.
+// (expandHome is a hoisted function declaration below, so it's usable here.)
+export const DATA_DIR = process.env.CLAUDECLAW_DATA_DIR
+  ? path.resolve(expandHome(process.env.CLAUDECLAW_DATA_DIR))
+  : PROJECT_ROOT;
+export const STORE_DIR = path.resolve(DATA_DIR, 'store');
+export const ENV_PATH = path.resolve(DATA_DIR, '.env');
 
 // ── External config directory ────────────────────────────────────────
 // Personal config files (CLAUDE.md, agent.yaml, agent CLAUDE.md) can live
