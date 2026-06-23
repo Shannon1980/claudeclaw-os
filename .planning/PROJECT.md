@@ -63,6 +63,8 @@ A terminal Claude Code session in the agentic-os workspace and the ClaudeClaw ch
 
 (Defining v2.0 requirements — see `specs/operator-product/`.)
 
+- Phase 1 (Desktop Shell & Onboarding) complete at code level: PKG-01..05 — Electron shell, non-interactive migration runner, no-terminal Claude setup (spawn+capture, A1 confirmed), file-only auth precedence (D1), login-item registration. Empirical PKG-01..04 confirmation awaits a signed `.dmg` build (deferred on MED-4: Electron ABI 115 has no better-sqlite3 prebuilt) — tracked in `01-HUMAN-UAT.md`.
+
 ### Deferred (v1.0 cut — backlog)
 
 <!-- Planned under v1.0 but not executed; deferred at the pivot to the operator-product direction. -->
@@ -129,4 +131,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-22 after v1.0 (Agentic OS Consolidation) milestone close; pivoting to v2.0 Operator Product*
+*Last updated: 2026-06-22 — v2.0 Phase 1 (Desktop Shell & Onboarding) complete at code level; human-UAT pending on signed .dmg build (MED-4)*
