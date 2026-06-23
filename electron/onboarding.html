@@ -463,7 +463,15 @@
         if (name === 'done') {
           nextBtn.disabled = true;
           nextBtn.textContent = 'Starting…';
-          await api.finish();
+          const r = await api.finish();
+          if (!r || !r.ok) {
+            // A failed finish (e.g. secret write failed) would otherwise leave
+            // the wizard stuck on "Starting…" forever with no error surfaced.
+            alert((r && r.error) || 'Could not finish setup. Please try again.');
+            nextBtn.disabled = false;
+            nextBtn.textContent = 'Open dashboard';
+            return;
+          }
           return; // main navigates to the dashboard
         }
         await go(step + 1);
