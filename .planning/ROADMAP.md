@@ -87,7 +87,7 @@ Plans:
 Plans:
 - [x] 03-01-PLAN.md — Wave 0 failing tests pinning PERM-01..04 (gate/config/queue/contract/gate-wiring)
 - [x] 03-02-PLAN.md — Slice A engine core: gate.ts (classify/resolve/Tier4 lock/audit) + permissions-config
-- [ ] 03-03-PLAN.md — Slice B queue + wiring: approval_queue (v1.2.3) + canUseTool replaces bypass, gate threaded through all runs + routine seam
+- [x] 03-03-PLAN.md — Slice B queue + wiring: approval_queue (v1.2.3) + canUseTool replaces bypass, gate threaded through all runs + routine seam
 - [ ] 03-04-PLAN.md — Slice C surfaces: /api/permissions + /api/approvals, Settings Permissions section, Home approval item, inline chat ask (human-verify)
 **UI hint**: yes
 
@@ -159,7 +159,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
-| 3. Permissions & Autonomy | 2/4 | In Progress|  |
+| 3. Permissions & Autonomy | 3/4 | In Progress|  |
 | 4. Activity Feed | 0/? | Not started | - |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |

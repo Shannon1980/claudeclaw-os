@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
 status: executing
-last_updated: "2026-06-23T20:49:58.859Z"
+last_updated: "2026-06-23T21:03:36.171Z"
 last_activity: 2026-06-23
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 25
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 03 (permissions-autonomy) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-06-23
 
@@ -55,6 +55,7 @@ Last activity: 2026-06-23
 | Phase 01 P04 | ~2min | 2 tasks | 5 files |
 | Phase 03 P01 | 5min | 3 tasks | 5 files |
 | Phase 03 P02 | 6min | 2 tasks | 4 files |
+| Phase 03 P03 | ~25min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 01]: 01-04: landed version-agnostic signing config (entitlements.mac.plist, notarize.cjs afterSign hook that no-ops without creds, package.json build.mac hardenedRuntime+entitlements+afterSign); @electron/notarize ^3.1.1 official Electron org; no version bumps
 - [Phase ?]: [Phase 01]: 01-04: operator DEFERS the real signed .dmg build on MED-4 (electron 33 ABI 115 has no better-sqlite3 prebuilt); PKG-01 NOT verified for real users; SMOKE checklist authored, build steps PENDING + interactive find-identity precondition + MED-3 real-auth round-trip step
 - [Phase ?]: [Phase 03]: 03-02: gate engine GREEN — Tier 4 ask-lock precedes mode/override; unknown -> Tier 3; PERMISSION_GATE_ENABLED kill switch + try/catch degrade to Tier 3 ask (L-2); makeCanUseTool never returns updatedPermissions (D-05)
+- [Phase ?]: [Phase 03]: 03-03: bypassPermissions removed; query() runs canUseTool gate; omitted gateCtx defaults to safe background ask/queue (P-5)
+- [Phase ?]: [Phase 03]: 03-03: approval_queue dual-written (db.ts createSchema + migration v1.2.3); approve/deny status-guarded WHERE status='pending' + .changes===1 = replay-once (L-3); migration AUTHORED + temp-DB validated but NOT applied to live store/ (operator runs npm run migrate before restart)
 
 ### Pending Todos
 
@@ -103,8 +106,8 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-23T20:49:53.000Z
-Stopped at: Phase 3 planned (4 plans, checker-approved) — paused before execution per user
+Last session: 2026-06-23T21:03:36.168Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
