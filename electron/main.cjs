@@ -478,7 +478,10 @@ function registerOnboardingHandlers() {
   // 'apikey' | 'oauth' | 'none'.
   ipcMain.handle('onb:getAuthSource', async () => {
     try {
-      const env = cfg.readEnv(ENV_PATH, [
+      // File-only read (CR-02): the app owns auth precedence (D1), so a stale
+      // exported ANTHROPIC_API_KEY in the Electron parent env must never outrank
+      // the credential the wizard actually wrote to the .env.
+      const env = cfg.readEnvFromFile(ENV_PATH, [
         'ANTHROPIC_API_KEY',
         'CLAUDE_CODE_OAUTH_TOKEN',
       ]);
@@ -504,17 +507,25 @@ function registerOnboardingHandlers() {
     } catch (err) {
       return { ok: false, error: `Could not load auth verifier: ${String(err)}` };
     }
-    const secrets = cfg.readEnv(ENV_PATH, [
+    // File-only read (CR-02): verification must authenticate with the credential
+    // the operator chose (written to the .env), never a stale ANTHROPIC_API_KEY
+    // inherited from the Electron parent environment.
+    const secrets = cfg.readEnvFromFile(ENV_PATH, [
       'CLAUDE_CODE_OAUTH_TOKEN',
       'ANTHROPIC_API_KEY',
     ]);
     if (!secrets.CLAUDE_CODE_OAUTH_TOKEN && !secrets.ANTHROPIC_API_KEY) {
       return { ok: false, error: 'No credential to verify. Sign in first.' };
     }
-    const sdkEnv = getScrubbedSdkEnv({
-      CLAUDE_CODE_OAUTH_TOKEN: secrets.CLAUDE_CODE_OAUTH_TOKEN || undefined,
-      ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY || undefined,
-    });
+    // Enforce the never-coexist invariant at the spawn boundary (WR-01): resolve
+    // the single active source and forward ONLY that var, so a hand-edited or
+    // contaminated .env can never push both credentials into the SDK subprocess.
+    const source = await cfg.activeAuthSource(secrets); // 'apikey' | 'oauth' | 'none'
+    const sdkEnv = getScrubbedSdkEnv(
+      source === 'apikey'
+        ? { ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY }
+        : { CLAUDE_CODE_OAUTH_TOKEN: secrets.CLAUDE_CODE_OAUTH_TOKEN },
+    );
     const bin = cfg.claudeBinaryPath();
     sendLog('Checking your sign-in…\n');
     return await new Promise((resolve) => {

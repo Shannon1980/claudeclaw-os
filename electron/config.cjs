@@ -84,11 +84,28 @@ function parseEnvFile(envPath) {
   return out;
 }
 
-// Read specific keys, preferring process.env then the .env file.
+// Read specific keys, preferring process.env then the .env file. Use this ONLY
+// for non-secret operational values (e.g. DASHBOARD_PORT) where honoring an
+// explicit environment override is desirable. NEVER use it for auth credentials:
+// a stale inherited ANTHROPIC_API_KEY in the Electron parent env would outrank a
+// fresh OAuth login written to the .env (the crash-loop trap, CR-02). Auth reads
+// must go through readEnvFromFile.
 function readEnv(envPath, keys) {
   const fileVals = parseEnvFile(envPath || resolveEnvPath());
   const out = {};
   for (const key of keys) out[key] = process.env[key] || fileVals[key] || '';
+  return out;
+}
+
+// Read specific keys from the managed .env file ONLY (never process.env). This
+// is the auth-precedence read: it keeps the desktop shell consistent with
+// isConfigured/checkLogin (both file-only) so the app owns auth precedence (D1)
+// and a stale exported ANTHROPIC_API_KEY cannot silently outrank a fresh OAuth
+// login written to the .env (CR-02).
+function readEnvFromFile(envPath, keys) {
+  const fileVals = parseEnvFile(envPath || resolveEnvPath());
+  const out = {};
+  for (const key of keys) out[key] = fileVals[key] || '';
   return out;
 }
 
@@ -182,6 +199,7 @@ module.exports = {
   parseEnvFile,
   resolveEnvPath,
   readEnv,
+  readEnvFromFile,
   writeEnv,
   isConfigured,
   checkClaudeCli,
