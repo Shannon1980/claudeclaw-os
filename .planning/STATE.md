@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
-status: planning
-last_updated: "2026-06-22T14:29:54.009Z"
-last_activity: 2026-06-22
+status: ready_to_plan
+last_updated: 2026-06-23T00:34:16.707Z
+last_activity: 2026-06-23
 progress:
   total_phases: 8
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 4
+  completed_plans: 4
+  percent: 13
+stopped_at: Phase 01 complete (4/4) — ready to discuss Phase 2
 ---
 
 # Project State
@@ -20,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** A local-first desktop AI chief-of-staff for business operators — install with no terminal, runs the real Claude engine on the operator's own machine, keeps work moving and never lets anything fall through.
-**Current focus:** Phase 1 — Desktop Shell & Onboarding (the gating prerequisite: zero-terminal install)
+**Current focus:** Phase 2 — routines
 
 ## Current Position
 
-Phase: Not started (roadmap drafted)
-Plan: —
-Status: Roadmap created, awaiting phase planning
-Last activity: 2026-06-22 — Milestone v2.0 roadmap created (8 phases)
+Phase: 2
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-23
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 4
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -41,7 +42,7 @@ Last activity: 2026-06-22 — Milestone v2.0 roadmap created (8 phases)
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -49,6 +50,10 @@ Last activity: 2026-06-22 — Milestone v2.0 roadmap created (8 phases)
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01 P01 | 30 | 2 tasks | 5 files |
+| Phase 01 P02 | ~25min | 3 tasks | 11 files |
+| Phase 01 P03 | ~5min | 3 tasks | 5 files |
+| Phase 01 P04 | ~2min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -62,6 +67,13 @@ Recent decisions affecting current work:
 - Build sequence is gated by what ships, not what is fun: Electron shell first (no product until a non-developer can install with no terminal), then Routines, then the trust chain.
 - Trust chain spine: Permissions (rules) → action → Activity (operator view) → Audit (technical truth), with Memory feeding the rules. Phases 3→4→5 build the chain in order; Phase 6 (Memory) depends on Phase 3.
 - The reframe is mostly a view layer over data the engine already produces (audit_log, hive_mind, memories, scheduled_tasks, token_usage). Most operator surfaces are UI→API→DB vertical slices (mvp mode).
+- [Phase ?]: A1 resolved: claude setup-token captures a token from a non-TTY Electron subprocess; plan 03 uses spawn+capture path.
+- [Phase ?]: MED-2: desktop service logs via pino to stdout/stderr only (no file/log-dir) — no log-path redirect needed for the launchd space trap
+- [Phase ?]: MED-4 BLOCKER: better-sqlite3 11.10.0 has no Electron-v115 prebuilt (lowest v116); pinned electron ^33.4.11 = ABI 115 forces a source compile the broken toolchain can't do — needs a version-bump decision before plan 04 build
+- [Phase 01]: 01-03: MED-1 interop = lazy await import of compiled dist ESM (cached, async accessors), not a CJS shim; config.cjs/main.cjs auth+security helpers are async
+- [Phase 01]: 01-03: setup-token spawn+capture wired (success=token captured); onb:verifyAuth proves a real claude round-trip via getScrubbedSdkEnv; login item pinned macOS 13.0 with type:mainAppService (A5)
+- [Phase ?]: [Phase 01]: 01-04: landed version-agnostic signing config (entitlements.mac.plist, notarize.cjs afterSign hook that no-ops without creds, package.json build.mac hardenedRuntime+entitlements+afterSign); @electron/notarize ^3.1.1 official Electron org; no version bumps
+- [Phase ?]: [Phase 01]: 01-04: operator DEFERS the real signed .dmg build on MED-4 (electron 33 ABI 115 has no better-sqlite3 prebuilt); PKG-01 NOT verified for real users; SMOKE checklist authored, build steps PENDING + interactive find-identity precondition + MED-3 real-auth round-trip step
 
 ### Pending Todos
 
@@ -74,6 +86,8 @@ None yet.
 - Phase 3: the permission gate sits at the Agent SDK tool-call layer — before any external/irreversible tool runs it must consult the model, log the decision, and proceed/queue/block. New surface, not just a view.
 - Phase 5: audit_log is encryption-adjacent and append-only; reads of any encrypted columns must go through ClaudeClaw's decryption path, not raw better-sqlite3 reads of ciphertext.
 - All phases: schema changes go through versioned migrations (`migrations/<version>/`, `add-migration` skill) — never inline-edit the schema.
+- ABI gap (01-02 MED-4): better-sqlite3 11.10.0 has no Electron-v115 prebuilt (lowest v116); pinned electron ^33.4.11 = ABI 115, so install-app-deps falls back to a source compile the broken toolchain cannot do. W4 .dmg build will fail under current pins. Needs a version-bump decision (electron 35+ for ABI116, or a better-sqlite3 version publishing v115) before plan 04.
+- PKG-01 DEFERRED: signed/notarized .dmg build blocked on MED-4 (electron ^33.4.11 ABI 115 has no better-sqlite3 prebuilt; lowest is electron-v116). 01-04 landed the signing config (entitlements + notarize hook + build.mac); the real build + clean-machine smoke (SMOKE §§0-5 incl MED-3 round-trip) are deferred until electron is bumped >=35 (ABI 116) + install-app-deps on an isolated checkout, OR better-sqlite3 repinned. PKG-01 NOT verified for real users.
 
 ## Deferred Items
 
@@ -87,8 +101,8 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-22
-Stopped at: v2.0 roadmap created (8 phases)
+Last session: 2026-06-23T00:14:11.051Z
+Stopped at: Completed 01-04-PLAN.md (PKG-01 DEFERRED on MED-4)
 Resume file: None
 
 ## Operator Next Steps

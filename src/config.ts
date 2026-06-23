@@ -141,7 +141,20 @@ const __dirname = path.dirname(__filename);
 // The SDK uses this as cwd, which causes Claude Code to load our CLAUDE.md
 // and all global skills from ~/.claude/skills/ via settingSources.
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
+
+// ── Writable data dir (packaged-app redirect) ────────────────────────────
+// In a signed .app, PROJECT_ROOT (resourcesPath/app) is read-only under
+// Gatekeeper, so the desktop shell sets CLAUDECLAW_DATA_DIR to a writable
+// per-user dir (app.getPath('userData')) and forks the service with it. When
+// set, all writable state (store/, db, .env) lives under it; PROJECT_ROOT
+// itself does NOT move — it stays the code/CLAUDE.md/skills dir the SDK loads.
+// Read from the shell env only (no .env fallback): it must be known before the
+// .env is even located. Unset => behavior is byte-identical to the dev/terminal
+// path (STORE_DIR under PROJECT_ROOT).
+const dataDir = process.env.CLAUDECLAW_DATA_DIR;
+export const STORE_DIR = dataDir
+  ? path.join(dataDir, 'store')
+  : path.resolve(PROJECT_ROOT, 'store');
 
 // ── External config directory ────────────────────────────────────────
 // Personal config files (CLAUDE.md, agent.yaml, agent CLAUDE.md) can live

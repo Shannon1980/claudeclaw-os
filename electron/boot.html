@@ -79,6 +79,18 @@
         100% { left: 100%; }
       }
       .hidden { display: none; }
+      button {
+        margin-top: 6px;
+        padding: 8px 18px;
+        font-size: 13px;
+        font-family: inherit;
+        color: var(--fg);
+        background: var(--track);
+        border: 1px solid var(--track);
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); }
     </style>
   </head>
   <body>
@@ -87,6 +99,7 @@
       <h1 id="title">Starting ClaudeClaw</h1>
       <p id="detail">Bringing your assistant online…</p>
       <div class="bar" id="bar"><span></span></div>
+      <button id="retry" class="hidden">Try again</button>
     </div>
     <script>
       const params = new URLSearchParams(location.search);
@@ -95,12 +108,24 @@
       const title = document.getElementById('title');
       const detailEl = document.getElementById('detail');
       const bar = document.getElementById('bar');
+      const retry = document.getElementById('retry');
 
       const copy = {
         starting: {
           title: 'Starting ClaudeClaw',
           detail: 'Bringing your assistant online…',
           bar: true,
+        },
+        migrating: {
+          title: 'Updating your assistant',
+          detail: 'Applying database updates. This only takes a moment…',
+          bar: true,
+        },
+        'migrating-failed': {
+          title: 'Update did not finish',
+          detail: 'A database update could not be applied. You can try again.',
+          bar: false,
+          retry: true,
         },
         'needs-setup': {
           title: 'Almost there',
@@ -118,6 +143,15 @@
       title.textContent = c.title;
       detailEl.textContent = detail || c.detail;
       if (!c.bar) bar.classList.add('hidden');
+      if (c.retry) {
+        retry.classList.remove('hidden');
+        retry.addEventListener('click', () => {
+          retry.disabled = true;
+          if (window.claudeclaw && window.claudeclaw.boot) {
+            window.claudeclaw.boot.retryMigration();
+          }
+        });
+      }
     </script>
   </body>
 </html>
