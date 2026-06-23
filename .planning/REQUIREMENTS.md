@@ -25,9 +25,9 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 ### Routines (RTN)
 - [ ] **RTN-01**: A user can create a routine by describing it in plain language; the assistant assembles the steps
 - [ ] **RTN-02**: A routine runs multi-step work on a plain-language schedule with no cron syntax shown in the operator UI
-- [ ] **RTN-03**: A user can review and edit a routine's ordered steps, each assigned to a named teammate
-- [ ] **RTN-04**: A user can turn a routine on/off and run it now
-- [ ] **RTN-05**: Routine run history shows success, degraded, and failed runs honestly, and the user is notified when a routine breaks or degrades
+- [x] **RTN-03**: A user can review and edit a routine's ordered steps, each assigned to a named teammate
+- [x] **RTN-04**: A user can turn a routine on/off and run it now
+- [x] **RTN-05**: Routine run history shows success, degraded, and failed runs honestly, and the user is notified when a routine breaks or degrades
 
 ### Permissions & Autonomy (PERM)
 - [ ] **PERM-01**: A user can set a global autonomy mode (Cautious / Balanced / Autonomous)
@@ -76,9 +76,9 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 | PKG-05 | Phase 1 | Complete |
 | RTN-01 | Phase 2 | Pending |
 | RTN-02 | Phase 2 | Pending |
-| RTN-03 | Phase 2 | Pending |
-| RTN-04 | Phase 2 | Pending |
-| RTN-05 | Phase 2 | Pending |
+| RTN-03 | Phase 2 | Complete |
+| RTN-04 | Phase 2 | Complete |
+| RTN-05 | Phase 2 | Complete |
 | PERM-01 | Phase 3 | Pending |
 | PERM-02 | Phase 3 | Pending |
 | PERM-03 | Phase 3 | Pending |
