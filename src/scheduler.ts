@@ -16,9 +16,12 @@ import {
   resetStuckMissionTasks,
   getMissionTask,
   isAgentPaused,
+  getRoutineSteps,
+  getLastRoutineOutcome,
   type MissionTask,
   type ScheduledTask,
 } from './db.js';
+import { runRoutineOnce } from './routine-runner.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
@@ -263,6 +266,32 @@ async function runDueTasks(): Promise<void> {
       continue;
     }
 
+    // ── Routine firing branch (Phase 2, RTN-04 / D-03 / D-09 / D-10) ──
+    // Mirrors the aos-cron branch exactly: ONE atomic claim per routine run
+    // (never per step — Pitfall 1 / T-02-04), runningTaskIds guard, run through
+    // the message queue so it serializes against in-flight user turns. The
+    // multi-step execution + outcome derivation + state-change notify all live in
+    // runRoutineOnce.
+    if (task.source === 'routine') {
+      if (!claimDueTask(task.id, nextRun)) continue;
+      runningTaskIds.add(task.id);
+
+      const chatId = ALLOWED_CHAT_ID || 'scheduler';
+      messageQueue.enqueue(chatId, async () => {
+        try {
+          await runRoutineOnce(task, getRoutineSteps(task.id), nextRun, {
+            sender,
+            delegateToAgent,
+            isAgentPaused,
+            getLastRoutineOutcome,
+          });
+        } finally {
+          runningTaskIds.delete(task.id);
+        }
+      });
+      continue;
+    }
+
     // ── User-created task path (source='user') — unchanged ──
     runningTaskIds.add(task.id);
     markTaskRunning(task.id, nextRun);
@@ -325,6 +354,37 @@ async function runDueTasks(): Promise<void> {
 
   // Also check for queued mission tasks (one-shot async tasks from Mission Control)
   await runDueMissionTasks();
+}
+
+/**
+ * Fire a routine immediately (RTN-04 run-now), reusing the EXACT one-claim +
+ * enqueue mechanism the scheduler tick uses so a manual run and a scheduled tick
+ * can never double-fire the same routine. 02-03's `POST /api/routines/:id/run`
+ * route calls this. Returns false if the claim is lost (already running) so the
+ * route can answer 409; true once the run is enqueued.
+ *
+ * The dashboard runs in the same `main` process as the scheduler, so the shared
+ * `runningTaskIds` set + the atomic `claimDueTask` cover both entry points.
+ */
+export function triggerRoutineRun(task: ScheduledTask, nextRun: number): boolean {
+  if (runningTaskIds.has(task.id)) return false;
+  if (!claimDueTask(task.id, nextRun)) return false;
+  runningTaskIds.add(task.id);
+
+  const chatId = ALLOWED_CHAT_ID || 'scheduler';
+  messageQueue.enqueue(chatId, async () => {
+    try {
+      await runRoutineOnce(task, getRoutineSteps(task.id), nextRun, {
+        sender,
+        delegateToAgent,
+        isAgentPaused,
+        getLastRoutineOutcome,
+      });
+    } finally {
+      runningTaskIds.delete(task.id);
+    }
+  });
+  return true;
 }
 
 async function runDueMissionTasks(): Promise<void> {
