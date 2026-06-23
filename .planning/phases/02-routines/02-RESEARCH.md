@@ -519,24 +519,23 @@ phase follows.
 | A3 | Recovery-to-ok notification is desired as a single quiet line (Claude's discretion per D-10). | Pattern 6 | Operator may prefer total silence on recovery; cheap to toggle. |
 | A4 | A paused step's teammate should record a skip and contribute to a `degraded` outcome rather than block the whole run. | Pitfall 2 | Operator may expect a paused teammate to block (fail) the routine. Surface as an open question. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Routine ownership / which `agent_id` owns the `scheduled_tasks` row.**
    - What we know: `getDueTasks(agentId)` filters by owner `agent_id`; steps carry their own teammate.
-   - What's unclear: Should a routine row be owned by `'main'` (so the main loop always fires it) while
-     steps fan out to teammates, or owned by the "primary" teammate?
-   - Recommendation: Own the routine row as `agent_id='main'` so the main scheduler fires it; per-step
+   - RESOLVED: Own the routine row as `agent_id='main'` so the main scheduler always fires it; per-step
      `delegateToAgent` handles teammate execution. Simplest, avoids the cross-process race entirely.
+     (Planned in 02-02.)
 
 2. **Paused-teammate behavior for a step (Pitfall 2 / A4).**
-   - Recommendation: skip → degraded, with a "teammate paused" note in the run detail (matches UI-SPEC).
-   - Confirm with operator during planning.
+   - RESOLVED: skip the step (record `ok:false`/`skipped:true` with a "teammate paused" note) and let it
+     contribute to a `degraded` outcome rather than hard-fail the run. Matches UI-SPEC. (Planned in 02-02.)
 
 3. **Where does "View output" point (RTN-05)?**
    - What we know: `routine_runs.output` / `step_results` hold the text.
-   - Recommendation: store combined output inline in `routine_runs` (capped, like
-     `updateTaskAfterRun`'s 4000-char slice); "View output" opens it in a panel. Phase 08 Activity can
-     read the same rows.
+   - RESOLVED: store combined output inline in `routine_runs` (capped, like `updateTaskAfterRun`'s
+     4000-char slice); "View output" opens it in a panel. Phase 08 Activity can read the same rows.
+     (Planned in 02-02 / 02-04.)
 
 ## Environment Availability
 
