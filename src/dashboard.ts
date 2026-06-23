@@ -14,6 +14,12 @@ import {
   pauseScheduledTask,
   resumeScheduledTask,
   updateScheduledTask,
+  createScheduledTask,
+  getRoutineSteps,
+  saveRoutineSteps,
+  getRoutineRuns,
+  getLastRoutineOutcome,
+  type RoutineStepInput,
   getConversationPage,
   getDashboardMemoryStats,
   getDashboardPinnedMemories,
@@ -80,7 +86,8 @@ import {
   markAgentSuggestionActed,
   getRecentlySuggestedSplits,
 } from './db.js';
-import { computeNextRun } from './scheduler.js';
+import { computeNextRun, triggerRoutineRun } from './scheduler.js';
+import { assembleRoutineDraft } from './routine-draft.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { getSecurityStatus } from './security.js';
 import { AGENT_ID_RE, SLACK_CHANNEL_RE, agentExists, listAgentIds, loadAgentConfig, refreshWarRoomRoster, resolveAgentDir, setAgentModel, setAgentProfile, setAgentSlackChannel } from './agent-config.js';
@@ -1565,6 +1572,233 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
 
   // Resume a scheduled task
   app.post('/api/tasks/:id/resume', (c) => {
+    const id = c.req.param('id');
+    resumeScheduledTask(id);
+    return c.json({ ok: true });
+  });
+
+  // ── Routines (Phase 2, RTN-01/02/04) ─────────────────────────────────
+  // A routine IS a scheduled_tasks row with source='routine'; its ordered steps
+  // and run history hang off routine_steps/routine_runs (FK CASCADE). These
+  // routes mirror the /api/tasks* patterns above and mount behind the same
+  // DASHBOARD_TOKEN gate (T-02-07 — no new auth surface). Operator-facing fields
+  // carry schedule_text/plain language, never raw cron (RTN-02 / D-06).
+
+  // Validation bounds (V5 — bound untrusted request bodies).
+  const ROUTINE_AUTONOMY = new Set(['unattended', 'queue_approval']);
+  const ROUTINE_ON_ERROR = new Set(['continue', 'stop']);
+  const MAX_ROUTINE_STEPS = 50;
+
+  // Coerce an untrusted request-body step list into validated RoutineStepInput
+  // rows, assigning step_order by position. Returns null (with a reason) when
+  // the list is empty or malformed so the route can 400. agent_id is validated
+  // by saveRoutineSteps' callers via the roster; here we keep the operator's
+  // chosen teammate verbatim (the draft assembler already coerced unknown ids).
+  const buildRoutineSteps = (
+    raw: unknown,
+  ): { steps: RoutineStepInput[] } | { error: string } => {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return { error: 'a routine needs at least one step' };
+    }
+    if (raw.length > MAX_ROUTINE_STEPS) {
+      return { error: `too many steps (max ${MAX_ROUTINE_STEPS})` };
+    }
+    const validAgents = new Set(['main', ...listAgentIds()]);
+    const steps: RoutineStepInput[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const entry = raw[i];
+      if (!entry || typeof entry !== 'object') {
+        return { error: `step ${i + 1} is malformed` };
+      }
+      const s = entry as Record<string, unknown>;
+      const action = typeof s.action === 'string' ? s.action.trim().slice(0, 2000) : '';
+      if (!action) return { error: `step ${i + 1} has no action` };
+      const rawAgent = typeof s.agent_id === 'string' ? s.agent_id : '';
+      const agent_id = validAgents.has(rawAgent) ? rawAgent : 'main';
+      const onErr = typeof s.on_error === 'string' ? s.on_error : 'continue';
+      if (!ROUTINE_ON_ERROR.has(onErr)) {
+        return { error: `step ${i + 1} on_error must be 'continue' or 'stop'` };
+      }
+      steps.push({ step_order: i, action, agent_id, on_error: onErr });
+    }
+    return { steps };
+  };
+
+  // Enrich a routine row for the operator list/detail. Renders the stored cron
+  // as `schedule_text` would (the row label is plain-language) but never leaks
+  // raw cron as the primary field — `schedule` stays available for the advanced
+  // (cron) escape hatch only.
+  const enrichRoutine = (t: ReturnType<typeof getAllScheduledTasks>[number]) => ({
+    id: t.id,
+    name: t.prompt,
+    schedule: t.schedule,
+    next_run: t.next_run,
+    last_run: t.last_run,
+    last_status: t.last_status,
+    status: t.status,
+    autonomy: t.autonomy,
+    created_at: t.created_at,
+    steps: getRoutineSteps(t.id),
+    last_outcome: getLastRoutineOutcome(t.id),
+  });
+
+  const listRoutines = () => getAllScheduledTasks().filter((t) => t.source === 'routine');
+
+  // List routines.
+  app.get('/api/routines', (c) => {
+    const routines = listRoutines().map(enrichRoutine);
+    return c.json({ routines });
+  });
+
+  // Draft a routine from a plain-language description. D-05: this writes NO
+  // rows — it only runs the server-side assembler and returns JSON. The browser
+  // can't call runAgent (scrubbed SDK env), so assembly lives server-side here.
+  app.post('/api/routines/draft', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { description?: unknown };
+    const description = typeof body.description === 'string' ? body.description : '';
+    try {
+      const draft = await assembleRoutineDraft(description);
+      return c.json(draft);
+    } catch (err: any) {
+      // An invalid assembled cron surfaces here — return a friendly 400, not a
+      // 500. Nothing was persisted.
+      return c.json({ error: 'could not assemble routine: ' + (err?.message || String(err)) }, 400);
+    }
+  });
+
+  // Run a routine now (RTN-04). Reuses the scheduler's ONE-claim mechanism via
+  // triggerRoutineRun, which itself does the single claimDueTask + runningTaskIds
+  // guard — so a manual run and a scheduled tick can never double-fire. Returns
+  // 409 when the routine can't be claimed (already running / not found / paused).
+  app.post('/api/routines/:id/run', (c) => {
+    const id = c.req.param('id');
+    const task = listRoutines().find((t) => t.id === id);
+    if (!task) return c.json({ ok: false, error: 'already running or not runnable' }, 409);
+    let nextRun: number;
+    try {
+      nextRun = computeNextRun(task.schedule);
+    } catch (err: any) {
+      return c.json({ ok: false, error: 'invalid cron: ' + (err?.message || String(err)) }, 400);
+    }
+    // triggerRoutineRun returns false if the claim is lost (already running) —
+    // the SINGLE claim path. Never claim here too.
+    if (!triggerRoutineRun(task, nextRun)) {
+      return c.json({ ok: false, error: 'already running' }, 409);
+    }
+    return c.json({ ok: true });
+  });
+
+  // Routine detail: row + ordered steps + recent run history.
+  app.get('/api/routines/:id', (c) => {
+    const id = c.req.param('id');
+    const task = listRoutines().find((t) => t.id === id);
+    if (!task) return c.json({ error: 'routine not found' }, 404);
+    return c.json({
+      routine: enrichRoutine(task),
+      steps: getRoutineSteps(id),
+      runs: getRoutineRuns(id),
+    });
+  });
+
+  // Create a routine. Validates cron (computeNextRun), autonomy + on_error
+  // enums, and the step list before persisting (V5 / T-02-09). source='routine',
+  // agent_id='main' — the main loop owns/fires it (A1).
+  app.post('/api/routines', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      name?: unknown;
+      schedule?: unknown;
+      autonomy?: unknown;
+      steps?: unknown;
+    };
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!name) return c.json({ ok: false, error: 'name required' }, 400);
+
+    const schedule = typeof body.schedule === 'string' ? body.schedule.trim() : '';
+    if (!schedule) return c.json({ ok: false, error: 'schedule required' }, 400);
+    let nextRun: number;
+    try {
+      nextRun = computeNextRun(schedule);
+    } catch (err: any) {
+      return c.json({ ok: false, error: 'invalid cron: ' + (err?.message || String(err)) }, 400);
+    }
+
+    const autonomy = typeof body.autonomy === 'string' ? body.autonomy : 'unattended';
+    if (!ROUTINE_AUTONOMY.has(autonomy)) {
+      return c.json({ ok: false, error: "autonomy must be 'unattended' or 'queue_approval'" }, 400);
+    }
+
+    const built = buildRoutineSteps(body.steps);
+    if ('error' in built) return c.json({ ok: false, error: built.error }, 400);
+
+    const id = crypto.randomUUID();
+    createScheduledTask(id, name, schedule, nextRun, 'main', 'routine', autonomy);
+    saveRoutineSteps(id, built.steps);
+    const created = listRoutines().find((t) => t.id === id);
+    return c.json({ ok: true, routine: created ? enrichRoutine(created) : null }, 201);
+  });
+
+  // Edit / reorder a routine (RTN-03). Updates the schedule (re-validating cron)
+  // and/or replaces the full ordered step list.
+  const editRoutine = async (c: any) => {
+    const id = c.req.param('id');
+    const existing = listRoutines().find((t) => t.id === id);
+    if (!existing) return c.json({ ok: false, error: 'routine not found' }, 404);
+
+    const body = (await c.req.json().catch(() => ({}))) as {
+      name?: unknown;
+      schedule?: unknown;
+      autonomy?: unknown;
+      steps?: unknown;
+    };
+
+    const patch: { prompt?: string; schedule?: string; nextRun?: number } = {};
+    if (typeof body.name === 'string') {
+      const trimmed = body.name.trim();
+      if (!trimmed) return c.json({ ok: false, error: 'name cannot be empty' }, 400);
+      patch.prompt = trimmed;
+    }
+    if (typeof body.schedule === 'string' && body.schedule.trim() !== existing.schedule) {
+      const cron = body.schedule.trim();
+      try {
+        patch.nextRun = computeNextRun(cron);
+        patch.schedule = cron;
+      } catch (err: any) {
+        return c.json({ ok: false, error: 'invalid cron: ' + (err?.message || String(err)) }, 400);
+      }
+    }
+    if (typeof body.autonomy === 'string' && !ROUTINE_AUTONOMY.has(body.autonomy)) {
+      return c.json({ ok: false, error: "autonomy must be 'unattended' or 'queue_approval'" }, 400);
+    }
+
+    if (Object.keys(patch).length > 0) updateScheduledTask(id, patch);
+
+    // Steps are optional on an edit — only replace when the client sends them.
+    if (body.steps !== undefined) {
+      const built = buildRoutineSteps(body.steps);
+      if ('error' in built) return c.json({ ok: false, error: built.error }, 400);
+      saveRoutineSteps(id, built.steps);
+    }
+
+    const updated = listRoutines().find((t) => t.id === id);
+    return c.json({ ok: true, routine: updated ? enrichRoutine(updated) : null });
+  };
+  app.put('/api/routines/:id', editRoutine);
+  app.patch('/api/routines/:id', editRoutine);
+
+  // Delete a routine. FK CASCADE wipes its steps + run history.
+  app.delete('/api/routines/:id', (c) => {
+    const id = c.req.param('id');
+    deleteScheduledTask(id);
+    return c.json({ ok: true });
+  });
+
+  // Pause / resume a routine (RTN-04 on/off — non-destructive, verbatim reuse).
+  app.post('/api/routines/:id/pause', (c) => {
+    const id = c.req.param('id');
+    pauseScheduledTask(id);
+    return c.json({ ok: true });
+  });
+  app.post('/api/routines/:id/resume', (c) => {
     const id = c.req.param('id');
     resumeScheduledTask(id);
     return c.json({ ok: true });

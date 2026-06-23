@@ -1337,12 +1337,17 @@ export function createScheduledTask(
   schedule: string,
   nextRun: number,
   agentId = 'main',
+  // Routines (Phase 2, D-07): a routine row IS a scheduled_tasks row with
+  // source='routine' and a persisted autonomy mode. Both default to the
+  // hand-created-task values so every existing caller is unchanged.
+  source = 'user',
+  autonomy = 'unattended',
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id)
-     VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-  ).run(id, prompt, schedule, nextRun, now, agentId);
+    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id, source, autonomy)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+  ).run(id, prompt, schedule, nextRun, now, agentId, source, autonomy);
 }
 
 export function getDueTasks(agentId = 'main'): ScheduledTask[] {
