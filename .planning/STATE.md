@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
 status: executing
-last_updated: "2026-06-22T23:56:13.001Z"
-last_activity: 2026-06-22
+last_updated: "2026-06-23T00:04:56.345Z"
+last_activity: 2026-06-23
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 01 (desktop-shell-onboarding) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
-Last activity: 2026-06-22
+Last activity: 2026-06-23
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Last activity: 2026-06-22
 *Updated after each plan completion*
 | Phase 01 P01 | 30 | 2 tasks | 5 files |
 | Phase 01 P02 | ~25min | 3 tasks | 11 files |
+| Phase 01 P03 | ~5min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,8 @@ Recent decisions affecting current work:
 - [Phase ?]: A1 resolved: claude setup-token captures a token from a non-TTY Electron subprocess; plan 03 uses spawn+capture path.
 - [Phase ?]: MED-2: desktop service logs via pino to stdout/stderr only (no file/log-dir) — no log-path redirect needed for the launchd space trap
 - [Phase ?]: MED-4 BLOCKER: better-sqlite3 11.10.0 has no Electron-v115 prebuilt (lowest v116); pinned electron ^33.4.11 = ABI 115 forces a source compile the broken toolchain can't do — needs a version-bump decision before plan 04 build
+- [Phase 01]: 01-03: MED-1 interop = lazy await import of compiled dist ESM (cached, async accessors), not a CJS shim; config.cjs/main.cjs auth+security helpers are async
+- [Phase 01]: 01-03: setup-token spawn+capture wired (success=token captured); onb:verifyAuth proves a real claude round-trip via getScrubbedSdkEnv; login item pinned macOS 13.0 with type:mainAppService (A5)
 
 ### Pending Todos
 
@@ -93,8 +96,8 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-22T23:56:07.821Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-06-23T00:04:56.341Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
