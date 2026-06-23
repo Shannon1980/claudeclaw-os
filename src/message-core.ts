@@ -39,6 +39,72 @@ import { splitMessage, extractFileMarkers } from './format.js';
 const globalStreamLastEdit = new Map<string, number>();
 const GLOBAL_STREAM_INTERVAL_MS = 2500;
 
+// ── Inline approval ask (D-04, attended live-chat gate) ──────────────
+//
+// When a Tier 3/4 action arises during a LIVE chat turn, the gate calls
+// ctx.requestInline (built below). There is no interactive yes/no primitive in
+// TransportCallbacks (Open Q3), so we implement it as a bounded-timeout
+// text-reply parse: the gate posts the ask, then BLOCKS the in-process
+// canUseTool callback on a per-chat pending resolver. The operator's NEXT
+// message is intercepted at the top of processUserMessage and routed to
+// resolveInlineAsk() — a "yes" allows the captured action, anything else (or a
+// timeout) denies (fail-safe, P-2). Tier 4 is per-instance only: approving here
+// runs just this one prepared action and never writes an "always" (D-05).
+
+interface PendingInlineAsk {
+  resolve: (approved: boolean) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+const pendingInlineAsks = new Map<string, PendingInlineAsk>();
+const INLINE_ASK_TIMEOUT_MS = 120_000; // 2 min — then fail to deny (P-2).
+
+/**
+ * True if `chatId` is currently waiting on an inline yes/no. The transport
+ * (or processUserMessage) routes the next message to resolveInlineAsk instead
+ * of starting a new agent turn.
+ */
+export function hasPendingInlineAsk(chatId: string): boolean {
+  return pendingInlineAsks.has(chatId);
+}
+
+/**
+ * Resolve a pending inline ask from the operator's reply. Returns true if a
+ * pending ask existed and was consumed (so the caller should NOT run a normal
+ * turn). A leading yes/y/approve/ok/sure → approve; everything else denies.
+ */
+export function resolveInlineAsk(chatId: string, reply: string): boolean {
+  const pending = pendingInlineAsks.get(chatId);
+  if (!pending) return false;
+  pendingInlineAsks.delete(chatId);
+  clearTimeout(pending.timer);
+  const approved = /^\s*(yes|y|yeah|yep|approve|approved|ok|okay|sure|do it|send it)\b/i.test(reply);
+  pending.resolve(approved);
+  return true;
+}
+
+/** Build the attended requestInline resolver for one chat. */
+function makeRequestInline(cb: TransportCallbacks) {
+  return (q: { summary: string; tier: number; toolName: string }): Promise<boolean> => {
+    // If another ask is somehow already pending for this chat, deny the new one
+    // immediately rather than stacking (fail-safe).
+    if (pendingInlineAsks.has(cb.chatId)) return Promise.resolve(false);
+
+    const tier4Note = q.tier === 4 ? ' This always asks, approving sends just this one.' : '';
+    void cb
+      .sendPlain(`This needs your ok: ${q.summary}.${tier4Note} Reply "yes" to go ahead, anything else cancels.`)
+      .catch(() => {});
+
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        pendingInlineAsks.delete(cb.chatId);
+        void cb.sendPlain('No reply, so I left it. Nothing was sent.').catch(() => {});
+        resolve(false); // fail-safe to deny (P-2)
+      }, INLINE_ASK_TIMEOUT_MS);
+      pendingInlineAsks.set(cb.chatId, { resolve, timer });
+    });
+  };
+}
+
 // ── Context window tracking ──────────────────────────────────────────
 // Uses input_tokens from the last API call (= actual context window size:
 // system prompt + conversation history + tool results for that call).
@@ -182,6 +248,14 @@ export async function processUserMessage(
     audit({ agentId, chatId: chatIdStr, action: 'kill', detail: 'Emergency kill triggered', blocked: false });
     await cb.sendPlain('EMERGENCY KILL activated. All agents stopping.');
     executeEmergencyKill();
+    return;
+  }
+
+  // Inline approval reply (D-04). If this chat is waiting on a yes/no for a
+  // gated action, this message IS the operator's decision — consume it here and
+  // do NOT start a new agent turn. The blocked canUseTool callback resolves and
+  // the original turn proceeds (approve) or reports it was left (deny).
+  if (resolveInlineAsk(chatIdStr, message)) {
     return;
   }
 
@@ -418,12 +492,12 @@ export async function processUserMessage(
       MODEL_FALLBACK_CHAIN.length > 0 ? MODEL_FALLBACK_CHAIN : undefined,
       effectiveMcpAllowlist,
       effectiveCwd,
-      // Phase 3 permission gate. This IS the live operator chat path, so it is
-      // conceptually attended — but the inline yes/no resolver (requestInline)
-      // is wired in plan 04. Until then pass a background-safe ctx (attended:false,
-      // no requestInline) so an "ask" enqueues + denies rather than silent-allows
-      // (P-5). Plan 04 replaces this with `{ attended:true, requestInline, ... }`.
-      { attended: false, agentId, chatId: chatIdStr },
+      // Phase 3 permission gate (D-04). This IS the live operator chat path, so
+      // it is attended: a Tier 3/4 "ask" asks INLINE (yes/no) via requestInline
+      // and runs the prepared action only on yes. Tier 4 inline approval is
+      // per-instance only — approving never writes an "always" (D-05). On no
+      // reply the ask times out to deny (fail-safe, P-2).
+      { attended: true, agentId, chatId: chatIdStr, requestInline: makeRequestInline(cb) },
     );
 
     clearTimeout(timeoutId);

@@ -25,6 +25,11 @@ import {
   type GateContext,
 } from './gate.js';
 
+// The SDK CanUseTool callback is invoked with a third `options` argument
+// ({ signal }). Supply a no-op one here so the calls match the SDK signature;
+// the gate ignores it (`_options`), so this changes no assertion.
+const OPTS = { signal: new AbortController().signal, toolUseID: 'test-tool-use' };
+
 describe('classify', () => {
   it('maps money/sign/delete MCP tools to Tier 4', () => {
     expect(classifyTier('mcp__quickbooks__pay-invoice')).toBe(4 as Tier);
@@ -132,7 +137,7 @@ describe('background queue deny', () => {
       enqueue,
     };
     const canUseTool = makeCanUseTool(ctx);
-    const result = await canUseTool('mcp__gmail__send-email', { to: 'x@y.com' });
+    const result = await canUseTool('mcp__gmail__send-email', { to: 'x@y.com' }, OPTS);
     expect(result).toMatchObject({ behavior: 'deny' });
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
@@ -148,7 +153,7 @@ describe('audit recorded', () => {
 
   async function runDecision(ctx: GateContext, tool: string, input: Record<string, unknown>) {
     const canUseTool = makeCanUseTool(ctx);
-    return canUseTool(tool, input);
+    return canUseTool(tool, input, OPTS);
   }
 
   it('records exactly one permission audit on the allow path with tool/tier/mode/outcome', async () => {

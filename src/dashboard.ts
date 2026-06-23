@@ -113,6 +113,16 @@ import {
   isAgentRunning,
 } from './agent-create.js';
 import { getMainModelOverride, processMessageFromDashboard } from './bot.js';
+import {
+  getMode,
+  setMode,
+  getOverrides,
+  setOverride,
+  type Mode,
+  type OverrideValue,
+} from './permissions-config.js';
+import { listPending, approve, deny, type ApprovalRow } from './approval-queue.js';
+import { replayApproval } from './replay-executor.js';
 import { UPLOADS_DIR } from './media.js';
 import { collectProjectFiles, collectTaskFiles, allowedProjectDownloadPaths } from './mission-files.js';
 import { getDashboardHtml } from './dashboard-html.js';
@@ -3408,6 +3418,128 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       const msg = err instanceof Error ? err.message : String(err);
       return c.json({ error: 'Failed to write .env: ' + msg }, 500);
     }
+  });
+
+  // ── Permissions & Autonomy (Phase 3, PERM-01/02/03) ────────────────
+  //
+  // Mounted on the shared `app`, so both routes inherit the token gate
+  // (:332) and the DASHBOARD_MUTATIONS_ENABLED kill-switch 503 (:366) for
+  // PUT. Mode + override changes are audited server-side by permissions-config
+  // (D-11). PUT enum-validates mode + every override value (V5) → 400 on bad
+  // input. Tier 4 is never settable to "always" here — the gate's resolveOutcome
+  // lock is the real enforcement, but we also refuse to persist an override on
+  // the send-money capability so the API can't even record one (D-05/PERM-03).
+
+  const VALID_MODES = new Set<Mode>(['cautious', 'balanced', 'autonomous']);
+  const VALID_OVERRIDE_VALUES = new Set<OverrideValue>(['always', 'ask']);
+  // The locked Tier 4 capability key (gate.ts TIER_CAPABILITY[4]). An "always"
+  // here would be a no-op against the gate lock, but we reject it outright so
+  // the persisted config never contains a misleading Tier 4 "always" (D-05).
+  const LOCKED_CAPABILITY = 'send-money';
+
+  app.get('/api/permissions', (c) => {
+    return c.json({ mode: getMode(), overrides: getOverrides() });
+  });
+
+  app.put('/api/permissions', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      mode?: unknown;
+      overrides?: unknown;
+    };
+
+    // Validate mode (V5).
+    if (typeof body.mode !== 'string' || !VALID_MODES.has(body.mode as Mode)) {
+      return c.json({ ok: false, error: "mode must be one of 'cautious', 'balanced', 'autonomous'" }, 400);
+    }
+    const mode = body.mode as Mode;
+
+    // Validate overrides if present: an object of capability → 'always' | 'ask'.
+    let overrides: Record<string, OverrideValue> = {};
+    if (body.overrides !== undefined) {
+      if (
+        body.overrides === null ||
+        typeof body.overrides !== 'object' ||
+        Array.isArray(body.overrides)
+      ) {
+        return c.json({ ok: false, error: 'overrides must be an object of capability to value' }, 400);
+      }
+      for (const [cap, value] of Object.entries(body.overrides as Record<string, unknown>)) {
+        if (typeof value !== 'string' || !VALID_OVERRIDE_VALUES.has(value as OverrideValue)) {
+          return c.json({ ok: false, error: `override "${cap}" must be 'always' or 'ask'` }, 400);
+        }
+        // PERM-03 / D-05: the locked Tier 4 capability can never be set to
+        // 'always'. Reject so the stored config never carries a Tier 4 'always'.
+        if (cap === LOCKED_CAPABILITY && value === 'always') {
+          return c.json({ ok: false, error: 'this action always asks and cannot be set to always' }, 400);
+        }
+        overrides[cap] = value as OverrideValue;
+      }
+    }
+
+    // Persist (each setter audits a config-change event — D-11).
+    setMode(mode);
+    for (const [cap, value] of Object.entries(overrides)) {
+      setOverride(cap, value);
+    }
+    return c.json({ ok: true });
+  });
+
+  // ── Approvals ("Needs you" queue, PERM-04) ─────────────────────────
+
+  /** Shape the queue row for the dashboard (plain fields, no raw secrets). */
+  function approvalView(row: ApprovalRow) {
+    return {
+      id: row.id,
+      agent_id: row.agent_id,
+      tool_name: row.tool_name,
+      tier: row.tier,
+      mode_at_decision: row.mode_at_decision,
+      summary: row.summary,
+      status: row.status,
+      run_id: row.run_id,
+      routine_id: row.routine_id,
+      created_at: row.created_at,
+    };
+  }
+
+  app.get('/api/approvals', (c) => {
+    return c.json({ approvals: listPending().map(approvalView) });
+  });
+
+  // Approve a pending item → replay the captured action, then status-guarded
+  // transition (L-3). The transition is the source of truth for `ok`: a second
+  // approve finds no pending row, so approve() returns false and we return
+  // { ok:false } WITHOUT replaying again (T-replay-twice). Replay success or the
+  // honest failure reason is stored in `result` and surfaced to the operator.
+  app.post('/api/approvals/:id/approve', async (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+
+    // Find the still-pending row to replay. If it's not pending, do NOT replay.
+    const pending = listPending().find((r) => r.id === id);
+    if (!pending) {
+      return c.json({ ok: false, error: 'not pending (already decided or unknown)' });
+    }
+
+    // Run the prepared action. Tier 4 approval is per-instance only — approving
+    // never writes an "always" (D-05); we only replay this one captured call.
+    const replay = await replayApproval(pending.tool_name, pending.tool_input);
+
+    // Status-guarded transition. If we lost a race (a poll/another click already
+    // moved it), changed is false and we report ok:false — no double replay.
+    const changed = approve(id, replay.message);
+    if (!changed) {
+      return c.json({ ok: false, error: 'already decided' });
+    }
+    return c.json({ ok: true, replayed: replay.ok, result: replay.message });
+  });
+
+  app.post('/api/approvals/:id/deny', (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+    const changed = deny(id, 'Discarded by operator.');
+    if (!changed) return c.json({ ok: false, error: 'not pending (already decided or unknown)' });
+    return c.json({ ok: true });
   });
 
   app.get('/api/audit', (c) => {
