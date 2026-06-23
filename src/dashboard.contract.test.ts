@@ -931,3 +931,100 @@ describe('GET /api/home/summary?project=', () => {
     expect(allIds.every((id: string) => id === inside.id)).toBe(true);
   });
 });
+
+// ── Phase 3 Permissions & Autonomy (Wave 0 RED) ──────────────────────────────
+// The /api/permissions* and /api/approvals* routes do not exist yet — plan 03
+// lands them. Until then these assertions are RED (404 / wrong shape). They pin
+// the route shapes, the existing-token auth gate, enum validation (V5), and the
+// replay-once invariant (L-3 / T-replay-twice): a second approve does NOT replay.
+
+describe('permissions API contract', () => {
+  it('GET /api/permissions returns { mode, overrides } and is auth-gated', async () => {
+    const noTok = await getNoToken('/api/permissions');
+    expect(noTok.status).toBe(401);
+
+    const res = await get('/api/permissions');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ mode: expect.any(String), overrides: expect.any(Object) });
+  });
+
+  it('PUT /api/permissions with a valid mode persists and returns ok', async () => {
+    const res = await app.request('/api/permissions' + Q, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'autonomous' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await jsonOf(res)).toMatchObject({ ok: true });
+
+    const after = await jsonOf(await get('/api/permissions'));
+    expect(after.mode).toBe('autonomous');
+  });
+
+  it('PUT /api/permissions rejects an invalid mode (400)', async () => {
+    const res = await app.request('/api/permissions' + Q, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'reckless' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('PUT /api/permissions rejects an invalid override value (400)', async () => {
+    const res = await app.request('/api/permissions' + Q, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'balanced', overrides: { send: 'maybe' } }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('approvals API contract', () => {
+  it('GET /api/approvals returns { approvals: [...] } and is auth-gated', async () => {
+    const noTok = await getNoToken('/api/approvals');
+    expect(noTok.status).toBe(401);
+
+    const res = await get('/api/approvals');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ approvals: expect.any(Array) });
+  });
+
+  it('POST /api/approvals/:id/approve on a pending item returns ok; a SECOND approve does NOT replay (L-3 / T-replay-twice)', async () => {
+    // Seed a pending approval via the queue service so an id exists to approve.
+    const { enqueueApproval } = await import('./approval-queue.js');
+    const id = enqueueApproval({
+      toolName: 'mcp__gmail__send-email',
+      toolInput: { to: 'a@b.com', body: 'hi' },
+      tier: 3,
+      modeAtDecision: 'balanced',
+      summary: 'send to a@b.com',
+      runId: 'routine-x',
+    });
+
+    const first = await postAction(`/api/approvals/${id}/approve`);
+    expect(first.status).toBe(200);
+    expect(await jsonOf(first)).toMatchObject({ ok: true });
+
+    // Second approve of the same id must be status-guarded — no second replay.
+    const second = await postAction(`/api/approvals/${id}/approve`);
+    expect(await jsonOf(second)).toMatchObject({ ok: false });
+  });
+
+  it('POST /api/approvals/:id/deny sets the item denied', async () => {
+    const { enqueueApproval } = await import('./approval-queue.js');
+    const id = enqueueApproval({
+      toolName: 'mcp__slack__post-message',
+      toolInput: { text: 'hi' },
+      tier: 3,
+      modeAtDecision: 'balanced',
+      summary: 'post to slack',
+      runId: 'routine-y',
+    });
+    const res = await postAction(`/api/approvals/${id}/deny`);
+    expect(res.status).toBe(200);
+    expect(await jsonOf(res)).toMatchObject({ ok: true });
+  });
+});

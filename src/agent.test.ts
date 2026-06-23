@@ -202,3 +202,28 @@ describe('runAgentWithRetry', () => {
     expect(capturedModels[1]).toBe('claude-sonnet-4-6');
   }, 15000);
 });
+
+// ── Phase 3 gate wiring (Wave 0 RED) ─────────────────────────────────────────
+// Pins T-03-01 (Elevation of Privilege): the SDK query() options the agent
+// passes must NOT bypass permissions, and must carry a canUseTool callback when
+// a GateContext is present. These reference a not-yet-exported options-builder
+// (buildAgentQueryOptions) + makeCanUseTool from ./gate.js, so they run RED
+// until plan 03 wires the gate at the tool-call layer (drops bypassPermissions).
+describe('gate wired', () => {
+  it('agent query options do not bypass permissions and carry canUseTool', async () => {
+    // The options-builder does not exist yet — importing it is the RED state.
+    const agentMod: any = await import('./agent.js');
+    const buildAgentQueryOptions = agentMod.buildAgentQueryOptions;
+    expect(typeof buildAgentQueryOptions).toBe('function');
+
+    const { makeCanUseTool } = await import('./gate.js');
+    const gateCtx: any = { attended: false, mode: 'balanced', overrides: {}, enqueue: () => 1 };
+
+    const options = buildAgentQueryOptions({ gateCtx });
+    expect(options.permissionMode).not.toBe('bypassPermissions');
+    expect(options.permissionMode).toBe('default');
+    expect(options.allowDangerouslySkipPermissions).not.toBe(true);
+    expect(typeof options.canUseTool).toBe('function');
+    expect(typeof makeCanUseTool).toBe('function');
+  });
+});
