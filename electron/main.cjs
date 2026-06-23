@@ -197,14 +197,47 @@ function runMigrationsStep() {
       '}).catch((e) => {' +
       '  process.stdout.write("__MIGRATE_RESULT__" + JSON.stringify({ status: "failed", error: String(e && e.message || e) }) + "\\n");' +
       '});';
+    // Pass a MINIMAL env to the migration child (WR-04): migrations run
+    // arbitrary code, so they must not inherit the whole Electron parent
+    // environment (ANTHROPIC_API_KEY and other secrets). Allowlist only the
+    // process plumbing needed to launch (PATH/HOME/locale/runtime dir) plus the
+    // DB credential migrations legitimately need to open the encrypted store.
+    // This mirrors the scrubbing discipline getScrubbedSdkEnv applies to the
+    // verify spawn.
+    const ENV_ALLOWLIST = [
+      'PATH',
+      'HOME',
+      'TMPDIR',
+      'LANG',
+      'LC_ALL',
+      'LC_CTYPE',
+      'USER',
+      'LOGNAME',
+      'SHELL',
+      'XDG_RUNTIME_DIR',
+      'NODE_PATH',
+      'NODE_OPTIONS',
+      'SystemRoot', // Windows: required for child process startup
+      'TEMP',
+      'TMP',
+    ];
     const childEnv = {
-      ...process.env,
       __MIGRATE_RUNNER: runAsNode
         ? require('url').pathToFileURL(runnerPath).href
         : runnerPath,
       __MIGRATE_ROOT: APP_ROOT,
       __MIGRATE_DATA: DATA_DIR,
+      // The migration runner resolves writable state under CLAUDECLAW_DATA_DIR.
+      CLAUDECLAW_DATA_DIR: DATA_DIR,
     };
+    for (const key of ENV_ALLOWLIST) {
+      if (process.env[key] !== undefined) childEnv[key] = process.env[key];
+    }
+    // DB_ENCRYPTION_KEY is the one secret migrations need (to open the encrypted
+    // DB). Source it from the managed .env, not the inherited process env, so a
+    // stale exported value can't leak in.
+    const dbKey = cfg.readEnvFromFile(ENV_PATH, ['DB_ENCRYPTION_KEY']).DB_ENCRYPTION_KEY;
+    if (dbKey) childEnv.DB_ENCRYPTION_KEY = dbKey;
     if (runAsNode) childEnv.ELECTRON_RUN_AS_NODE = '1';
 
     let proc;
