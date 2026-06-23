@@ -23,8 +23,8 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 - [x] **PKG-05**: A user can authenticate with their Claude subscription (OAuth) by default, with an API-key path available for heavy automation (D1)
 
 ### Routines (RTN)
-- [ ] **RTN-01**: A user can create a routine by describing it in plain language; the assistant assembles the steps
-- [ ] **RTN-02**: A routine runs multi-step work on a plain-language schedule with no cron syntax shown in the operator UI
+- [x] **RTN-01**: A user can create a routine by describing it in plain language; the assistant assembles the steps
+- [x] **RTN-02**: A routine runs multi-step work on a plain-language schedule with no cron syntax shown in the operator UI
 - [x] **RTN-03**: A user can review and edit a routine's ordered steps, each assigned to a named teammate
 - [x] **RTN-04**: A user can turn a routine on/off and run it now
 - [x] **RTN-05**: Routine run history shows success, degraded, and failed runs honestly, and the user is notified when a routine breaks or degrades
@@ -74,8 +74,8 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 | PKG-03 | Phase 1 | Complete |
 | PKG-04 | Phase 1 | Complete |
 | PKG-05 | Phase 1 | Complete |
-| RTN-01 | Phase 2 | Pending |
-| RTN-02 | Phase 2 | Pending |
+| RTN-01 | Phase 2 | Complete |
+| RTN-02 | Phase 2 | Complete |
 | RTN-03 | Phase 2 | Complete |
 | RTN-04 | Phase 2 | Complete |
 | RTN-05 | Phase 2 | Complete |
