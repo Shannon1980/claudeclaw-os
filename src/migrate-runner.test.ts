@@ -44,6 +44,16 @@ function writeMigration(
   fs.writeFileSync(path.join(dir, `${name}.ts`), body);
 }
 
+// A migration file that loads fine but exports NO run() (typo / wrong name).
+function writeMigrationNoRun(root: string, version: string, name: string): void {
+  const dir = path.join(root, 'migrations', version);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${name}.ts`),
+    `export const description = 'missing run'; export async function runn(){ /* typo */ }`,
+  );
+}
+
 describe('runMigrations (non-interactive runner)', () => {
   // Spy type is awkward to express; the spy itself only needs .not.toHaveBeenCalled().
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -100,6 +110,53 @@ describe('runMigrations (non-interactive runner)', () => {
     expect(res.status).toBe('failed');
     if (res.status === 'failed') expect(res.error).toBeTruthy();
     expect(createInterfaceSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails in pre-flight (before touching the DB) when a migration has no run() export', async () => {
+    const root = makeProject();
+    writeRegistry(root, { '1.0.0': ['init'], '1.1.0': ['norun'] });
+    writeMigration(root, '1.0.0', 'init');
+    writeMigrationNoRun(root, '1.1.0', 'norun');
+    writeApplied(root, '1.0.0');
+
+    const res = await runMigrations({ assumeYes: true, projectRoot: root });
+    expect(res.status).toBe('failed');
+    if (res.status === 'failed') expect(res.error).toMatch(/no run\(\) export/);
+    // .applied.json must NOT have advanced — pre-flight caught it first.
+    const applied = JSON.parse(
+      fs.readFileSync(path.join(root, 'migrations', '.applied.json'), 'utf-8'),
+    );
+    expect(applied.lastApplied).toBe('1.0.0');
+  });
+
+  it('keeps the just-created backup during rotation when older backups exist', async () => {
+    // store/claudeclaw.db exists so a pre-migration backup is written. Three
+    // older .bak files are pre-seeded with mtimes NEWER than the run will set,
+    // so a naive "keep 3 newest" would delete the fresh backup. WR-02 pins it.
+    const root = makeProject();
+    writeRegistry(root, { '1.0.0': ['init'], '1.1.0': ['add'] });
+    writeMigration(root, '1.0.0', 'init');
+    writeMigration(root, '1.1.0', 'add');
+    writeApplied(root, '1.0.0'); // 1.1.0 pending
+
+    const storeDir = path.join(root, 'store');
+    fs.writeFileSync(path.join(storeDir, 'claudeclaw.db'), 'db');
+    const future = Date.now() / 1000 + 3600;
+    for (const v of ['0.1.0', '0.2.0', '0.3.0']) {
+      const f = path.join(storeDir, `claudeclaw.db.pre-${v}.bak`);
+      fs.writeFileSync(f, 'old');
+      fs.utimesSync(f, future, future); // mtime in the future
+    }
+
+    const res = await runMigrations({ assumeYes: true, projectRoot: root });
+    expect(res.status).toBe('applied');
+    // The backup created for THIS run (pre-1.1.0) must survive rotation.
+    expect(fs.existsSync(path.join(storeDir, 'claudeclaw.db.pre-1.1.0.bak'))).toBe(true);
+    // Total .bak count capped at 3 (current + 2 newest others).
+    const baks = fs
+      .readdirSync(storeDir)
+      .filter((f) => f.startsWith('claudeclaw.db.pre-') && f.endsWith('.bak'));
+    expect(baks.length).toBe(3);
   });
 
   it('honors dataDir for store/ and migrations resolution', async () => {

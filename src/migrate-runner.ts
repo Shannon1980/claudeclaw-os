@@ -132,14 +132,27 @@ export async function runMigrations(
           error: `Migration file not found: ${filePath}`,
         };
       }
+      let mod: Partial<MigrationModule>;
       try {
-        await import(pathToFileURL(filePath).href);
+        mod = (await import(pathToFileURL(filePath).href)) as Partial<MigrationModule>;
       } catch (e) {
         return {
           status: 'failed',
           from: lastApplied,
           to: latest,
           error: `Failed to load migration ${filePath}: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+      // Validate the export shape now (WR-03): a file that loads fine but is
+      // missing a callable run() would otherwise throw "mod.run is not a
+      // function" mid-apply, AFTER the backup/rotation and possibly after
+      // earlier versions already mutated the DB and advanced .applied.json.
+      if (typeof mod.run !== 'function') {
+        return {
+          status: 'failed',
+          from: lastApplied,
+          to: latest,
+          error: `Migration ${filePath} has no run() export.`,
         };
       }
     }
@@ -172,14 +185,24 @@ export async function runMigrations(
         };
       }
     }
-    // Rotation: keep the 3 most recent .bak files.
+    // Rotation: keep the 3 most recent .bak files. Exclude the backup just
+    // created for THIS run from the rotation candidates (WR-02): mtime ties or
+    // clock skew on a restored backup could otherwise sort it among the oldest
+    // and delete the only pre-migration snapshot before migrations run. We pin
+    // the current backup and keep 2 of the remaining (current + 2 = 3 total).
     try {
+      const currentBak = path.basename(backupPath);
       const baks = fs
         .readdirSync(storeDir)
-        .filter((f) => f.startsWith('claudeclaw.db.pre-') && f.endsWith('.bak'))
+        .filter(
+          (f) =>
+            f.startsWith('claudeclaw.db.pre-') &&
+            f.endsWith('.bak') &&
+            f !== currentBak,
+        )
         .map((f) => ({ f, mtime: fs.statSync(path.join(storeDir, f)).mtimeMs }))
         .sort((a, b) => b.mtime - a.mtime);
-      for (const old of baks.slice(3)) {
+      for (const old of baks.slice(2)) {
         fs.rmSync(path.join(storeDir, old.f), { force: true });
         fs.rmSync(path.join(storeDir, `${old.f}-wal`), { force: true });
       }
