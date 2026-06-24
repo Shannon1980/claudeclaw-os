@@ -94,6 +94,25 @@ export function Activity() {
   // teammate doesn't make the other chips vanish (matches Audit's sticky set).
   const [knownTeammates, setKnownTeammates] = useState<string[]>([]);
   const [openRow, setOpenRow] = useState<number | null>(null);
+  // Summarize Today (D-10): operator-invoked only. summary holds the digest or
+  // the honest degrade; never auto-runs on mount, never summarizes per row.
+  const [summarizing, setSummarizing] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+
+  // Run the daily digest. Always renders an honest line: the model paragraph,
+  // or "Couldn't summarize right now. The feed below is complete." on failure
+  // or when the LLM_SPAWN_ENABLED kill-switch is off. Never a generic error.
+  const summarizeToday = useCallback(async () => {
+    setSummarizing(true);
+    try {
+      const res = await apiPost<{ ok: boolean; text?: string }>('/api/activity/summarize');
+      setSummary(res.text || "Couldn't summarize right now. The feed below is complete.");
+    } catch {
+      setSummary("Couldn't summarize right now. The feed below is complete.");
+    } finally {
+      setSummarizing(false);
+    }
+  }, []);
 
   // Resolve teammate display names once (best effort; falls back to agent_id).
   useEffect(() => {
@@ -169,7 +188,17 @@ export function Activity() {
       <PageHeader
         title={term('page.activity')}
         actions={
-          <span class="text-[11px] text-[var(--color-text-muted)]">What your team did</span>
+          <>
+            <span class="text-[11px] text-[var(--color-text-muted)]">What your team did</span>
+            <button
+              type="button"
+              onClick={() => void summarizeToday()}
+              disabled={summarizing}
+              class="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors disabled:opacity-40"
+            >
+              {summarizing ? 'Summarizing…' : 'Summarize Today'}
+            </button>
+          </>
         }
         tabs={
           <>
@@ -209,6 +238,15 @@ export function Activity() {
           </>
         }
       />
+
+      {/* Summarize Today result: a quiet inline panel near the header, not a
+          per-row element. Renders the plain-language paragraph (weight 400) or
+          the honest degrade. Operator-invoked; absent until the action runs. */}
+      {summary && (
+        <div class="mx-6 mt-3 rounded-md border border-[var(--color-border)] bg-[var(--color-card)] p-3 text-[12.5px] font-normal leading-snug text-[var(--color-text)]">
+          {summary}
+        </div>
+      )}
 
       {error && <PageState error={error} />}
       {loading && rows.length === 0 && <PageState loading />}
