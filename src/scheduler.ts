@@ -25,6 +25,7 @@ import { runRoutineOnce } from './routine-runner.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
+import type { GateContext } from './gate.js';
 import { formatForTelegram, splitMessage } from './bot.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { isAgentRunning } from './agent-create.js';
@@ -252,12 +253,20 @@ async function runDueTasks(): Promise<void> {
       runningTaskIds.add(task.id);
 
       const chatId = ALLOWED_CHAT_ID || 'scheduler';
+      // Background gate context (P-5): scheduled aos-cron runs are unattended,
+      // so an "ask" outcome enqueues + denies (never blocks the subprocess, P-2).
+      const aosGateCtx: GateContext = {
+        attended: false,
+        runId: task.id,
+        agentId: schedulerAgentId,
+        chatId,
+      };
       messageQueue.enqueue(chatId, async () => {
         try {
           await runAosCronTaskOnce(task, nextRun, {
             sender,
             runAgent: (prompt, abortController) =>
-              runAgent(prompt, undefined, () => {}, undefined, task.model ?? undefined, abortController, undefined, agentMcpAllowlist),
+              runAgent(prompt, undefined, () => {}, undefined, task.model ?? undefined, abortController, undefined, agentMcpAllowlist, undefined, aosGateCtx),
           });
         } finally {
           runningTaskIds.delete(task.id);
@@ -309,8 +318,15 @@ async function runDueTasks(): Promise<void> {
       try {
         await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
 
-        // Run as a fresh agent call (no session — scheduled tasks are autonomous)
-        const result = await runAgent(task.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
+        // Run as a fresh agent call (no session — scheduled tasks are autonomous).
+        // Background gate context (P-5): unattended user-scheduled task → ask/queue.
+        const userTaskGateCtx: GateContext = {
+          attended: false,
+          runId: task.id,
+          agentId: schedulerAgentId,
+          chatId,
+        };
+        const result = await runAgent(task.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist, undefined, userTaskGateCtx);
         clearTimeout(timeout);
 
         if (result.aborted) {
@@ -439,6 +455,14 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
       }
     }, 5_000);
 
+    // Background gate context (P-5): missions are unattended → an "ask" outcome
+    // enqueues + denies, never blocks the subprocess (P-2).
+    const missionGateCtx: GateContext = {
+      attended: false,
+      runId: mission.id,
+      agentId: delegateAgentId ?? schedulerAgentId,
+      chatId,
+    };
     try {
       let result: { text: string | null; aborted?: boolean };
       if (delegateAgentId) {
@@ -450,10 +474,11 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
           undefined,
           TASK_TIMEOUT_MS,
           abortController,
+          missionGateCtx,
         );
         result = { text: delegated.text, aborted: abortController.signal.aborted };
       } else {
-        result = await runAgent(mission.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
+        result = await runAgent(mission.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist, undefined, missionGateCtx);
       }
       clearTimeout(timeout);
       clearInterval(cancelPoll);

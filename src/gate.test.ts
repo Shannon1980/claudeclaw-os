@@ -1,0 +1,197 @@
+// Wave 0 RED tests for the Phase 3 permission gate (PERM-01..04 + D-10).
+//
+// These reference `./gate.js`, which does NOT exist yet. The import failing is
+// the intended RED state — plans 02-04 are graded against these executable
+// specifications, not against interpretation.
+//
+// What this file pins:
+//   - classifyTier: the concrete tool -> tier mapping + the D-03 safe default
+//     (unknown tools are never Tier 1/2).
+//   - resolveOutcome: the mode x tier (allow|ask) matrix (PERM-01), per-action
+//     overrides flipping Tier 2/3 (PERM-02), and the Tier 4 lock that ignores
+//     both mode and override (PERM-03).
+//   - makeCanUseTool: a background (unattended) Tier 3 call denies + enqueues
+//     (PERM-04), and every decision path records exactly one audit() event
+//     carrying tool/tier/mode/outcome with NO secret material (D-10).
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { setAuditCallback, type AuditEntry } from './security.js';
+import {
+  classifyTier,
+  resolveOutcome,
+  makeCanUseTool,
+  type Tier,
+  type Mode,
+  type GateContext,
+} from './gate.js';
+
+// The SDK CanUseTool callback is invoked with a third `options` argument
+// ({ signal }). Supply a no-op one here so the calls match the SDK signature;
+// the gate ignores it (`_options`), so this changes no assertion.
+const OPTS = { signal: new AbortController().signal, toolUseID: 'test-tool-use' };
+
+describe('classify', () => {
+  it('maps money/sign/delete MCP tools to Tier 4', () => {
+    expect(classifyTier('mcp__quickbooks__pay-invoice')).toBe(4 as Tier);
+    expect(classifyTier('mcp__docusign__send-for-signature')).toBe(4 as Tier);
+    expect(classifyTier('mcp__drive__permanent-delete')).toBe(4 as Tier);
+  });
+
+  it('maps destructive Bash commands to Tier 4', () => {
+    expect(classifyTier('Bash', { command: 'rm -rf /tmp/x' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'git push --force origin main' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'drop table users' })).toBe(4 as Tier);
+  });
+
+  it('maps read-only Bash and read-only built-ins to Tier 1', () => {
+    expect(classifyTier('Bash', { command: 'ls -la' })).toBe(1 as Tier);
+    expect(classifyTier('Bash', { command: 'cat package.json' })).toBe(1 as Tier);
+    expect(classifyTier('Bash', { command: 'git status' })).toBe(1 as Tier);
+    expect(classifyTier('Read')).toBe(1 as Tier);
+    expect(classifyTier('Grep')).toBe(1 as Tier);
+    expect(classifyTier('WebSearch')).toBe(1 as Tier);
+  });
+
+  it('maps Write/Edit to Tier 2', () => {
+    expect(classifyTier('Write')).toBe(2 as Tier);
+    expect(classifyTier('Edit')).toBe(2 as Tier);
+  });
+
+  it('maps external send/post MCP tools to Tier 3', () => {
+    expect(classifyTier('mcp__gmail__send-email')).toBe(3 as Tier);
+    expect(classifyTier('mcp__slack__post-message')).toBe(3 as Tier);
+  });
+
+  it('defaults UNKNOWN/unclassified tools to Tier 3 (D-03 safe side, never Tier 1/2)', () => {
+    const t = classifyTier('mcp__mystery__do-something-unknown');
+    expect(t).toBe(3 as Tier);
+    expect(t).not.toBe(1 as Tier);
+    expect(t).not.toBe(2 as Tier);
+  });
+});
+
+describe('resolveOutcome mode matrix', () => {
+  // cautious = auto Tier 1 only; balanced = auto Tier 1+2;
+  // autonomous = auto Tier 1+2+3; Tier 4 = ask in all three (PERM-01).
+  const cases: Array<{ mode: Mode; tier: Tier; expected: 'allow' | 'ask' }> = [
+    { mode: 'cautious', tier: 1 as Tier, expected: 'allow' },
+    { mode: 'cautious', tier: 2 as Tier, expected: 'ask' },
+    { mode: 'cautious', tier: 3 as Tier, expected: 'ask' },
+    { mode: 'cautious', tier: 4 as Tier, expected: 'ask' },
+    { mode: 'balanced', tier: 1 as Tier, expected: 'allow' },
+    { mode: 'balanced', tier: 2 as Tier, expected: 'allow' },
+    { mode: 'balanced', tier: 3 as Tier, expected: 'ask' },
+    { mode: 'balanced', tier: 4 as Tier, expected: 'ask' },
+    { mode: 'autonomous', tier: 1 as Tier, expected: 'allow' },
+    { mode: 'autonomous', tier: 2 as Tier, expected: 'allow' },
+    { mode: 'autonomous', tier: 3 as Tier, expected: 'allow' },
+    { mode: 'autonomous', tier: 4 as Tier, expected: 'ask' },
+  ];
+
+  for (const { mode, tier, expected } of cases) {
+    it(`${mode} + Tier ${tier} -> ${expected}`, () => {
+      expect(resolveOutcome(tier, mode, {})).toBe(expected);
+    });
+  }
+});
+
+describe('override', () => {
+  it('an `always` override flips a defaulted-ask Tier 3 capability to allow (PERM-02)', () => {
+    // balanced default for Tier 3 is ask; override forces allow.
+    expect(resolveOutcome(3 as Tier, 'balanced', {})).toBe('ask');
+    expect(resolveOutcome(3 as Tier, 'balanced', { send: 'always' })).toBe('allow');
+  });
+
+  it('an `ask` override forces ask where the mode default was allow (PERM-02)', () => {
+    // balanced default for Tier 2 is allow; override forces ask.
+    expect(resolveOutcome(2 as Tier, 'balanced', {})).toBe('allow');
+    expect(resolveOutcome(2 as Tier, 'balanced', { save: 'ask' })).toBe('ask');
+  });
+
+  it('with no override the mode default applies', () => {
+    expect(resolveOutcome(3 as Tier, 'autonomous', {})).toBe('allow');
+    expect(resolveOutcome(3 as Tier, 'cautious', {})).toBe('ask');
+  });
+});
+
+describe('tier4 locked', () => {
+  it('returns ask for Tier 4 in EVERY mode (PERM-03)', () => {
+    expect(resolveOutcome(4 as Tier, 'cautious', {})).toBe('ask');
+    expect(resolveOutcome(4 as Tier, 'balanced', {})).toBe('ask');
+    expect(resolveOutcome(4 as Tier, 'autonomous', {})).toBe('ask');
+  });
+
+  it('ignores an `always` override on the Tier 4 capability — the lock holds (PERM-03)', () => {
+    expect(resolveOutcome(4 as Tier, 'autonomous', { 'send-money': 'always' })).toBe('ask');
+    expect(resolveOutcome(4 as Tier, 'balanced', { 'send-money': 'always' })).toBe('ask');
+  });
+});
+
+describe('background queue deny', () => {
+  it('denies a Tier 3 tool in a background (unattended) context under balanced and enqueues it (PERM-04)', async () => {
+    const enqueue = vi.fn().mockReturnValue(1);
+    const ctx: GateContext = {
+      attended: false,
+      mode: 'balanced',
+      overrides: {},
+      enqueue,
+    };
+    const canUseTool = makeCanUseTool(ctx);
+    const result = await canUseTool('mcp__gmail__send-email', { to: 'x@y.com' }, OPTS);
+    expect(result).toMatchObject({ behavior: 'deny' });
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('audit recorded', () => {
+  let entries: AuditEntry[];
+
+  beforeEach(() => {
+    entries = [];
+    setAuditCallback((e) => entries.push(e));
+  });
+
+  async function runDecision(ctx: GateContext, tool: string, input: Record<string, unknown>) {
+    const canUseTool = makeCanUseTool(ctx);
+    return canUseTool(tool, input, OPTS);
+  }
+
+  it('records exactly one permission audit on the allow path with tool/tier/mode/outcome', async () => {
+    await runDecision(
+      { attended: false, mode: 'autonomous', overrides: {}, enqueue: vi.fn() },
+      'Read',
+      { file_path: '/tmp/x' },
+    );
+    const perm = entries.filter((e) => e.action === ('permission' as AuditEntry['action']));
+    expect(perm).toHaveLength(1);
+    const detail = JSON.parse(perm[0].detail);
+    expect(detail).toMatchObject({ tool: 'Read', tier: 1, mode: 'autonomous', outcome: 'allow' });
+  });
+
+  it('records exactly one permission audit on the queued (background-deny) path', async () => {
+    await runDecision(
+      { attended: false, mode: 'balanced', overrides: {}, enqueue: vi.fn().mockReturnValue(7) },
+      'mcp__gmail__send-email',
+      { to: 'a@b.com' },
+    );
+    const perm = entries.filter((e) => e.action === ('permission' as AuditEntry['action']));
+    expect(perm).toHaveLength(1);
+    const detail = JSON.parse(perm[0].detail);
+    expect(detail).toMatchObject({ tool: 'mcp__gmail__send-email', tier: 3, mode: 'balanced' });
+    expect(detail.outcome).toMatch(/queue|deny/);
+  });
+
+  it('never writes secret/env material into the audit detail (D-10 / L-4)', async () => {
+    const secret = 'sk-super-secret-token-AKIA1234567890';
+    await runDecision(
+      { attended: false, mode: 'autonomous', overrides: {}, enqueue: vi.fn() },
+      'mcp__slack__post-message',
+      { token: secret, text: 'hi' },
+    );
+    const perm = entries.filter((e) => e.action === ('permission' as AuditEntry['action']));
+    expect(perm.length).toBeGreaterThanOrEqual(1);
+    for (const e of perm) {
+      expect(e.detail).not.toContain(secret);
+    }
+  });
+});

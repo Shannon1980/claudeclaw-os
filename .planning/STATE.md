@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
-status: "Phase 2 (Routines) shipped — PR #60 (Shannon1980/claudeclaw-os)"
-last_updated: "2026-06-23T19:21:15.417Z"
-last_activity: 2026-06-23
+status: "Phase 03 verification gaps_found (2/4) — gap closure pending"
+last_updated: "2026-06-24T15:21:13.618Z"
+last_activity: 2026-06-24
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 12
-  completed_plans: 8
+  completed_plans: 12
   percent: 25
 ---
 
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** A local-first desktop AI chief-of-staff for business operators — install with no terminal, runs the real Claude engine on the operator's own machine, keeps work moving and never lets anything fall through.
-**Current focus:** Phase 2 — routines
+**Current focus:** Phase 03 — permissions-autonomy
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
-Status: Phase 2 (Routines) shipped — PR #60 (Shannon1980/claudeclaw-os)
-Last activity: 2026-06-23
+Phase: 03 (permissions-autonomy) — ALL PLANS EXECUTED, VERIFICATION gaps_found (2/4)
+Plan: 4 of 4 executed; gap closure pending
+Status: Verifier found 2 blocking gaps (PERM-04 replay-once race; PERM-02 override-key mismatch). Run /gsd-plan-phase 03 --gaps then /gsd-execute-phase 03 --gaps-only.
+Last activity: 2026-06-24
 
 ## Performance Metrics
 
@@ -53,6 +53,10 @@ Last activity: 2026-06-23
 | Phase 01 P02 | ~25min | 3 tasks | 11 files |
 | Phase 01 P03 | ~5min | 3 tasks | 5 files |
 | Phase 01 P04 | ~2min | 2 tasks | 5 files |
+| Phase 03 P01 | 5min | 3 tasks | 5 files |
+| Phase 03 P02 | 6min | 2 tasks | 4 files |
+| Phase 03 P03 | ~25min | 2 tasks | 12 files |
+| Phase 03 P04 | ~30min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -73,6 +77,10 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-03: setup-token spawn+capture wired (success=token captured); onb:verifyAuth proves a real claude round-trip via getScrubbedSdkEnv; login item pinned macOS 13.0 with type:mainAppService (A5)
 - [Phase ?]: [Phase 01]: 01-04: landed version-agnostic signing config (entitlements.mac.plist, notarize.cjs afterSign hook that no-ops without creds, package.json build.mac hardenedRuntime+entitlements+afterSign); @electron/notarize ^3.1.1 official Electron org; no version bumps
 - [Phase ?]: [Phase 01]: 01-04: operator DEFERS the real signed .dmg build on MED-4 (electron 33 ABI 115 has no better-sqlite3 prebuilt); PKG-01 NOT verified for real users; SMOKE checklist authored, build steps PENDING + interactive find-identity precondition + MED-3 real-auth round-trip step
+- [Phase ?]: [Phase 03]: 03-02: gate engine GREEN — Tier 4 ask-lock precedes mode/override; unknown -> Tier 3; PERMISSION_GATE_ENABLED kill switch + try/catch degrade to Tier 3 ask (L-2); makeCanUseTool never returns updatedPermissions (D-05)
+- [Phase ?]: [Phase 03]: 03-03: bypassPermissions removed; query() runs canUseTool gate; omitted gateCtx defaults to safe background ask/queue (P-5)
+- [Phase ?]: [Phase 03]: 03-03: approval_queue dual-written (db.ts createSchema + migration v1.2.3); approve/deny status-guarded WHERE status='pending' + .changes===1 = replay-once (L-3); migration AUTHORED + temp-DB validated but NOT applied to live store/ (operator runs npm run migrate before restart)
+- [Phase ?]: [Phase 03]: 03-04: /api/permissions + /api/approvals shipped behind token gate + mutations kill-switch; replay-executor.ts allowlists MCP direct-call + tiny Bash/Write, rejects all else honestly (no eval); Tier 4 approve is per-instance only (D-05); message-core requestInline is bounded-timeout fail-to-deny (D-04). Operator human-verify checkpoint APPROVED 2026-06-24.
 
 ### Pending Todos
 
@@ -100,10 +108,10 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-23T19:21:15.413Z
-Stopped at: Phase 3 planned (4 plans, checker-approved) — paused before execution per user
-Resume file: .planning/phases/03-permissions-autonomy/03-01-PLAN.md
+Last session: 2026-06-24T15:20:51.578Z
+Stopped at: Completed 03-04-PLAN.md (Phase 03 all plans executed; operator human-verify checkpoint APPROVED 2026-06-24)
+Resume file: None
 
 ## Operator Next Steps
 
-- Plan the first phase with /gsd-plan-phase 1
+- Phase 03 (Permissions & Autonomy) is complete (4/4, PERM-01..04 + D-04/D-05 verified live). Run phase verification, then plan Phase 04 (Activity Feed) with /gsd-plan-phase 4.

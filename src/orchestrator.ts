@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { runAgentWithRetry, UsageInfo } from './agent.js';
+import type { GateContext } from './gate.js';
 import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd, resolveAgentRuntime, isWorkspaceAgent, workspaceMemoryKey } from './agent-config.js';
 import { MODEL_FALLBACK_CHAIN, PROJECT_ROOT, DELEGATION_TIMEOUT_MS } from './config.js';
 import { logToHiveMind, createInterAgentTask, completeInterAgentTask } from './db.js';
@@ -152,6 +153,11 @@ export async function delegateToAgent(
   onProgress?: (msg: string) => void,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   abortCtrl?: AbortController,
+  // Phase 3 permission gate context (P-5). Delegation is a background path —
+  // when omitted, runAgent defaults to a SAFE background context (ask/queue),
+  // never silent-allow. Routine steps pass a ctx carrying routineAutonomy (D-06)
+  // so each step enters the gate with its stored autonomy.
+  gateCtx?: GateContext,
 ): Promise<DelegationResult> {
   let agent = agentRegistry.find((a) => a.id === agentId);
   if (!agent) {
@@ -242,6 +248,7 @@ export async function delegateToAgent(
         MODEL_FALLBACK_CHAIN.length > 0 ? MODEL_FALLBACK_CHAIN : undefined, // recover from overloaded/billing like the main path
         agentConfig.mcpServers,
         delegateCwd, // run in the agent's project_dir so writes land in the workspace
+        gateCtx, // Phase 3: background gate context (safe-default when undefined, P-5)
       );
 
       clearTimeout(timer);

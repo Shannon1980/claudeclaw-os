@@ -11,6 +11,7 @@ import {
 } from 'lucide-preact';
 import { Pill, StatusDot } from '@/components/Pill';
 import { AgentAvatar } from '@/components/AgentAvatar';
+import { ApprovalItem, type Approval } from '@/components/ApprovalItem';
 import { type MissionTask, type Agent } from '@/components/TaskModals';
 import { apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
@@ -28,8 +29,9 @@ export interface HomeSummary {
 
 // ── Needs you / Today ───────────────────────────────────────────────
 
-export function NeedsYouCard({ needsYou, today, starters, agents, agentById, onChange, onSuggest, variant }: {
+export function NeedsYouCard({ needsYou, approvals, today, starters, agents, agentById, onChange, onSuggest, variant }: {
   needsYou: MissionTask[];
+  approvals?: Approval[];
   today?: TodaySuggestion[];
   starters?: string[];
   agents: Agent[];
@@ -38,7 +40,11 @@ export function NeedsYouCard({ needsYou, today, starters, agents, agentById, onC
   onSuggest?: (text: string) => void;
   variant: 'home' | 'project';
 }) {
-  const hasNeeds = needsYou.length > 0;
+  const approvalItems = approvals ?? [];
+  // Gated approval items are decisions only the operator can make — they count
+  // toward "Needs you" alongside flagged tasks (do not render a zero, spec 03).
+  const hasNeeds = needsYou.length > 0 || approvalItems.length > 0;
+  const needsCount = needsYou.length + approvalItems.length;
   const todayItems = today ?? [];
   const starterItems = starters ?? [];
   const title = hasNeeds ? 'Needs you' : variant === 'home' ? 'Today' : 'Needs you';
@@ -50,12 +56,15 @@ export function NeedsYouCard({ needsYou, today, starters, agents, agentById, onC
     <div class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden">
       <div class="px-4 py-2.5 border-b border-[var(--color-border)] flex items-center gap-2">
         <span class="text-[13px] font-semibold text-[var(--color-text)]">{title}</span>
-        {hasNeeds && <span class="text-[11px] text-[var(--color-text-muted)] tabular-nums">{needsYou.length}</span>}
+        {hasNeeds && <span class="text-[11px] text-[var(--color-text-muted)] tabular-nums">{needsCount}</span>}
         <span class="ml-auto text-[11px] text-[var(--color-text-faint)]">{subtitle}</span>
       </div>
       <div class="p-2.5 space-y-1.5">
         {hasNeeds ? (
           <>
+            {approvalItems.map((a) => (
+              <ApprovalItem key={`approval-${a.id}`} approval={a} agent={agentById.get(a.agent_id)} onChange={onChange} />
+            ))}
             {needsYou.slice(0, 6).map((t) => (
               <NeedsItem key={t.id} task={t} agents={agents} agentById={agentById} onChange={onChange} />
             ))}

@@ -67,6 +67,16 @@ export function decryptField(ciphertext: string): string {
 
 let db: Database.Database;
 
+/**
+ * Accessor for the singleton better-sqlite3 handle. Sibling modules that own
+ * their own table CRUD (e.g. approval-queue.ts) use this instead of importing
+ * the private `db` binding directly, so the single-connection serialization
+ * guarantee (and the test-DB swap via _initTestDatabase) is preserved.
+ */
+export function getDb(): Database.Database {
+  return db;
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
@@ -330,6 +340,33 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_audit_agent ON audit_log(agent_id, created_at DESC);
+
+    -- Approval queue (Phase 3, PERM-04). The permission gate inserts a pending
+    -- row when a background (non-attended) run hits a Tier 3/4 "ask" outcome;
+    -- the operator approves/denies from the dashboard, and approve replays the
+    -- captured tool params exactly once (D-08, L-3 status-guarded). Shaped for
+    -- Phase 4/5 readers. Dual-written: this createSchema block builds it for the
+    -- in-memory test DB (_initTestDatabase), and migrations/v1.2.3 builds it for
+    -- the live store — never only one (P-4 migration drift). tool_input stores
+    -- ONLY the model-supplied params as JSON, never env/secrets (L-4 / ASVS V8).
+    CREATE TABLE IF NOT EXISTS approval_queue (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id      TEXT NOT NULL DEFAULT 'main',
+      chat_id       TEXT NOT NULL DEFAULT '',
+      run_id        TEXT,                            -- mission/scheduled task id (NULL for chat)
+      routine_id    TEXT,                            -- forward-compat for Phase 2 (NULL today)
+      tool_name     TEXT NOT NULL,
+      tool_input    TEXT NOT NULL,                   -- JSON of the captured params (D-08 replay)
+      tier          INTEGER NOT NULL,
+      mode_at_decision TEXT NOT NULL,                -- mode when gated (audit/Phase 5)
+      summary       TEXT NOT NULL DEFAULT '',        -- plain-language one-liner
+      status        TEXT NOT NULL DEFAULT 'pending', -- pending|approved|denied|expired
+      decided_at    INTEGER,                         -- when approved/denied
+      result        TEXT,                            -- replay outcome (success text or honest error)
+      created_at    INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_approval_pending ON approval_queue(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_approval_agent ON approval_queue(agent_id, created_at DESC);
 
     -- Per-workspace personalization (workspace name, hotkey mod, mission
     -- column order/widths, etc). Simple key/value with last-write-wins;

@@ -89,7 +89,8 @@ export type AuditAction =
   | 'command'
   | 'delegation'
   | 'kill'
-  | 'blocked';
+  | 'blocked'
+  | 'permission';
 
 export interface AuditEntry {
   agentId: string;

@@ -70,6 +70,7 @@ export const TERMS = {
   'page.activity':  { operator: 'Activity',                    builder: 'Audit' },
   'page.pulse':     { operator: 'Team pulse',                  builder: 'Hive Mind' },
   'page.knowledge': { operator: 'What your assistant knows',   builder: 'Memories' },
+  'page.permissions': { operator: 'Permissions',               builder: 'Permissions' },
 
   // Reusable nouns for in-screen copy and palette actions.
   'noun.teammate':       { operator: 'teammate',        builder: 'agent' },

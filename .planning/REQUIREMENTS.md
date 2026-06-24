@@ -30,10 +30,10 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 - [x] **RTN-05**: Routine run history shows success, degraded, and failed runs honestly, and the user is notified when a routine breaks or degrades
 
 ### Permissions & Autonomy (PERM)
-- [ ] **PERM-01**: A user can set a global autonomy mode (Cautious / Balanced / Autonomous)
-- [ ] **PERM-02**: A user can override what the team may do per action (Always / Ask first)
-- [ ] **PERM-03**: Irreversible actions (send money, sign, delete) are locked to Ask-first and cannot be set to Always in any mode (D4)
-- [ ] **PERM-04**: A gated action is prepared and queued as a "Needs you" item for one-tap approval
+- [x] **PERM-01**: A user can set a global autonomy mode (Cautious / Balanced / Autonomous)
+- [x] **PERM-02**: A user can override what the team may do per action (Always / Ask first)
+- [x] **PERM-03**: Irreversible actions (send money, sign, delete) are locked to Ask-first and cannot be set to Always in any mode (D4)
+- [x] **PERM-04**: A gated action is prepared and queued as a "Needs you" item for one-tap approval
 
 ### Activity & Audit (TRUST)
 - [ ] **TRUST-01**: A user can see an activity feed of what the team did, each item tagged autonomous vs approved
@@ -79,10 +79,10 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 | RTN-03 | Phase 2 | Complete |
 | RTN-04 | Phase 2 | Complete |
 | RTN-05 | Phase 2 | Complete |
-| PERM-01 | Phase 3 | Pending |
-| PERM-02 | Phase 3 | Pending |
-| PERM-03 | Phase 3 | Pending |
-| PERM-04 | Phase 3 | Pending |
+| PERM-01 | Phase 3 | Complete |
+| PERM-02 | Phase 3 | Complete |
+| PERM-03 | Phase 3 | Complete |
+| PERM-04 | Phase 3 | Complete |
 | TRUST-01 | Phase 4 | Pending |
 | TRUST-02 | Phase 4 | Pending |
 | AUD-01 | Phase 5 | Pending |
