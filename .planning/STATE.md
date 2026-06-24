@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
-status: verifying
+status: "Phase 03 verification gaps_found (2/4) — gap closure pending"
 last_updated: "2026-06-24T15:21:13.618Z"
 last_activity: 2026-06-24
 progress:
   total_phases: 8
-  completed_phases: 3
+  completed_phases: 2
   total_plans: 12
   completed_plans: 12
-  percent: 38
+  percent: 25
 ---
 
 # Project State
@@ -24,9 +24,9 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 ## Current Position
 
-Phase: 03 (permissions-autonomy) — ALL PLANS EXECUTED
-Plan: 4 of 4 (complete)
-Status: Phase complete — ready for verification
+Phase: 03 (permissions-autonomy) — ALL PLANS EXECUTED, VERIFICATION gaps_found (2/4)
+Plan: 4 of 4 executed; gap closure pending
+Status: Verifier found 2 blocking gaps (PERM-04 replay-once race; PERM-02 override-key mismatch). Run /gsd-plan-phase 03 --gaps then /gsd-execute-phase 03 --gaps-only.
 Last activity: 2026-06-24
 
 ## Performance Metrics
