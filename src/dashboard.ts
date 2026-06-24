@@ -122,6 +122,7 @@ import {
   type OverrideValue,
 } from './permissions-config.js';
 import { listPending, approve, deny, type ApprovalRow } from './approval-queue.js';
+import { buildActivityFeed } from './activity.js';
 import { replayApproval } from './replay-executor.js';
 import { UPLOADS_DIR } from './media.js';
 import { collectProjectFiles, collectTaskFiles, allowedProjectDownloadPaths } from './mission-files.js';
@@ -3554,6 +3555,23 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   app.get('/api/audit/blocked', (c) => {
     const limit = parseInt(c.req.query('limit') || '10', 10);
     return c.json({ entries: getRecentBlockedActions(limit) });
+  });
+
+  // ── Activity (operator feed, TRUST-01 / D-06) ──────────────────────
+  //
+  // The curated, plain-language read model the operator looks at. GET, so it
+  // inherits the query-token gate from the app-level middleware above (T-04-auth)
+  // by mounting on `app`, no bespoke auth here. The response carries ONLY the
+  // curated, param-level row fields buildActivityFeed already projects (no env,
+  // no secrets, mirrors the approvalView no-raw-secrets rule, T-04-infodisc-resp).
+  // Read-side filter (all | autonomous | needsyou | <agent_id>, D-11) and a
+  // bounded limit are passed straight through to the plan-01 read model.
+  app.get('/api/activity', (c) => {
+    const filter = c.req.query('filter') || undefined;
+    const rawLimit = parseInt(c.req.query('limit') || '100', 10);
+    const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
+    const rows = buildActivityFeed({ filter, limit });
+    return c.json({ rows });
   });
 
   // Hive mind feed

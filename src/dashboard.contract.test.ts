@@ -1028,3 +1028,85 @@ describe('approvals API contract', () => {
     expect(await jsonOf(res)).toMatchObject({ ok: true });
   });
 });
+
+describe('activity API contract', () => {
+  it('GET /api/activity is auth-gated (token gate inherited from app mount, T-04-auth)', async () => {
+    const noTok = await getNoToken('/api/activity');
+    expect(noTok.status).toBe(401);
+    expect(await jsonOf(noTok)).toMatchObject({ error: 'Unauthorized' });
+  });
+
+  it('GET /api/activity with the token returns 200 and a rows array', async () => {
+    const res = await get('/api/activity');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ rows: expect.any(Array) });
+  });
+
+  it('returns the curated tagged shape: a queued pending row tagged "Needs you", an autonomous audit "allow" row tagged "Ran on its own", and no secret fields', async () => {
+    const { enqueueApproval } = await import('./approval-queue.js');
+    const { insertAuditLog } = await import('./db.js');
+
+    // A queued, still-pending action: approval_queue owns it -> "Needs you".
+    enqueueApproval({
+      toolName: 'mcp__gmail__send-email',
+      toolInput: { to: 'lead@example.com', body: 'follow up' },
+      tier: 3,
+      modeAtDecision: 'balanced',
+      summary: 'send to lead@example.com',
+      runId: 'routine-a',
+    });
+
+    // An autonomous action that never touched the queue: audit outcome='allow'
+    // -> "Ran on its own". detail carries only {tool,tier,outcome}, no params.
+    insertAuditLog(
+      'comms',
+      'chat-1',
+      'permission',
+      JSON.stringify({ tool: 'mcp__gmail__apply-label', tier: 1, outcome: 'allow' }),
+      false,
+    );
+
+    const res = await get('/api/activity');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    const rows = body.rows as Array<Record<string, unknown>>;
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+
+    const tags = rows.map((r) => r.tag);
+    expect(tags).toContain('Needs you');
+    expect(tags).toContain('Ran on its own');
+
+    // No secret/env material leaks into a feed row (T-04-infodisc-resp).
+    const blob = JSON.stringify(body).toLowerCase();
+    expect(blob).not.toContain('api_key');
+    expect(blob).not.toContain('oauth');
+    expect(blob).not.toContain('process.env');
+  });
+
+  it('respects the read-side filter (needsyou returns only "Needs you" rows, D-11)', async () => {
+    const { enqueueApproval } = await import('./approval-queue.js');
+    const { insertAuditLog } = await import('./db.js');
+    enqueueApproval({
+      toolName: 'mcp__gmail__send-email',
+      toolInput: { to: 'x@y.com' },
+      tier: 3,
+      modeAtDecision: 'balanced',
+      summary: 'send',
+      runId: 'routine-b',
+    });
+    insertAuditLog(
+      'ops',
+      'chat-1',
+      'permission',
+      JSON.stringify({ tool: 'mcp__gmail__apply-label', tier: 1, outcome: 'allow' }),
+      false,
+    );
+
+    const res = await get('/api/activity?filter=needsyou');
+    expect(res.status).toBe(200);
+    const rows = (await jsonOf(res)).rows as Array<Record<string, unknown>>;
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.every((r) => r.tag === 'Needs you')).toBe(true);
+  });
+});
