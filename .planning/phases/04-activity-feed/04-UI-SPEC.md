@@ -35,38 +35,36 @@ created: 2026-06-24
 
 ## Spacing Scale
 
-The project uses Tailwind's default 4px-based scale, applied through utility classes. Declared values for this surface (all multiples of 4):
+The project uses Tailwind's default 4px-based scale, applied through utility classes. The declared spacing scale for this surface contains only multiples of 4:
 
 | Token | Value | Usage |
 |-------|-------|-------|
 | xs | 4px | Icon-to-label gap, tag inner padding (`gap-1`, `px-1` = 4px) |
-| sm | 8px | Inline element spacing, row action gaps (`gap-2`, `gap-1.5`≈6px rounds within this band) |
+| sm | 8px | Inline element spacing, row action gaps (`gap-2`) |
 | md | 12px | Row internal padding (`p-3` = 12px — matches `ApprovalItem`) |
 | lg | 16px | Gap between rows / vertical rhythm inside a day group |
 | xl | 24px | Page horizontal padding (`px-6` = 24px — matches `PageHeader`) |
 | 2xl | 32px | Day-group separation (between dated sections) |
 | 3xl | 64px | Empty/loading vertical centering (`py-16` = 64px — matches `PageState`) |
 
-Exceptions:
-- Tag chips and the teammate dot follow `Pill` / `StatusDot` exactly: chip `px-1.5 py-0.5` (6px/2px), dot `w-1.5 h-1.5` (6px). These are sub-grid micro-paddings inherited verbatim from existing components — do not re-derive them.
-- Touch targets: row action buttons match `ApprovalItem` (`px-2.5 py-1` / `px-2 py-1`); this is a desktop Electron app, not touch, so 44px targets are not required.
+Exceptions: none. The reused components (`Pill.tsx` / `StatusDot` / `ApprovalItem` button sizing) carry their own internal micro-spacing inherited verbatim from the existing design system; `Activity.tsx` introduces **no new sub-4px spacing values** of its own. Touch targets: this is a desktop Electron app, not touch, so 44px targets are not required.
 
 ---
 
 ## Typography
 
-Inter throughout. Base `font-size` is 13px / `line-height: 1.5` (set on `html`). This surface declares 4 roles, mirroring the values already in `PageHeader`, `ApprovalItem`, and `PageState`:
+Inter throughout. Base `font-size` is 13px / `line-height: 1.5` (set on `html`). This surface declares **exactly 4 sizes** (10 / 11 / 12.5 / 14), mirroring the values already in `PageHeader`, `ApprovalItem`, and `PageState`. Hierarchy below the title is carried by **color and weight**, not by adding more sizes:
 
 | Role | Size | Weight | Line Height |
 |------|------|--------|-------------|
 | Page title ("Activity") | 14px | 500 (header component renders 600 — inherited exception) | 1.5 |
 | Row action phrase (the plain-language line) | 12.5px | 400 | 1.4 (`leading-snug`) |
-| Meta (who + when, "Comms · 9:12am") | 11px | 400 | 1.5 |
+| Meta (who + when, "Comms · 9:12am") AND page subtitle ("What your team did") | 11px | 400 | 1.5 |
 | Tag / day-group label / chip | 10px | 500 | 1.5 |
 
-- Subtitle "What your team did" renders at 12px / weight 400 / `--color-text-muted`.
+- The page subtitle "What your team did" renders at **11px / weight 400**, the same size as the meta line; it is differentiated from the meta line by the **`--color-text-muted`** token, not by a distinct size. (Collapsed from a 5th size per checker Dimension 4 fix.)
 - Relative time uses `tabular-nums` (matches `ApprovalItem`).
-- NO monospace anywhere on this surface. The honest failure reason on Undo is the single allowed exception ONLY if it carries a technical verbatim error — prefer plain text; if mono is used it matches `ApprovalItem`'s `font-mono` failure line at 10.5px.
+- NO monospace anywhere on this surface. The honest failure reason on Undo is the single allowed exception ONLY if it carries a technical verbatim error — prefer plain text; if mono is used it matches `ApprovalItem`'s `font-mono` failure line at 10.5px (a reused component value, not a new declared type role).
 
 ---
 
@@ -78,11 +76,11 @@ Dark-theme app with three themes (graphite default, midnight, crimson). Activity
 |------|-------|-------|
 | Dominant (60%) | `var(--color-bg)` (#0e0e10 graphite) | Page background, the feed canvas |
 | Secondary (30%) | `var(--color-card)` / `var(--color-elevated)` (#1a1a1c / #222226) | Row cards, day-group containers, filter-chip active state |
-| Accent (10%) | `var(--color-accent)` (#8b8af0 graphite; theme-variable) | Primary action buttons (Summarize, Review→approve), active nav, focus — RESERVED, see below |
+| Accent (10%) | `var(--color-accent)` (#8b8af0 graphite; theme-variable) | Primary action buttons (Summarize Today, Review→approve), active nav, focus — RESERVED, see below |
 | Destructive | `var(--color-status-failed)` (#dc2626) | Undo confirmation modal, honest Undo-failure text only |
 
 **Accent reserved for (explicit list — never "all interactive elements"):**
-- The **Summarize** header action button (filled accent, like `ApprovalItem`'s Approve button).
+- The **Summarize Today** header action button (filled accent, like `ApprovalItem`'s Approve button).
 - The **Review** affordance's primary approve action (reuses the existing `/api/approvals` approve button styling, which is filled accent).
 - The active filter chip and active sidebar nav item.
 - Focus rings / hover on accent buttons (`--color-accent-hover`).
@@ -109,7 +107,7 @@ Reuse-first. Do NOT rebuild any of these.
 
 | Component | Path | Role in Activity |
 |-----------|------|------------------|
-| `PageHeader` + `Tab` | `web/src/components/PageHeader.tsx` | Header ("Activity" title, subtitle via custom node, Summarize in `actions` slot, filter chips in `tabs` slot) |
+| `PageHeader` + `Tab` | `web/src/components/PageHeader.tsx` | Header ("Activity" title, subtitle via custom node, Summarize Today in `actions` slot, filter chips in `tabs` slot) |
 | `Pill` / `StatusDot` | `web/src/components/Pill.tsx` | The per-row tag (tones above) and the teammate/status dot |
 | `PageState` | `web/src/components/PageState.tsx` | Loading / error / empty states |
 | `ConfirmModal` | `web/src/components/ConfirmModal.tsx` | Undo confirmation (`destructive` prop) |
@@ -124,7 +122,9 @@ New components to build: `web/src/pages/Activity.tsx` (the surface) and optional
 
 ## Layout Contract
 
-**Page:** `PageHeader` (title "Activity", subtitle "What your team did", Summarize action, filter-chip tabs) over a scrollable reverse-chronological feed grouped by day.
+**Page:** `PageHeader` (title "Activity", subtitle "What your team did", Summarize Today action, filter-chip tabs) over a scrollable reverse-chronological feed grouped by day.
+
+**Per-row visual focal point:** the right-aligned `Pill` tag (Ran on its own / You approved / Needs you) is the primary visual focal point of every row — it is the accountability signal the operator scans for, so it must be the most color-saturated, immediately-legible element in the row's right rail, sitting above the quieter View/Review/Undo affordances.
 
 **Day grouping:** a quiet day-label header (`.section-label` style: 10px, uppercase, letter-spacing, `--color-text-faint`) e.g. "TODAY", "YESTERDAY", "MON, JUN 23". Grouped by **local machine timezone** (single-user local-first app, per RESEARCH A3). 32px (`2xl`) separates day groups.
 
@@ -140,7 +140,7 @@ New components to build: `web/src/pages/Activity.tsx` (the surface) and optional
 1. **Teammate color dot** — 6px `StatusDot`-style span filled with `teammateColor(agent_id)`.
 2. **Plain-language phrase** — 12.5px / weight 400, `--color-text`, `leading-snug`, `line-clamp-2`. From the deterministic tool→phrase map (D-04); honest generic ("Used Gmail", "Ran <tool>") for unmapped (D-05). Never fabricated, never hidden.
 3. **Meta line** — `AgentAvatar` (16px) + "Teammate · 9:12am" (or "Ops · 6:00pm routine" when `routine_id` is present), 11px / `--color-text-muted`.
-4. **Tag** — right-aligned `Pill` with the tone from the Color table. This is the accountability signal; keep it legible.
+4. **Tag** — right-aligned `Pill` with the tone from the Color table. This is the per-row focal point and the accountability signal; keep it legible.
 5. **Affordances** (right-aligned, conditional — see Interaction States): `View`, `Review`, `Undo`.
 
 ---
@@ -179,7 +179,7 @@ All copy plain-language, terse, no em dashes.
 |---------|------|
 | Page title | Activity |
 | Page subtitle | What your team did |
-| Primary CTA (header action) | Summarize |
+| Primary CTA (header action) | Summarize Today |
 | Summarize in-progress | Summarizing… |
 | Summarize result framing | A short plain-language paragraph (no em dashes, 3 to 4 sentences). On failure: "Couldn't summarize right now. The feed below is complete." |
 | Filter chips | All / Ran on its own / Needs you / [teammate names] |
