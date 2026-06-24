@@ -17,7 +17,10 @@ import {
   approve,
   deny,
   expireOlderThan,
+  getApprovalById,
+  listApprovals,
 } from './approval-queue.js';
+import { getDb } from './db.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -89,5 +92,59 @@ describe('approval-queue', () => {
     const id = enqueueSample({ toolInput: { to: 'x@y.com', body: 'safe' }, summary: 'safe summary' });
     const found = listPending().find((p) => p.id === id);
     expect(JSON.stringify(found)).not.toContain(secret);
+  });
+});
+
+describe('approval-queue read helpers (Undo prep)', () => {
+  it('getApprovalById returns a hydrated row of any status (pending/approved/denied/expired)', () => {
+    const pendingId = enqueueSample();
+    const approvedId = enqueueSample();
+    approve(approvedId, { ok: true });
+    const deniedId = enqueueSample();
+    deny(deniedId, { ok: false });
+
+    const pending = getApprovalById(pendingId);
+    expect(pending?.status).toBe('pending');
+    // tool_input hydrated to an object, not the raw JSON string.
+    expect(typeof pending?.tool_input).toBe('object');
+    expect(pending?.tool_input).toMatchObject({ to: 'a@b.com' });
+
+    expect(getApprovalById(approvedId)?.status).toBe('approved');
+    expect(getApprovalById(deniedId)?.status).toBe('denied');
+  });
+
+  it('getApprovalById returns undefined for a missing id', () => {
+    expect(getApprovalById(999_999)).toBeUndefined();
+  });
+
+  it('listApprovals(statuses) returns only rows in those statuses, most-recent-first', () => {
+    const pendingId = enqueueSample();
+    const approvedId = enqueueSample();
+    approve(approvedId, { ok: true });
+    const deniedId = enqueueSample();
+    deny(deniedId, { ok: false });
+
+    const rows = listApprovals(['approved', 'denied']);
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(approvedId);
+    expect(ids).toContain(deniedId);
+    expect(ids).not.toContain(pendingId);
+    // Ordered created_at DESC, id DESC — the later-inserted denied id comes first.
+    expect(ids.indexOf(deniedId)).toBeLessThan(ids.indexOf(approvedId));
+  });
+
+  it('listApprovals([]) returns no rows (empty status set)', () => {
+    enqueueSample();
+    expect(listApprovals([])).toEqual([]);
+  });
+
+  it('a corrupt tool_input JSON string hydrates to {} and does not throw', () => {
+    const id = enqueueSample();
+    // Force a corrupt JSON blob directly into the row.
+    getDb()
+      .prepare(`UPDATE approval_queue SET tool_input = ? WHERE id = ?`)
+      .run('{not valid json', id);
+    expect(() => getApprovalById(id)).not.toThrow();
+    expect(getApprovalById(id)?.tool_input).toEqual({});
   });
 });
