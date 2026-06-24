@@ -121,7 +121,7 @@ Plans:
 **Plans**: 4 plansPlans:
 **Wave 1**
 
-- [ ] 04-01-PLAN.md: Read-side engine + Wave 0 tests: phrase map (D-04/05), buildActivityFeed merge/dedupe/tag derivation (D-06), approval-queue read helpers
+- [x] 04-01-PLAN.md: Read-side engine + Wave 0 tests: phrase map (D-04/05), buildActivityFeed merge/dedupe/tag derivation (D-06), approval-queue read helpers
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -206,7 +206,7 @@ Plans:
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
-| 4. Activity Feed | 0/? | Not started | - |
+| 4. Activity Feed | 1/4 | In Progress|  |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |

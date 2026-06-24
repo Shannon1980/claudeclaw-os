@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
 status: executing
-last_updated: "2026-06-24T21:57:52.309Z"
-last_activity: 2026-06-24 -- Phase 04 planning complete
+last_updated: "2026-06-24T23:24:33.403Z"
+last_activity: 2026-06-24
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 16
-  completed_plans: 12
+  completed_plans: 13
   percent: 38
 ---
 
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** A local-first desktop AI chief-of-staff for business operators — install with no terminal, runs the real Claude engine on the operator's own machine, keeps work moving and never lets anything fall through.
-**Current focus:** Phase 03 — permissions-autonomy
+**Current focus:** Phase 04 — activity-feed
 
 ## Current Position
 
-Phase: 03 (permissions-autonomy) — ALL PLANS EXECUTED, VERIFICATION gaps_found (2/4)
-Plan: 4 of 4 executed; gap closure pending
+Phase: 04 (activity-feed) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-06-24 -- Phase 04 planning complete
+Last activity: 2026-06-24
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Last activity: 2026-06-24 -- Phase 04 planning complete
 | Phase 03 P02 | 6min | 2 tasks | 4 files |
 | Phase 03 P03 | ~25min | 2 tasks | 12 files |
 | Phase 03 P04 | ~30min | 3 tasks | 12 files |
+| Phase 04 P01 | 6min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: 03-03: bypassPermissions removed; query() runs canUseTool gate; omitted gateCtx defaults to safe background ask/queue (P-5)
 - [Phase ?]: [Phase 03]: 03-03: approval_queue dual-written (db.ts createSchema + migration v1.2.3); approve/deny status-guarded WHERE status='pending' + .changes===1 = replay-once (L-3); migration AUTHORED + temp-DB validated but NOT applied to live store/ (operator runs npm run migrate before restart)
 - [Phase ?]: [Phase 03]: 03-04: /api/permissions + /api/approvals shipped behind token gate + mutations kill-switch; replay-executor.ts allowlists MCP direct-call + tiny Bash/Write, rejects all else honestly (no eval); Tier 4 approve is per-instance only (D-05); message-core requestInline is bounded-timeout fail-to-deny (D-04). Operator human-verify checkpoint APPROVED 2026-06-24.
+- [Phase ?]: [Phase 04]: 04-01: activity read engine GREEN. isUndoableFamily is the single undo-allowlist source of truth (plan 03 reuses it); audit read filters outcome IN (allow,approved-inline) which IS the dedupe (approval_queue owns queued); undoable requires status=approved + allowlist + tier<4 + tool_input; read-side D-06 tags, no migration, gate.ts untouched
 
 ### Pending Todos
 
@@ -108,9 +110,9 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-24T21:39:44.589Z
+Last session: 2026-06-24T23:24:28.237Z
 Stopped at: Phase 4 UI-SPEC approved
-Resume file: .planning/phases/04-activity-feed/04-UI-SPEC.md
+Resume file: None
 
 ## Operator Next Steps
 
