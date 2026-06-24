@@ -9,15 +9,17 @@
 // shows exactly the {tool, tier, outcome} the system captured and says so
 // (D-05 honesty), never implying more detail than was stored.
 
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { PageHeader, Tab } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { Pill } from '@/components/Pill';
 import { AgentAvatar } from '@/components/AgentAvatar';
-import { apiGet } from '@/lib/api';
+import { ConfirmModal } from '@/components/ConfirmModal';
+import { apiGet, apiPost } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { teammateColor } from '@/lib/teammate';
 import { term } from '@/lib/vocabulary';
+import { pushToast } from '@/lib/toasts';
 
 // Mirror of the curated row the GET /api/activity endpoint returns
 // (src/activity.ts ActivityRow). Carries only param-level fields, no secrets.
@@ -112,31 +114,38 @@ export function Activity() {
   }, []);
 
   // Read-side filtering: pass the active filter straight to the endpoint (D-11).
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    const q = filter === 'all' ? '' : `?filter=${encodeURIComponent(filter)}`;
-    apiGet<{ rows: ActivityRow[] }>(`/api/activity${q}`)
-      .then((data) => {
-        if (cancelled) return;
-        setRows(data.rows);
-        setKnownTeammates((prev) => {
-          const next = new Set(prev);
-          for (const r of data.rows) next.add(r.agent_id);
-          return Array.from(next).sort();
+  const load = useCallback(
+    (signal?: { cancelled: boolean }) => {
+      setLoading(true);
+      setError(null);
+      const q = filter === 'all' ? '' : `?filter=${encodeURIComponent(filter)}`;
+      return apiGet<{ rows: ActivityRow[] }>(`/api/activity${q}`)
+        .then((data) => {
+          if (signal?.cancelled) return;
+          setRows(data.rows);
+          setKnownTeammates((prev) => {
+            const next = new Set(prev);
+            for (const r of data.rows) next.add(r.agent_id);
+            return Array.from(next).sort();
+          });
+        })
+        .catch((err: any) => {
+          if (!signal?.cancelled) setError(err?.message || String(err));
+        })
+        .finally(() => {
+          if (!signal?.cancelled) setLoading(false);
         });
-      })
-      .catch((err: any) => {
-        if (!cancelled) setError(err?.message || String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    },
+    [filter],
+  );
+
+  useEffect(() => {
+    const signal = { cancelled: false };
+    void load(signal);
     return () => {
-      cancelled = true;
+      signal.cancelled = true;
     };
-  }, [filter]);
+  }, [load]);
 
   const teammateName = (id: string) => agents[id] || id;
 
@@ -228,6 +237,7 @@ export function Activity() {
                     onToggle={() =>
                       setOpenRow(openRow === rowUid(r) ? null : rowUid(r))
                     }
+                    onUndone={() => void load()}
                   />
                 ))}
               </div>
@@ -244,20 +254,74 @@ function rowUid(r: ActivityRow): number {
   return (r.source === 'queue' ? 1 : 2) * 1_000_000 + r.id;
 }
 
+// Name the concrete inverse so the confirmation says exactly what Undo will do
+// (D-08 honesty). Falls back to a generic but truthful line for an allowlisted
+// family without a more specific phrase. No em dashes.
+function undoCopy(toolName: string): { body: string; success: string } {
+  if (/draft/i.test(toolName)) {
+    return { body: 'This will delete the draft.', success: 'Draft deleted.' };
+  }
+  if (/label/i.test(toolName)) {
+    return { body: 'This will remove the label.', success: 'Label removed.' };
+  }
+  if (/(calendar|gcal|event|meeting)/i.test(toolName)) {
+    return { body: 'This will cancel the meeting.', success: 'Meeting cancelled.' };
+  }
+  return { body: 'This will reverse the action.', success: 'Undone.' };
+}
+
 // One feed row, echoing the ApprovalItem card anatomy (card on --color-elevated,
 // border, rounded-md, p-3). Teammate dot, plain-language phrase, meta line, the
-// right-aligned accountability tag, and an honest View toggle.
+// right-aligned accountability tag, an honest View toggle, and (only when the
+// row is genuinely undoable) an Undo affordance that runs a real inverse.
 function ActivityRowCard({
   row,
   teammate,
   open,
   onToggle,
+  onUndone,
 }: {
   row: ActivityRow;
   teammate: string;
   open: boolean;
   onToggle: () => void;
+  onUndone: () => void;
 }) {
+  // Undo interaction model mirrors ApprovalItem: busy + honest-failure state,
+  // a destructive ConfirmModal, apiPost, and a success / honest-failure toast.
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [confirmUndo, setConfirmUndo] = useState(false);
+  const copy = undoCopy(row.tool_name);
+
+  async function undoNow() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const res = await apiPost<{ ok: boolean; result?: string; error?: string }>(
+        `/api/activity/${row.id}/undo`,
+      );
+      if (res.ok) {
+        pushToast({ tone: 'success', title: 'Undone.', description: res.result || copy.success });
+        onUndone();
+      } else {
+        // The route ran (or refused) honestly. Surface the verbatim reason,
+        // never a generic failure line. If a server is absent the reason
+        // itself reads "Connect Gmail in Settings to undo this."
+        const reason = res.result || res.error || 'Could not undo this action.';
+        setFailure(reason);
+        pushToast({ tone: 'error', title: 'Could not undo', description: reason, durationMs: 6000 });
+        onUndone();
+      }
+    } catch (err: any) {
+      const reason = err?.body?.error || err?.message || String(err);
+      setFailure(reason);
+      pushToast({ tone: 'error', title: 'Could not undo', description: reason, durationMs: 6000 });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-3">
       <div class="flex items-start gap-2">
@@ -284,7 +348,27 @@ function ActivityRowCard({
             >
               {open ? 'Hide' : 'View'}
             </button>
+            {/* Undo renders ONLY when the row is genuinely undoable (server-
+                computed flag: approved + allowlisted + tier<4 + has params).
+                Otherwise it is ABSENT, never a dead or no-op button
+                (D-07/D-08/D-09; UI-SPEC interaction table). */}
+            {row.undoable && (
+              <button
+                type="button"
+                onClick={() => setConfirmUndo(true)}
+                disabled={busy}
+                class="text-[11px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-status-failed)] transition-colors disabled:opacity-40"
+              >
+                {busy ? '…' : 'Undo'}
+              </button>
+            )}
           </div>
+
+          {failure && (
+            <div class="text-[10.5px] text-[var(--color-status-failed)] font-mono line-clamp-2 mt-1.5">
+              {failure}
+            </div>
+          )}
 
           {open && (
             <div class="mt-2 pt-2 border-t border-[var(--color-border)] text-[11px] text-[var(--color-text-muted)] flex flex-col gap-0.5">
@@ -307,6 +391,18 @@ function ActivityRowCard({
           )}
         </div>
       </div>
+
+      {row.undoable && (
+        <ConfirmModal
+          open={confirmUndo}
+          onClose={() => setConfirmUndo(false)}
+          onConfirm={() => void undoNow()}
+          title="Undo this?"
+          body={copy.body}
+          confirmLabel="Undo"
+          destructive
+        />
+      )}
     </div>
   );
 }
