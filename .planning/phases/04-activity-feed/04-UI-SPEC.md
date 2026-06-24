@@ -75,15 +75,13 @@ Exceptions:
 ## Typography
 
 The base font-size is 13px (`html { font-size: 13px }`) — a deliberately compact desktop density.
-Sizes are declared in px via arbitrary Tailwind classes. **Exactly 4 roles, exactly 3 weights (400 / 500 / 600).**
+Sizes are declared in px via arbitrary Tailwind classes. **Exactly 4 roles, exactly 2 weights (400, 600).**
 
-All three weights already exist in the design system — this contract does not introduce any new weight,
-it documents the ones the existing primitives ship with so the executor applies them consistently:
+The Activity contract declares two design-system weights, and the executor applies only these two:
 
 | Weight | Where it already lives | Role in Activity |
 |--------|------------------------|------------------|
-| 400 (regular) | App body default | All running body text — row action descriptions, attribution lines, button labels |
-| 500 (medium) | `Pill` (`font-medium`) and `.section-label` helper, both pre-existing primitives | Micro tier only — tag/pill text and the uppercase day-group dividers. Inherited from the primitive; never hand-applied to body copy. |
+| 400 (regular) | App body default | All running body text — row action descriptions, attribution lines, button labels, subtitle, filter tabs |
 | 600 (semibold) | `PageHeader` title (`font-semibold`) | Page title "Activity" only |
 
 | Role | Size | Weight | Line Height | Usage |
@@ -91,16 +89,24 @@ it documents the ones the existing primitives ship with so the executor applies 
 | Heading | 14px | semibold (600) | 1.3 | Page title "Activity" (matches `PageHeader` `text-[14px] font-semibold`) |
 | Body | 13px | regular (400) | 1.5 | Per-row plain-language action description ("Sent follow-up to 3 leads") |
 | Label | 12px | regular (400) | 1.4 | Subtitle "What your team did", attribution line "Comms · 9:12am", buttons, filter tabs |
-| Micro | 10px | medium (500) | 1.4 | Tags/pills (via `Pill` `font-medium`), day-group date labels, `.section-label` |
+| Micro | 10px | regular (400) | 1.4 | Day-group date labels and any 10px text not rendered through a `Pill` |
 
-**Weight discipline:** 600 is reserved for the single page title. 500 is owned by two existing
-primitives (`Pill`, `.section-label`) and rides along with them at the Micro tier — the executor must
-NOT introduce 500 anywhere a `Pill` or `.section-label` is not already in play. Everything else is 400.
-This keeps the three weights cleanly partitioned by tier (Micro→500, Heading→600, all else→400) rather
-than scattered emphasis.
+**Weight discipline:** the Activity-level weight contract is exactly two weights — 400 (regular) for
+everything, and 600 (semibold) reserved for the single page title "Activity". The executor must NOT
+apply `font-medium` / weight-500 anywhere on its own.
+
+**Primitive-inherited weight (implementation detail, OUTSIDE the Activity weight contract):** the
+pre-existing `Pill` primitive ships `font-medium` (500) internally, and the `.section-label` helper
+ships weight 500 internally. When Activity renders a `Pill` (the tags) or reuses `.section-label`
+(the day-group dividers), 500 rides in automatically as a baked-in property of those components — it
+is what those primitives already are, not a typographic choice Activity makes. It is therefore NOT a
+declared Activity design-system weight and is not counted toward the 2-weight contract. The executor
+must NOT apply `font-medium` / weight-500 anywhere a `Pill` or `.section-label` is not already in play.
+Outside those two primitives, only 400 and 600 exist on this surface.
 
 Day-group headers reuse the existing `.section-label` helper (10px, uppercase, `letter-spacing 0.08em`,
-`--color-text-faint`, weight 500) for "TODAY" / "YESTERDAY" / "JUN 22" dividers.
+`--color-text-faint`) for "TODAY" / "YESTERDAY" / "JUN 22" dividers; its internal weight is a property
+of the helper, not an Activity-declared weight.
 
 ---
 
