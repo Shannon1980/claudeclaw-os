@@ -129,7 +129,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-03-PLAN.md: Undo slice: undo-executor allowlist inverse (D-07/08), Tier 4 refused (D-09), status-guarded POST /api/activity/:id/undo + conditional Undo UI
+- [x] 04-03-PLAN.md: Undo slice: undo-executor allowlist inverse (D-07/08), Tier 4 refused (D-09), status-guarded POST /api/activity/:id/undo + conditional Undo UI
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -206,7 +206,7 @@ Plans:
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
-| 4. Activity Feed | 2/4 | In Progress|  |
+| 4. Activity Feed | 3/4 | In Progress|  |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |

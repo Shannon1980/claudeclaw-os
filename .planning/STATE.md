@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
 status: executing
-last_updated: "2026-06-24T23:33:10.869Z"
+last_updated: "2026-06-24T23:46:42.424Z"
 last_activity: 2026-06-24
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 16
-  completed_plans: 14
+  completed_plans: 15
   percent: 38
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 04 (activity-feed) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-06-24
 
@@ -59,6 +59,7 @@ Last activity: 2026-06-24
 | Phase 03 P04 | ~30min | 3 tasks | 12 files |
 | Phase 04 P01 | 6min | 3 tasks | 6 files |
 | Phase 04 P02 | ~6min | 3 tasks | 8 files |
+| Phase 04 P03 | ~14min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: 03-04: /api/permissions + /api/approvals shipped behind token gate + mutations kill-switch; replay-executor.ts allowlists MCP direct-call + tiny Bash/Write, rejects all else honestly (no eval); Tier 4 approve is per-instance only (D-05); message-core requestInline is bounded-timeout fail-to-deny (D-04). Operator human-verify checkpoint APPROVED 2026-06-24.
 - [Phase ?]: [Phase 04]: 04-01: activity read engine GREEN. isUndoableFamily is the single undo-allowlist source of truth (plan 03 reuses it); audit read filters outcome IN (allow,approved-inline) which IS the dedupe (approval_queue owns queued); undoable requires status=approved + allowlist + tier<4 + tool_input; read-side D-06 tags, no migration, gate.ts untouched
 - [Phase ?]: [Phase 04]: 04-02: GET /api/activity is a thin token-gated wrapper over buildActivityFeed (inherits app gate, no bespoke auth, limit clamped); Activity.tsx renders the day-grouped card/list feed unlike Audit with read-side D-11 filters; nav collision resolved (one /activity -> nav.activity, /audit -> new nav.audit); Home one-click entry point (D-03)
+- [Phase ?]: [Phase 04]: 04-03: Undo vertical slice GREEN. undo-executor.ts mirrors replay-executor (MCP-over-stdio inverse); Tier 4 refused BEFORE dispatch (D-09); reuses isUndoableFamily allowlist; label-remove floor family proven end-to-end; claim-before-dispatch status guard prevents inverse double-fire; undo result in existing result column, NO migration; inverse tool names unconfirmed (no MCP servers connected) -> honest no-undo, logged deferred
 
 ### Pending Todos
 
@@ -112,7 +114,7 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-24T23:32:45.043Z
+Last session: 2026-06-24T23:46:23.597Z
 Stopped at: Phase 4 UI-SPEC approved
 Resume file: None
 
