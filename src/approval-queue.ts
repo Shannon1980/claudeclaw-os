@@ -212,6 +212,79 @@ export function deny(id: number, result?: unknown): boolean {
 }
 
 /**
+ * A recognizable prefix the undo write stamps into the existing `result`
+ * column. Reusing `result` (no new column, no migration, RESEARCH A2) means we
+ * need an in-band marker so the status-guarded UPDATE can refuse a second undo
+ * of the SAME row without a dedicated `undone` status. The prefix is matched in
+ * SQL with a leading-anchored LIKE so a normal replay result can never be
+ * mistaken for an undo marker.
+ */
+const UNDONE_MARKER = '[undone] ';
+
+/**
+ * CLAIM an approved row for undo, BEFORE running the inverse. STATUS-GUARDED
+ * (Tampering / T-04-undo-doublefire): the UPDATE only fires when the row is
+ * `status='approved'` AND its `result` is not already an undo marker. Returns
+ * true iff exactly one row changed — that boolean is the single source of truth
+ * for "this caller, and only this caller, gets to run the inverse." A second
+ * click or retry finds the row already marked and returns false, so the route
+ * never dispatches the inverse twice.
+ *
+ * The stamp is the bare UNDONE_MARKER so the row reads as "undo in progress"
+ * until finalizeUndo() overwrites it with the real outcome. The status stays
+ * 'approved' throughout (the action did happen and was approved); only the
+ * existing `result` column is used. No new column, no migration (RESEARCH A2).
+ *
+ * @param id - The approval_queue row id to claim for undo.
+ * @returns True iff this call claimed exactly one not-yet-undone approved row.
+ */
+export function claimUndo(id: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const info = getDb()
+    .prepare(
+      `UPDATE approval_queue
+          SET result = ?, decided_at = ?
+        WHERE id = ? AND status = 'approved'
+          AND (result IS NULL OR result NOT LIKE '[undone] %')`,
+    )
+    .run(UNDONE_MARKER.trim(), now, id);
+  return info.changes === 1;
+}
+
+/**
+ * Finalize an undo by overwriting the claimed row's `result` with the verbatim
+ * honest outcome from undoAction. Called only after claimUndo() returned true,
+ * so it always targets the row this caller claimed. Keeps the UNDONE_MARKER
+ * prefix so the row stays recognizably undone and a later claim still refuses.
+ *
+ * @param id - The approval_queue row id previously claimed via claimUndo.
+ * @param result - The undo outcome to record (serialized + capped, marker-stamped).
+ */
+export function finalizeUndo(id: number, result: unknown): void {
+  const body = result === undefined ? '' : JSON.stringify(result);
+  const resultText = (UNDONE_MARKER + body).slice(0, TEXT_CAP);
+  getDb()
+    .prepare(`UPDATE approval_queue SET result = ? WHERE id = ?`)
+    .run(resultText, id);
+}
+
+/**
+ * Convenience for non-route callers (and tests): claim + finalize in one step,
+ * status-guarded against a double-fire. Returns true iff this call performed the
+ * undo (claimed the row); a second call returns false. Prefer claimUndo() +
+ * finalizeUndo() in the route so the inverse is gated by the claim BEFORE it runs.
+ *
+ * @param id - The approval_queue row id to undo.
+ * @param result - The undo outcome to record.
+ * @returns True iff this call performed the undo (no double-fire).
+ */
+export function undo(id: number, result: unknown): boolean {
+  if (!claimUndo(id)) return false;
+  finalizeUndo(id, result);
+  return true;
+}
+
+/**
  * Flip pending rows older than `cutoffEpochSeconds` to `expired`. Status-guarded
  * so an already-decided row is never reopened. Returns the number expired.
  */

@@ -1110,3 +1110,98 @@ describe('activity API contract', () => {
     expect(rows.every((r) => r.tag === 'Needs you')).toBe(true);
   });
 });
+
+// Undo write path (TRUST-02 / D-07/D-08/D-09). The route inherits the token
+// gate + DASHBOARD_MUTATIONS_ENABLED kill-switch by mounting on `app`. No MCP
+// server is connected in the contract harness, so an allowlisted approved row's
+// inverse returns an honest "Connect ... in Settings" failure — but the
+// status-guarded CLAIM still acts, so the undo-not-twice invariant is exercised
+// without any real external call.
+describe('activity undo API contract', () => {
+  // Seed an approved, allowlisted (label family), tier<4 row with captured
+  // params — the only shape that is undoable.
+  async function seedApprovedUndoable() {
+    const { enqueueApproval, approve } = await import('./approval-queue.js');
+    const id = enqueueApproval({
+      toolName: 'mcp__gmail__apply-label',
+      toolInput: { message_id: 'msg-1', label: 'Follow up' },
+      tier: 1,
+      modeAtDecision: 'balanced',
+      summary: 'apply label',
+      runId: 'routine-undo',
+    });
+    approve(id, { ok: true });
+    return id;
+  }
+
+  it('400s on a non-integer id', async () => {
+    const res = await postAction('/api/activity/not-a-number/undo');
+    expect(res.status).toBe(400);
+    expect(await jsonOf(res)).toMatchObject({ ok: false });
+  });
+
+  it('is mutation-gated: returns 503 when DASHBOARD_MUTATIONS_ENABLED is off', async () => {
+    const killSwitches = await import('./kill-switches.js');
+    const id = await seedApprovedUndoable();
+    const prev = process.env.DASHBOARD_MUTATIONS_ENABLED;
+    process.env.DASHBOARD_MUTATIONS_ENABLED = 'false';
+    killSwitches._reset();
+    try {
+      const res = await postAction(`/api/activity/${id}/undo`);
+      expect(res.status).toBe(503);
+    } finally {
+      process.env.DASHBOARD_MUTATIONS_ENABLED = prev;
+      killSwitches._reset();
+    }
+  });
+
+  it('undoes an approved undoable row once; a SECOND undo does NOT re-fire (undo-not-twice)', async () => {
+    const id = await seedApprovedUndoable();
+
+    const first = await postAction(`/api/activity/${id}/undo`);
+    expect(first.status).toBe(200);
+    const firstBody = await jsonOf(first);
+    // No MCP server connected here, so the inverse fails honestly (ok:false)
+    // with the verbatim connect-in-Settings reason — never a generic error.
+    expect(firstBody).toHaveProperty('result');
+    expect(String(firstBody.result).toLowerCase()).toContain('connect');
+
+    // The CLAIM acted on the first call, so a second undo is a no-op.
+    const second = await postAction(`/api/activity/${id}/undo`);
+    expect(await jsonOf(second)).toMatchObject({ ok: false, error: 'already undone' });
+  });
+
+  it('honestly rejects a Tier 4 row with no inverse run (D-09)', async () => {
+    const { enqueueApproval, approve } = await import('./approval-queue.js');
+    const id = enqueueApproval({
+      toolName: 'mcp__bank__send-money',
+      toolInput: { to: 'acct-1', amount: 100 },
+      tier: 4,
+      modeAtDecision: 'balanced',
+      summary: 'send money',
+      runId: 'routine-t4',
+    });
+    approve(id, { ok: true });
+    const res = await postAction(`/api/activity/${id}/undo`);
+    const body = await jsonOf(res);
+    expect(body.ok).toBe(false);
+    expect(String(body.error)).toContain("Undo isn't available");
+  });
+
+  it('honestly rejects a non-allowlisted approved row (D-07)', async () => {
+    const { enqueueApproval, approve } = await import('./approval-queue.js');
+    const id = enqueueApproval({
+      toolName: 'mcp__gmail__send-email',
+      toolInput: { to: 'a@b.com' },
+      tier: 3,
+      modeAtDecision: 'balanced',
+      summary: 'send email',
+      runId: 'routine-na',
+    });
+    approve(id, { ok: true });
+    const res = await postAction(`/api/activity/${id}/undo`);
+    const body = await jsonOf(res);
+    expect(body.ok).toBe(false);
+    expect(String(body.error)).toContain("Undo isn't available");
+  });
+});

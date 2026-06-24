@@ -19,6 +19,7 @@ import {
   expireOlderThan,
   getApprovalById,
   listApprovals,
+  undo,
 } from './approval-queue.js';
 import { getDb } from './db.js';
 
@@ -146,5 +147,36 @@ describe('approval-queue read helpers (Undo prep)', () => {
       .run('{not valid json', id);
     expect(() => getApprovalById(id)).not.toThrow();
     expect(getApprovalById(id)?.tool_input).toEqual({});
+  });
+});
+
+describe('undo write (status-guarded, no double-fire, T-04-undo-doublefire)', () => {
+  it('records the undo result on an approved row and returns true', () => {
+    const id = enqueueSample();
+    approve(id, { ok: true });
+    const acted = undo(id, { ok: true, message: 'Removed label.' });
+    expect(acted).toBe(true);
+    const row = getApprovalById(id);
+    expect(row?.status).toBe('approved'); // status unchanged; only result stamped
+    expect(row?.result).toContain('Removed label.');
+  });
+
+  it('a SECOND undo of the same row is a no-op returning false (no double-fire)', () => {
+    const id = enqueueSample();
+    approve(id, { ok: true });
+    const first = undo(id, { ok: true, message: 'Removed label.' });
+    expect(first).toBe(true);
+    const second = undo(id, { ok: true, message: 'Removed label.' });
+    expect(second).toBe(false); // status-guarded: already undone
+  });
+
+  it('undo on a non-approved (pending) row is a no-op returning false', () => {
+    const id = enqueueSample(); // stays pending
+    const acted = undo(id, { ok: true, message: 'x' });
+    expect(acted).toBe(false);
+  });
+
+  it('undo on an unknown id returns false', () => {
+    expect(undo(999_999, { ok: true })).toBe(false);
   });
 });

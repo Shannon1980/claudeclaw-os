@@ -121,9 +121,10 @@ import {
   type Mode,
   type OverrideValue,
 } from './permissions-config.js';
-import { listPending, approve, deny, type ApprovalRow } from './approval-queue.js';
-import { buildActivityFeed } from './activity.js';
+import { listPending, approve, deny, claimUndo, finalizeUndo, getApprovalById, type ApprovalRow } from './approval-queue.js';
+import { buildActivityFeed, isUndoableFamily } from './activity.js';
 import { replayApproval } from './replay-executor.js';
+import { undoAction } from './undo-executor.js';
 import { UPLOADS_DIR } from './media.js';
 import { collectProjectFiles, collectTaskFiles, allowedProjectDownloadPaths } from './mission-files.js';
 import { getDashboardHtml } from './dashboard-html.js';
@@ -3572,6 +3573,53 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
     const rows = buildActivityFeed({ filter, limit });
     return c.json({ rows });
+  });
+
+  // Undo a reversible action (TRUST-02 / D-07/D-08/D-09). POST, so it inherits
+  // the DASHBOARD_MUTATIONS_ENABLED kill-switch 503 and the token gate from the
+  // app-level middleware above (T-04-undo-auth) by mounting on `app` — no
+  // bespoke gating here. Flow, mirroring the approve route's status-guarded
+  // "act once" shape:
+  //   1. parseInt + Number.isInteger -> 400 on a bad id (V5).
+  //   2. getApprovalById(id): must exist, be status='approved', undoable
+  //      (allowlisted family, tier<4, has tool_input). Else honest rejection.
+  //   3. claimUndo(id) status-guarded CLAIM, BEFORE any dispatch: only one
+  //      caller claims an approved, not-yet-undone row (T-04-undo-doublefire).
+  //      A second click finds it claimed and is a no-op — the inverse never
+  //      fires twice because the claim gates the dispatch.
+  //   4. undoAction(tool_name, tool_input, tier) runs the real inverse (or
+  //      refuses Tier 4 before dispatch / returns honest "no undo").
+  //   5. finalizeUndo(id, result) records the verbatim outcome on the claimed row.
+  // The verbatim honest result is returned on failure, never a generic error.
+  app.post('/api/activity/:id/undo', async (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+
+    const row = getApprovalById(id);
+    if (!row) {
+      return c.json({ ok: false, error: 'no undoable action for that id' });
+    }
+    if (row.status !== 'approved') {
+      return c.json({ ok: false, error: 'only an approved action can be undone' });
+    }
+    const hasInput = Object.keys(row.tool_input).length > 0;
+    if (!isUndoableFamily(row.tool_name) || row.tier >= 4 || !hasInput) {
+      // Honest "no undo": Tier 4, non-allowlisted, or no captured params.
+      return c.json({ ok: false, error: `Undo isn't available for ${row.tool_name}.` });
+    }
+
+    // Claim BEFORE dispatch so the inverse can never fire twice. If we lost the
+    // race (a second click already claimed it), report ok:false and do NOT run
+    // the inverse again.
+    if (!claimUndo(id)) {
+      return c.json({ ok: false, error: 'already undone' });
+    }
+
+    // Run the real inverse. undoAction refuses Tier 4 before dispatch and never
+    // throws; it returns the honest verbatim message either way.
+    const result = await undoAction(row.tool_name, row.tool_input, row.tier);
+    finalizeUndo(id, result.message);
+    return c.json({ ok: result.ok, result: result.message });
   });
 
   // Hive mind feed
