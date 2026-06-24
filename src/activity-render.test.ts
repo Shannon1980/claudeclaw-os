@@ -1,6 +1,6 @@
 // Wave 0 RED tests for the D-04/D-05 tool->phrase map (src/activity-render.ts).
 //
-// References `./activity-render.js`, which does NOT exist yet — the import
+// References `./activity-render.js`, which does NOT exist yet. The import
 // failing is the intended RED state. Pins the deterministic phrase map:
 //   mapped tools (gmail send, draft) return a plain, honest phrase; unmapped
 //   tools return an honest generic with the mcp__server__ prefix stripped, and
@@ -35,7 +35,7 @@ describe('activity-render phraseFor', () => {
 
   it('returns an honest generic for an unmapped tool, mcp__server__ prefix stripped', () => {
     const phrase = phraseFor('mcp__gmail__list-labels', {}, 1);
-    // Honest generic — never a fabricated detail, never hidden.
+    // Honest generic: never a fabricated detail, never hidden.
     expect(phrase).toBe('Ran list-labels');
     expect(phrase).not.toMatch(/label.*applied|sent|created/i);
   });

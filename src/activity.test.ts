@@ -1,6 +1,6 @@
 // Wave 0 RED tests for the curated Activity read model (src/activity.ts).
 //
-// References `./activity.js`, which does NOT exist yet — the import failing is
+// References `./activity.js`, which does NOT exist yet. The import failing is
 // the intended RED state. Pins TRUST-01 + D-06:
 //   - reverse-chron merge over approval_queue + audit_log permission rows
 //   - tag derivation read-side (pending/approved/allow/denied/expired)

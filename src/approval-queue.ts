@@ -160,7 +160,7 @@ export function getApprovalById(id: number): ApprovalRow | undefined {
 
 /**
  * Rows in any of the given statuses, most recent first (created_at DESC, id
- * DESC — matching listPending). Uses a parameterized IN list so no status value
+ * DESC, matching listPending). Uses a parameterized IN list so no status value
  * is string-interpolated into the SQL. An empty status set returns no rows.
  */
 export function listApprovals(statuses: ApprovalRow['status'][]): ApprovalRow[] {
