@@ -125,7 +125,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02-PLAN.md: First vertical slice: GET /api/activity + Activity.tsx surface + filter chips (D-11) + nav/route/vocab fix (D-01/02) + Home entry (D-03)
+- [x] 04-02-PLAN.md: First vertical slice: GET /api/activity + Activity.tsx surface + filter chips (D-11) + nav/route/vocab fix (D-01/02) + Home entry (D-03)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -206,7 +206,7 @@ Plans:
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
-| 4. Activity Feed | 1/4 | In Progress|  |
+| 4. Activity Feed | 2/4 | In Progress|  |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |
