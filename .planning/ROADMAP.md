@@ -27,7 +27,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [x] **Phase 1: Desktop Shell & Onboarding** - Zero-terminal install: Electron shell boots the service and drives Claude login/auth (completed 2026-06-23)
 - [ ] **Phase 2: Routines** - Plain-language scheduled multi-step workflows the operator builds by describing
 - [ ] **Phase 3: Permissions & Autonomy** - The four-tier autonomy model that gates every external action (plans executed 2026-06-24; verification gaps_found 2/4 — gap closure pending)
-- [ ] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo
+- [ ] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo (executed 2026-06-24; end-of-phase human-verify pending)
 - [ ] **Phase 5: Audit Log** - Admin-facing immutable, append-only, exportable record of every event
 - [ ] **Phase 6: Memory Surface** - "What your assistant knows": editable, provenance-tagged knowledge base
 - [ ] **Phase 7: Power Surfaces** - War room decision tool + live team pulse, reframed off the daily path
@@ -133,7 +133,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 04-04-PLAN.md: Summarize slice (D-10) + end-of-phase human-verify of the live surface
+- [~] 04-04-PLAN.md: Summarize slice (D-10) code complete + committed; end-of-phase human-verify of the live surface PENDING operator sign-off
 
 **UI hint**: yes
 
@@ -206,7 +206,7 @@ Plans:
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
-| 4. Activity Feed | 3/4 | In Progress|  |
+| 4. Activity Feed | 4/4 | Executed (human-verify pending) | - |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |

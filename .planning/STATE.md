@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 Phase: 04 (activity-feed) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Plan 04 code complete (Tasks 1-2 committed); AWAITING end-of-phase human-verify checkpoint (Task 3)
 Last activity: 2026-06-24
 
 ## Performance Metrics
@@ -60,6 +60,7 @@ Last activity: 2026-06-24
 | Phase 04 P01 | 6min | 3 tasks | 6 files |
 | Phase 04 P02 | ~6min | 3 tasks | 8 files |
 | Phase 04 P03 | ~14min | 3 tasks | 7 files |
+| Phase 04 P04 | ~4min | 2 of 3 tasks (checkpoint pending) | 5 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: 03-04: /api/permissions + /api/approvals shipped behind token gate + mutations kill-switch; replay-executor.ts allowlists MCP direct-call + tiny Bash/Write, rejects all else honestly (no eval); Tier 4 approve is per-instance only (D-05); message-core requestInline is bounded-timeout fail-to-deny (D-04). Operator human-verify checkpoint APPROVED 2026-06-24.
 - [Phase ?]: [Phase 04]: 04-01: activity read engine GREEN. isUndoableFamily is the single undo-allowlist source of truth (plan 03 reuses it); audit read filters outcome IN (allow,approved-inline) which IS the dedupe (approval_queue owns queued); undoable requires status=approved + allowlist + tier<4 + tool_input; read-side D-06 tags, no migration, gate.ts untouched
 - [Phase ?]: [Phase 04]: 04-02: GET /api/activity is a thin token-gated wrapper over buildActivityFeed (inherits app gate, no bespoke auth, limit clamped); Activity.tsx renders the day-grouped card/list feed unlike Audit with read-side D-11 filters; nav collision resolved (one /activity -> nav.activity, /audit -> new nav.audit); Home one-click entry point (D-03)
+- [Phase ?]: [Phase 04]: 04-04: Summarize Today (D-10) code GREEN. summarizeDay reuses extractViaClaude (shared Haiku subscription one-shot, scrubbed env, bounded 20s timeout) directly, NOT a new LLM path / NOT the Gemini quota path; POST /api/activity/summarize checks LLM_SPAWN_ENABLED FIRST (off -> honest degrade + NO LLM call), inherits the mutations kill-switch + token gate; prompt carries only the params-free phrase + agent_id + time (no raw params/env/secrets); honest degrade over throw. Activity.tsx Summarize Today is operator-invoked only (click handler, never on mount, never per row). End-of-phase human-verify checkpoint (Task 3) PENDING operator sign-off.
 - [Phase ?]: [Phase 04]: 04-03: Undo vertical slice GREEN. undo-executor.ts mirrors replay-executor (MCP-over-stdio inverse); Tier 4 refused BEFORE dispatch (D-09); reuses isUndoableFamily allowlist; label-remove floor family proven end-to-end; claim-before-dispatch status guard prevents inverse double-fire; undo result in existing result column, NO migration; inverse tool names unconfirmed (no MCP servers connected) -> honest no-undo, logged deferred
 
 ### Pending Todos
@@ -114,9 +116,9 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-24T23:46:23.597Z
-Stopped at: Phase 4 UI-SPEC approved
-Resume file: None
+Last session: 2026-06-24
+Stopped at: 04-04 code complete (Summarize Today digest + route + UI); paused at end-of-phase human-verify checkpoint (Task 3)
+Resume file: .planning/phases/04-activity-feed/04-04-PLAN.md (Task 3 human-verify gate)
 
 ## Operator Next Steps
 
