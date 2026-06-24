@@ -146,6 +146,35 @@ export function listPending(): ApprovalRow[] {
 }
 
 /**
+ * Fetch a single approval row by id, in ANY status (the Activity feed and Undo
+ * target approved/denied/expired rows, not just pending). Read-only: same
+ * defensive hydrate as listPending, so a corrupt tool_input yields {} and never
+ * crashes the read. Returns undefined when no row matches.
+ */
+export function getApprovalById(id: number): ApprovalRow | undefined {
+  const row = getDb()
+    .prepare(`SELECT * FROM approval_queue WHERE id = ?`)
+    .get(id) as RawApprovalRow | undefined;
+  return row ? hydrate(row) : undefined;
+}
+
+/**
+ * Rows in any of the given statuses, most recent first (created_at DESC, id
+ * DESC — matching listPending). Uses a parameterized IN list so no status value
+ * is string-interpolated into the SQL. An empty status set returns no rows.
+ */
+export function listApprovals(statuses: ApprovalRow['status'][]): ApprovalRow[] {
+  if (statuses.length === 0) return [];
+  const placeholders = statuses.map(() => '?').join(', ');
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM approval_queue WHERE status IN (${placeholders}) ORDER BY created_at DESC, id DESC`,
+    )
+    .all(...statuses) as RawApprovalRow[];
+  return rows.map(hydrate);
+}
+
+/**
  * Approve a pending row, recording the replay result. STATUS-GUARDED (L-3):
  * only acts if the row is still `pending`. Returns true iff exactly one row
  * changed — a second approve (or a poll race) is a no-op returning false.
