@@ -64,7 +64,7 @@ export function Audit() {
   return (
     <div class="flex flex-col h-full">
       <PageHeader
-        title={term('page.activity')}
+        title={term('page.audit')}
         actions={<span class="text-[11px] text-[var(--color-text-muted)] tabular-nums">{filter === 'blocked' ? items.length + ' blocked' : total + ' entries'}</span>}
         tabs={
           <>

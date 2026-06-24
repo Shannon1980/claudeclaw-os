@@ -176,6 +176,17 @@ export function Home() {
               onSuggest={(text) => focusCapture(text)}
             />
 
+            {/* Quiet one-click shortcut into the Activity feed (D-03). Not a
+             *  second loud card; a daily-glance link beneath Needs you. */}
+            <button
+              type="button"
+              onClick={() => navigate('/activity')}
+              class="flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
+            >
+              What your team did
+              <ArrowRight size={12} />
+            </button>
+
             {/* 4. Three zones */}
             <LoopZones onPlate={onPlate} waiting={waiting} shipped={shipped} agentById={agentById} onChange={refresh} />
           </div>

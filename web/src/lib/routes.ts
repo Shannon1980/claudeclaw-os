@@ -34,7 +34,8 @@ export const ROUTES: RouteDef[] = [
   { path: '/memories',   label: 'Memories',        vocabKey: 'nav.knowledge', section: 'intelligence', icon: Brain,         shortcut: 'g e' },
   { path: '/hive',       label: 'Hive Mind',       vocabKey: 'nav.pulse',     section: 'intelligence', icon: Network,       shortcut: 'g h' },
   { path: '/usage',      label: 'Usage',           vocabKey: 'nav.usage',     section: 'intelligence', icon: Activity,      shortcut: 'g u' },
-  { path: '/audit',      label: 'Audit',           vocabKey: 'nav.activity',  section: 'intelligence', icon: ShieldCheck                   },
+  { path: '/activity',   label: 'Activity',        vocabKey: 'nav.activity',  section: 'intelligence', icon: Activity                      },
+  { path: '/audit',      label: 'Audit',           vocabKey: 'nav.audit',     section: 'intelligence', icon: ShieldCheck                   },
 
   { path: '/warroom',    label: 'War Room',        vocabKey: 'nav.warroom',   section: 'collaborate',  icon: Swords,        shortcut: 'g w' },
 
