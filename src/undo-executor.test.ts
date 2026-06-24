@@ -78,7 +78,7 @@ describe('undo-executor', () => {
     expect(res.message).toContain('msg-1');
   });
 
-  it('refuses Tier 4 BEFORE any dispatch (D-09), with an honest message', async () => {
+  it('refuses tier 4 BEFORE any dispatch (D-09), with an honest message', async () => {
     const res = await undoAction(
       'mcp__gmail__apply-label',
       { message_id: 'msg-1', label: 'Follow up' },
