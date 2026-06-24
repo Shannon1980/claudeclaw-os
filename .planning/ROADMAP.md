@@ -26,7 +26,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 - [x] **Phase 1: Desktop Shell & Onboarding** - Zero-terminal install: Electron shell boots the service and drives Claude login/auth (completed 2026-06-23)
 - [ ] **Phase 2: Routines** - Plain-language scheduled multi-step workflows the operator builds by describing
-- [ ] **Phase 3: Permissions & Autonomy** - The four-tier autonomy model that gates every external action
+- [x] **Phase 3: Permissions & Autonomy** - The four-tier autonomy model that gates every external action (completed 2026-06-24)
 - [ ] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo
 - [ ] **Phase 5: Audit Log** - Admin-facing immutable, append-only, exportable record of every event
 - [ ] **Phase 6: Memory Surface** - "What your assistant knows": editable, provenance-tagged knowledge base
@@ -88,7 +88,7 @@ Plans:
 - [x] 03-01-PLAN.md — Wave 0 failing tests pinning PERM-01..04 (gate/config/queue/contract/gate-wiring)
 - [x] 03-02-PLAN.md — Slice A engine core: gate.ts (classify/resolve/Tier4 lock/audit) + permissions-config
 - [x] 03-03-PLAN.md — Slice B queue + wiring: approval_queue (v1.2.3) + canUseTool replaces bypass, gate threaded through all runs + routine seam
-- [ ] 03-04-PLAN.md — Slice C surfaces: /api/permissions + /api/approvals, Settings Permissions section, Home approval item, inline chat ask (human-verify)
+- [x] 03-04-PLAN.md — Slice C surfaces: /api/permissions + /api/approvals, Settings Permissions section, Home approval item, inline chat ask (human-verify)
 **UI hint**: yes
 
 ### Phase 4: Activity Feed
@@ -159,7 +159,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
-| 3. Permissions & Autonomy | 3/4 | In Progress|  |
+| 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
 | 4. Activity Feed | 0/? | Not started | - |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
