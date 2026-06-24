@@ -100,7 +100,12 @@ Plans:
   1. A user sees a reverse-chronological activity feed of what the team did, in plain language, attributed by teammate
   2. Each item is tagged autonomous ("Ran on its own") vs approved ("You approved"), with held items tagged "Needs you"
   3. A user can undo a reversible action directly from the feed; irreversible actions show no undo (D9)
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 04-01-PLAN.md — Wave 0: failing tests (TRUST-01 tag/dedup/phrase, TRUST-02 undo allowlist/Tier-4/never-throw) + formatClock + Summarize JSON-prose seam
+- [ ] 04-02-PLAN.md — Slice A (TRUST-01): src/activity.ts curated join+dedup+read-side tags+phrase map, GET /api/activity, Activity.tsx, nav/route/vocab rewire, Home entry point
+- [ ] 04-03-PLAN.md — Slice B (TRUST-02): src/undo-executor.ts allowlisted inverse + Tier-4 lock, POST /api/activity/:id/undo, in-feed Undo UI (D-08 floor: >=1 family end-to-end)
+- [ ] 04-04-PLAN.md — Summarize daily digest (D-10): POST /api/activity/summarize Gemini one-shot + header CTA
 **UI hint**: yes
 
 ### Phase 5: Audit Log
@@ -160,7 +165,7 @@ Plans:
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
-| 4. Activity Feed | 0/? | Not started | - |
+| 4. Activity Feed | 0/4 | Planned | - |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |
