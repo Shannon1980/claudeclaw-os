@@ -53,21 +53,21 @@ dots, plain-language phrases. Do not inherit monospace timestamps or dense log s
 ## Spacing Scale
 
 The project uses Tailwind v4 default spacing (4px base unit). Declared values for this surface
-(all multiples of 4):
+(standard 8-point set is {4, 8, 16, 24, 32, 48, 64}; one justified off-scale value is noted on its row):
 
 | Token | Value | Usage in Activity |
 |-------|-------|-------------------|
 | xs | 4px | Icon-to-text gaps, pill inner padding (`gap-1`) |
 | sm | 8px | Row inner element spacing, tag gaps (`gap-2`) |
-| md | 12px | Row vertical padding, header `py-3` (matches `PageHeader`) |
+| md | 12px | Row vertical padding, header `py-3`. **Off the 8-point set on purpose:** this is the EXISTING `PageHeader` vertical padding (`py-3` = 12px). Activity matches it verbatim so its header and rows align pixel-for-pixel with every other page in the app. Introducing 8px or 16px here would make Activity the one page whose header height differs — a worse outcome than the off-scale value. No new 12px usage beyond mirroring `PageHeader`. |
 | — | 16px | Day-group inner padding, action-button clusters |
 | lg | 24px | Page horizontal padding (`px-6`, matches all existing pages) |
 | xl | 32px | Day-group separation |
 | 2xl | 48px | Empty-state vertical breathing room (`py-16` ≈ 64 also allowed) |
 
 Exceptions:
-- `PageHeader` uses `px-6 py-3` — Activity header matches it exactly for layout consistency.
-- Touch targets: action buttons (View / Review / Undo) must be at least 32px tall (`py-1.5` + text)
+- `PageHeader` uses `px-6 py-3` — Activity header matches it exactly for layout consistency (see md-token note above).
+- Touch targets: action buttons (View details / Review task / Undo) must be at least 32px tall (`py-1.5` + text)
   to stay comfortably clickable on the desktop window; no 44px mobile target needed (desktop-only app).
 
 ---
@@ -75,18 +75,29 @@ Exceptions:
 ## Typography
 
 The base font-size is 13px (`html { font-size: 13px }`) — a deliberately compact desktop density.
-Sizes are declared in px via arbitrary Tailwind classes. Exactly 4 roles, exactly 2 weights.
+Sizes are declared in px via arbitrary Tailwind classes. **Exactly 4 roles, exactly 3 weights (400 / 500 / 600).**
+
+All three weights already exist in the design system — this contract does not introduce any new weight,
+it documents the ones the existing primitives ship with so the executor applies them consistently:
+
+| Weight | Where it already lives | Role in Activity |
+|--------|------------------------|------------------|
+| 400 (regular) | App body default | All running body text — row action descriptions, attribution lines, button labels |
+| 500 (medium) | `Pill` (`font-medium`) and `.section-label` helper, both pre-existing primitives | Micro tier only — tag/pill text and the uppercase day-group dividers. Inherited from the primitive; never hand-applied to body copy. |
+| 600 (semibold) | `PageHeader` title (`font-semibold`) | Page title "Activity" only |
 
 | Role | Size | Weight | Line Height | Usage |
 |------|------|--------|-------------|-------|
 | Heading | 14px | semibold (600) | 1.3 | Page title "Activity" (matches `PageHeader` `text-[14px] font-semibold`) |
 | Body | 13px | regular (400) | 1.5 | Per-row plain-language action description ("Sent follow-up to 3 leads") |
-| Label | 12px | regular (400) / 600 for emphasis | 1.4 | Subtitle "What your team did", attribution line "Comms · 9:12am", buttons, filter tabs |
-| Micro | 10px | medium (500) | 1.4 | Tags/pills (matches `Pill` `text-[10px]`), day-group date labels, `section-label` |
+| Label | 12px | regular (400) | 1.4 | Subtitle "What your team did", attribution line "Comms · 9:12am", buttons, filter tabs |
+| Micro | 10px | medium (500) | 1.4 | Tags/pills (via `Pill` `font-medium`), day-group date labels, `.section-label` |
 
-Weights: regular **400** and semibold **600** only. The `Pill` and `section-label` use `font-medium`
-(500) which is the single allowed accent weight for micro-labels — treat 500 as the micro tier's
-"emphasis", not a third body weight. Body text is 400; the title is 600.
+**Weight discipline:** 600 is reserved for the single page title. 500 is owned by two existing
+primitives (`Pill`, `.section-label`) and rides along with them at the Micro tier — the executor must
+NOT introduce 500 anywhere a `Pill` or `.section-label` is not already in play. Everything else is 400.
+This keeps the three weights cleanly partitioned by tier (Micro→500, Heading→600, all else→400) rather
+than scattered emphasis.
 
 Day-group headers reuse the existing `.section-label` helper (10px, uppercase, `letter-spacing 0.08em`,
 `--color-text-faint`, weight 500) for "TODAY" / "YESTERDAY" / "JUN 22" dividers.
@@ -105,10 +116,20 @@ midnight/crimson resolve automatically via `data-theme`).
 | Accent (10%) | `--color-accent` #8b8af0 | See reserved list below |
 | Destructive | `--color-status-failed` #dc2626 | Undo confirmation button (destructive inverse), error state border |
 
+**Primary focal point (Dimension 2):** the surface has ONE attention anchor that shifts by state:
+- **Pending work present:** the amber **"Needs you"** tag (`--color-priority-medium` #ca8a04) is the
+  focal point — it is the only attention-drawing tone on the page and every other tag is deliberately
+  calm so it stands alone. The eye should land on "Needs you" rows first.
+- **No pending work (calm/empty state):** the **Summarize** CTA in the header becomes the focal point —
+  accent-colored, top-right, the one thing inviting action when nothing needs review.
+
+No third element competes for primary attention; teammate dots, neutral tags, and body text are all
+intentionally low-contrast supporting layers.
+
 **Accent reserved for (explicit — never "all interactive elements"):**
 - The Summarize action button in the page header (primary CTA of this surface).
 - The active filter chip (selected tab state — `bg-[var(--color-elevated)]` for active per existing `Tab`; accent only if a chip needs stronger selection emphasis).
-- The "View" / "Review" link affordance on hover (text accent), matching `chat-md a` link styling.
+- The "View details" / "Review task" link affordance on hover (text accent), matching `chat-md a` link styling.
 - Focus rings on interactive rows/buttons.
 
 Accent is NOT used for: row text, the three tags (they use their own semantic tones below),
@@ -129,8 +150,9 @@ matching the existing status-color rule in `main.css`):
 | Expired (held, lapsed) | "Expired before you saw it" | `cancelled` | `--color-text-faint` | D-06 |
 
 Design intent (CONTEXT specifics): "Ran on its own" is neutral/calm ON PURPOSE — it is the reassurance
-tag, not an alarm. "Needs you" amber is the only attention-drawing tag. A "Skipped" row is the system
-working, present it as a calm neutral state, never as a red error.
+tag, not an alarm. "Needs you" amber is the only attention-drawing tag (and the page's primary focal
+point when pending work exists — see above). A "Skipped" row is the system working, present it as a
+calm neutral state, never as a red error.
 
 ---
 
@@ -143,8 +165,8 @@ working, present it as a calm neutral state, never as a red error.
 | Primary CTA (header action) | `Summarize` (produces the LLM daily digest — D-10) |
 | Filter chips | `All` · `Ran on its own` · `Needs you` · `{Teammate name}` (per-teammate, D-11) |
 | Row action — completed reversible | `Undo` |
-| Row action — completed/non-reversible | `View` |
-| Row action — held/pending | `Review` |
+| Row action — completed/non-reversible | `View details` |
+| Row action — held/pending | `Review task` |
 | No-undo affordance | render NO Undo button at all (never a disabled/greyed Undo — D-09 honesty: a real inverse or absent) |
 | Empty state heading | `No activity yet` |
 | Empty state body | `When your team does work — on its own or with your approval — it shows up here. Set what they can do on their own in Permissions.` |
@@ -152,6 +174,10 @@ working, present it as a calm neutral state, never as a red error.
 | Error state | `Couldn't load activity` + body `Something went wrong reading the activity log. Refresh to try again.` (reuse `PageState` error block) |
 | Summarize loading | `Summarizing your day…` |
 | Summarize empty | `Nothing to summarize yet today.` |
+
+Row action labels carry an explicit noun ("View details", "Review task") so the affordance reads as a
+full verb phrase rather than a bare verb. `Undo` stays single-word — it is a recognized inverse-action
+convention and pairing it with a noun ("Undo action") would read as redundant.
 
 ### Destructive actions (Undo confirmations)
 
@@ -184,7 +210,7 @@ Never show "Undone" unless a real inverse succeeded (D-09 — no mark-as-undone 
 **Row anatomy (success criteria 1 & 2, spec 08):**
 ```
 [teammate color dot] [plain-language action] ............... [tag pill]
-                     [Teammate name · time · "routine" if applicable]      [View / Review / Undo]
+                     [Teammate name · time · "routine" if applicable]      [View details / Review task / Undo]
 ```
 - Teammate color dot: `StatusDot`-style 6px dot using `teammateColor(agent_id)`, OR the full `TeammateTag` for the attribution line.
 - Action phrase from the render-time tool→phrase map (D-04, extends `gate.ts` `summarize()`). Unmapped tools render honest generic "Ran {tool}" / "Used Gmail" with technical detail behind View (D-05). Never fabricate, never hide a row.
@@ -194,7 +220,7 @@ Never show "Undone" unless a real inverse succeeded (D-09 — no mark-as-undone 
 
 **Home entry point (D-03):** a one-click affordance on Home into `/activity`. Exact form (card / link / mini-preview) is Claude's discretion — match the existing `NeedsYouCard` visual weight in `Home.tsx` so it reads as a peer surface, not a banner.
 
-**Held-item "Review" (D-06):** reuses the Phase 3 `approval-queue` approve/deny flow (`ApprovalItem.tsx` pattern); a "Needs you" row's Review opens the same one-tap approval the Home `NeedsYouCard` uses. Do not build a second approval UI.
+**Held-item "Review" (D-06):** reuses the Phase 3 `approval-queue` approve/deny flow (`ApprovalItem.tsx` pattern); a "Needs you" row's Review task opens the same one-tap approval the Home `NeedsYouCard` uses. Do not build a second approval UI.
 
 ---
 
