@@ -15,7 +15,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { _initTestDatabase } from './db.js';
 import { buildDashboardApp } from './dashboard.js';
 import { resolveAgentDir } from './agent-config.js';
@@ -1203,5 +1203,67 @@ describe('activity undo API contract', () => {
     const body = await jsonOf(res);
     expect(body.ok).toBe(false);
     expect(String(body.error)).toContain("Undo isn't available");
+  });
+});
+
+// Summarize Today (D-10 / T-04-llm-dos). POST, so it inherits the token gate +
+// DASHBOARD_MUTATIONS_ENABLED kill-switch by mounting on `app`. On top of that
+// it is governed by LLM_SPAWN_ENABLED: when off it short-circuits with the
+// honest degrade and makes NO LLM call. With a fresh in-memory DB the feed is
+// empty, so summarizeDay returns the honest degrade WITHOUT a real LLM call
+// either way — the contract harness never reaches Anthropic.
+describe('activity summarize API contract', () => {
+  const DEGRADE = "Couldn't summarize right now. The feed below is complete.";
+
+  it('is mutation-gated: returns 503 when DASHBOARD_MUTATIONS_ENABLED is off', async () => {
+    const killSwitches = await import('./kill-switches.js');
+    const prev = process.env.DASHBOARD_MUTATIONS_ENABLED;
+    process.env.DASHBOARD_MUTATIONS_ENABLED = 'false';
+    killSwitches._reset();
+    try {
+      const res = await postAction('/api/activity/summarize');
+      expect(res.status).toBe(503);
+    } finally {
+      process.env.DASHBOARD_MUTATIONS_ENABLED = prev;
+      killSwitches._reset();
+    }
+  });
+
+  it('short-circuits with the honest degrade and NO LLM call when LLM_SPAWN_ENABLED is off', async () => {
+    const killSwitches = await import('./kill-switches.js');
+    const memory = await import('./memory-ingest.js');
+    const spy = vi.spyOn(memory, 'extractViaClaude');
+    const prev = process.env.LLM_SPAWN_ENABLED;
+    process.env.LLM_SPAWN_ENABLED = 'false';
+    killSwitches._reset();
+    try {
+      const res = await postAction('/api/activity/summarize');
+      expect(res.status).toBe(200);
+      const body = await jsonOf(res);
+      expect(body).toMatchObject({ ok: true, text: DEGRADE, disabled: true });
+      // The kill-switch chokepoint fired before any LLM call.
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      process.env.LLM_SPAWN_ENABLED = prev;
+      killSwitches._reset();
+      spy.mockRestore();
+    }
+  });
+
+  it('returns text-or-honest-failure (degrade on an empty feed, no LLM call)', async () => {
+    const memory = await import('./memory-ingest.js');
+    const spy = vi.spyOn(memory, 'extractViaClaude');
+    try {
+      const res = await postAction('/api/activity/summarize');
+      expect(res.status).toBe(200);
+      const body = await jsonOf(res);
+      expect(body.ok).toBe(true);
+      expect(typeof body.text).toBe('string');
+      // Fresh DB -> empty feed -> honest degrade, summarizeDay never calls the LLM.
+      expect(body.text).toBe(DEGRADE);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

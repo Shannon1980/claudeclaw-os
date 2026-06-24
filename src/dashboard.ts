@@ -123,6 +123,7 @@ import {
 } from './permissions-config.js';
 import { listPending, approve, deny, claimUndo, finalizeUndo, getApprovalById, type ApprovalRow } from './approval-queue.js';
 import { buildActivityFeed, isUndoableFamily } from './activity.js';
+import { summarizeDay, SUMMARIZE_DEGRADE } from './activity-summary.js';
 import { replayApproval } from './replay-executor.js';
 import { undoAction } from './undo-executor.js';
 import { UPLOADS_DIR } from './media.js';
@@ -3620,6 +3621,33 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const result = await undoAction(row.tool_name, row.tool_input, row.tier);
     finalizeUndo(id, result.message);
     return c.json({ ok: result.ok, result: result.message });
+  });
+
+  // Summarize Today: the one acceptable on-demand LLM affordance (D-10). POST,
+  // so it inherits the token gate + DASHBOARD_MUTATIONS_ENABLED kill-switch 503
+  // by mounting on `app` (T-04-summarize-auth) — no bespoke gating here. On top
+  // of that it is governed by the LLM_SPAWN_ENABLED kill-switch (T-04-llm-dos):
+  // when LLM spawning is disabled the route short-circuits with the honest
+  // degrade and makes NO LLM call at all. It is operator-invoked only (no
+  // per-row, no on-mount), and summarizeDay carries only params-free phrases
+  // into the prompt (scrubbed env, bounded timeout, T-04-summarize-infodisc).
+  // It always returns 200 with { text } — either the digest or the honest
+  // degrade — and never throws or fabricates (D-05).
+  app.post('/api/activity/summarize', async (c) => {
+    // Kill-switch FIRST: if LLM spawning is off, return the honest degrade and
+    // make no LLM call. This is the DoS chokepoint for the summarize path.
+    if (!killSwitches.isEnabled('LLM_SPAWN_ENABLED')) {
+      return c.json({ ok: true, text: SUMMARIZE_DEGRADE, disabled: true });
+    }
+    // Today's rows only (local midnight forward), so the digest is "today".
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const sinceSeconds = Math.floor(startOfDay.getTime() / 1000);
+    const today = buildActivityFeed({ filter: 'all', limit: 200 }).filter(
+      (r) => r.created_at >= sinceSeconds,
+    );
+    const text = await summarizeDay(today);
+    return c.json({ ok: true, text });
   });
 
   // Hive mind feed
