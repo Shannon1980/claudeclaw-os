@@ -100,7 +100,12 @@ Plans:
   1. A user sees a reverse-chronological activity feed of what the team did, in plain language, attributed by teammate
   2. Each item is tagged autonomous ("Ran on its own") vs approved ("You approved"), with held items tagged "Needs you"
   3. A user can undo a reversible action directly from the feed; irreversible actions show no undo (D9)
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 04-01-PLAN.md: Read-side engine + Wave 0 tests: phrase map (D-04/05), buildActivityFeed merge/dedupe/tag derivation (D-06), approval-queue read helpers
+- [ ] 04-02-PLAN.md: First vertical slice: GET /api/activity + Activity.tsx surface + filter chips (D-11) + nav/route/vocab fix (D-01/02) + Home entry (D-03)
+- [ ] 04-03-PLAN.md: Undo slice: undo-executor allowlist inverse (D-07/08), Tier 4 refused (D-09), status-guarded POST /api/activity/:id/undo + conditional Undo UI
+- [ ] 04-04-PLAN.md: Summarize slice (D-10) + end-of-phase human-verify of the live surface
 **UI hint**: yes
 
 ### Phase 5: Audit Log
