@@ -58,6 +58,12 @@ export interface EnqueueApprovalInput {
 // (e.g. a giant email body) can't bloat the row unbounded.
 const TEXT_CAP = 4000;
 
+// Default upper bound for listApprovals reads (IN-02). The Activity feed only
+// renders a capped window, so an unbounded SELECT just to slice it down wastes
+// memory in a long-running install. Generous enough to never truncate a real
+// queue read, bounded enough to never load tens of thousands of rows.
+const DEFAULT_LIST_LIMIT = 1000;
+
 /**
  * Insert a `pending` approval row and return its id. Stores ONLY the captured
  * model-supplied tool params (never env/secrets, L-4). The serialized
@@ -162,15 +168,28 @@ export function getApprovalById(id: number): ApprovalRow | undefined {
  * Rows in any of the given statuses, most recent first (created_at DESC, id
  * DESC, matching listPending). Uses a parameterized IN list so no status value
  * is string-interpolated into the SQL. An empty status set returns no rows.
+ *
+ * A bounded `limit` keeps queue reads from growing unbounded (IN-02): the
+ * Activity feed only ever renders a capped window, so fetching the whole table
+ * just to slice it down wastes memory in a long-running install. The limit is
+ * applied at the DB layer. Callers that genuinely want every row pass a large
+ * limit; omitted defaults to a generous DEFAULT_LIST_LIMIT.
+ *
+ * @param statuses - The statuses to include (parameterized IN list).
+ * @param limit - Max rows to return, applied at the DB layer. Defaults to DEFAULT_LIST_LIMIT.
  */
-export function listApprovals(statuses: ApprovalRow['status'][]): ApprovalRow[] {
+export function listApprovals(
+  statuses: ApprovalRow['status'][],
+  limit: number = DEFAULT_LIST_LIMIT,
+): ApprovalRow[] {
   if (statuses.length === 0) return [];
   const placeholders = statuses.map(() => '?').join(', ');
+  const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_LIST_LIMIT;
   const rows = getDb()
     .prepare(
-      `SELECT * FROM approval_queue WHERE status IN (${placeholders}) ORDER BY created_at DESC, id DESC`,
+      `SELECT * FROM approval_queue WHERE status IN (${placeholders}) ORDER BY created_at DESC, id DESC LIMIT ?`,
     )
-    .all(...statuses) as RawApprovalRow[];
+    .all(...statuses, safeLimit) as RawApprovalRow[];
   return rows.map(hydrate);
 }
 

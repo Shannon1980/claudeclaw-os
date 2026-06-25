@@ -183,20 +183,34 @@ function applyFilter(rows: ActivityRow[], filter?: string): ActivityRow[] {
  */
 export function buildActivityFeed(options: ActivityFeedOptions = {}): ActivityRow[] {
   const limit = options.limit ?? 100;
+  // Over-fetch a bounded multiple per source so the merged feed can satisfy
+  // `limit` regardless of which source dominates, without loading whole tables
+  // (CR-02 / IN-02). The final .slice(0, limit) still caps the response.
+  const sourceLimit = limit * 2;
 
   // 1. approval_queue, all statuses; source of truth for anything queued.
-  const queueRows = listApprovals(['pending', 'approved', 'denied', 'expired']).map(rowFromQueue);
+  //    Bounded at the DB layer (IN-02) so a huge queue never loads in full.
+  const queueRows = listApprovals(
+    ['pending', 'approved', 'denied', 'expired'],
+    sourceLimit,
+  ).map(rowFromQueue);
 
   // 2. audit_log permission rows, filtered to the non-queued set ('allow' /
   //    'approved-inline'). This filter IS the dedupe: a queued action's audit
-  //    row (outcome='queued') is excluded, so approval_queue owns it.
+  //    row (outcome='queued') is excluded, so approval_queue owns it. The
+  //    outcome filter is pushed into SQL and the read is bounded with a LIMIT
+  //    (CR-02) so a long-running install never deserializes the whole table.
+  //    The LIKE is a heuristic prefilter on the detail JSON; parseDetail below
+  //    still does the authoritative outcome check.
   const auditRaw = getDb()
     .prepare(
       `SELECT id, agent_id, detail, created_at FROM audit_log
         WHERE action = 'permission'
-        ORDER BY created_at DESC, id DESC`,
+          AND (detail LIKE '%"outcome":"allow"%' OR detail LIKE '%"outcome":"approved-inline"%')
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?`,
     )
-    .all() as Array<{ id: number; agent_id: string; detail: string; created_at: number }>;
+    .all(sourceLimit) as Array<{ id: number; agent_id: string; detail: string; created_at: number }>;
 
   const auditRows: ActivityRow[] = [];
   for (const a of auditRaw) {
