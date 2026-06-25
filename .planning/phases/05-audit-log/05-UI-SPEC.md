@@ -40,13 +40,13 @@ Tailwind v4 default scale (4px base). Audit is **denser** than Activity by desig
 |-------|-------|-------|
 | xs | 4px | Icon-to-text gaps, inline tag padding (`gap-1`, `py-0.5`) |
 | sm | 8px | Cell padding within a row, chip spacing (`py-2`, `gap-2`) |
-| md | 16px | Filter-bar internal grouping, banner padding (`gap-4`, `p-4`) |
+| md | 16px | Filter-bar internal grouping, banner padding, expanded-detail block vertical padding (`gap-4`, `p-4`, `py-4`) |
 | lg | 24px | Page horizontal gutter aligns to existing `px-6` (24px) |
 | xl | 32px | Expanded-detail block internal section gaps |
 | 2xl | 48px | (not used this phase) |
 | 3xl | 64px | (not used this phase) |
 
-**Row density rule:** log rows use `px-6 py-2` (24px horizontal to match the page gutter, 8px vertical for density). Expanded detail uses `py-3` and a top border to separate it from the row. Do NOT widen rows to Activity's `p-3` card spacing — density is the contract.
+**Row density rule:** log rows use `px-6 py-2` (24px horizontal to match the page gutter, 8px vertical for density). Expanded detail uses `py-4` (16px) and a top border to separate it from the row — `py-4` gives the dense key/value grid a little breathing room as a distinct block while staying on the declared scale (the bare row stays tight at `py-2`). Do NOT widen rows to Activity's `p-3` card spacing — density is the contract.
 
 Exceptions: none.
 
@@ -60,10 +60,12 @@ Audit leans on TWO type families to do its job: Inter for headers/labels, JetBra
 |------|------|--------|-------------|--------|
 | Page title ("Audit log") | 14px | 600 (semibold) | 1.2 | Inter |
 | Body / row description | 12px | 400 (regular) | 1.5 | Inter |
-| Column header + section label | 10px | 500 (medium) | 1.2, uppercase, `tracking-wider` | Inter |
+| Column header + section label | 10px | 600 (semibold) | 1.2, uppercase, `tracking-wider` | Inter |
 | Machine values (timestamp, tool, target, session, model, detail) | 11px | 400 (regular) | 1.5 | **JetBrains Mono** |
 
-- **3 sizes (14 / 12 / 11) + the 10px uppercase micro-label** matching the existing `.section-label` convention. Two weights only: 400 and 500/600 for emphasis (the system never goes heavier).
+- **Exactly two weights: 400 (regular) and 600 (semibold).** The system never goes heavier than semibold; emphasis (page title, column headers, section labels) is carried by **600**, everything else by **400**. No 500/medium anywhere.
+- **3 sizes (14 / 12 / 11) + the 10px uppercase micro-label** matching the existing `.section-label` convention.
+- **The 10/11/12px cluster is intentionally tight — do NOT "fix" it by bumping sizes.** Each role is differentiated not by point size but by **family** (Inter vs JetBrains Mono) and **treatment** (uppercase + `tracking-wider` for the 10px label, `tabular-nums` for mono values). Pulling these sizes apart would weaken the technical density that is this surface's whole point.
 - **Monospace is reserved and meaningful.** Any value that is a machine fact (precise timestamp, tool name, target id, session id, model, cost, duration, raw detail) renders in JetBrains Mono. Human prose (the plain-language description, banner copy, empty/error states) stays in Inter. This split IS the "technical vs. operator" signal — keep it strict.
 - Timestamps use `tabular-nums` and render **precise to the second** in local time (e.g. `2026-06-25 14:32:07`), NOT the relative "5m ago" the current `Audit.tsx` uses. Relative time is an Activity affordance; absolute monospace time is an Audit affordance.
 
@@ -82,7 +84,7 @@ Inherit the three dark themes (graphite default, midnight, crimson) via CSS vari
 
 **Accent (`--color-accent`) is reserved for, and ONLY for:**
 1. The active state of a filter chip / type chip (selected = `bg-[var(--color-elevated)]` per existing `Tab`; accent is NOT used for chip selection — chips follow the existing neutral `Tab` pattern). *Accent is reserved exclusively for #2 below.*
-2. The primary **Export** button fill (`bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)]`), matching the single primary-action treatment used by Activity's "Summarize Today".
+2. The primary **Export log** button fill (`bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)]`), matching the single primary-action treatment used by Activity's "Summarize Today".
 
 That is the entire accent surface this phase. Everything else (links, hover, focus rings on neutral controls) uses muted/text tokens, exactly as the existing surfaces do.
 
@@ -109,7 +111,7 @@ All copy: sentence case, no em dashes, no AI clichés, honest about coverage. "C
 | Page title | `Audit log` |
 | Page subtitle | `Complete, read-only record of every event` |
 | Retention line (always visible, beside/under subtitle) | `Retaining {N} days` (default 90; the number MUST be the configured value, never hardcoded in copy) |
-| Primary CTA | **Export** (button label `Export`; on click reveals format choice — see interaction notes) |
+| Primary CTA | **Export log** (button label `Export log`; on click reveals format choice — see interaction notes) |
 | Export format choices | `Export as CSV` · `Export as JSON` |
 | Export scope reassurance (near the control) | `Exports every event matching your current filters, not just what is on screen.` |
 | Coverage-honesty banner (when a category is not yet captured) | `Not yet captured: {category list}. These events are not recorded yet, so this log does not claim to cover them.` |
@@ -133,8 +135,8 @@ Prescriptive build list for the planner/executor. Reuse first; build the dense a
 | Retention + coverage banner | **new** (small inline block, `--color-card` bg, `--color-border`, `p-4`, mono for the day count) | States retention window and any not-yet-captured categories. Always visible; not dismissible. |
 | Filter bar | **new** | Search input (Inter, debounced) + honest type chips (existing `Tab` look) + date-range control. Honest chips: only render an *active* chip for a type with backing data; not-yet-captured types render disabled with the footnote. |
 | Audit table | **rework** of `Audit.tsx` table | Sticky header on `--color-bg`; columns: **Time** (mono, to the second) · **Actor** (badge) · **Type** (mono neutral pill) · **Event** (Inter description + outcome icon) · **Detail** (expand toggle). Row hover `--color-elevated`. `px-6 py-2`. |
-| Expandable row detail | **new** | Disclosure under the row (top border, `--color-elevated`, `py-3`). Two-column key/value grid, keys in 10px uppercase Inter, values in 11px JetBrains Mono. Fields: tool, target, project, permission decision + who/when approved, result, duration, cost, session id, model. Any unknown field renders the value `not captured` in `--color-text-faint` — never blank, never a fabricated value (D-01 honesty). |
-| Export control | **new** | `Export` button (accent fill). On click opens a tiny menu/popover with `Export as CSV` / `Export as JSON`. Hitting either triggers the `/api/audit/export` file download for the full filtered set (D-21). Busy state disables both. |
+| Expandable row detail | **new** | Disclosure under the row (top border, `--color-elevated`, `py-4`). Two-column key/value grid, keys in 10px uppercase semibold Inter, values in 11px JetBrains Mono. Fields: tool, target, project, permission decision + who/when approved, result, duration, cost, session id, model. Any unknown field renders the value `not captured` in `--color-text-faint` — never blank, never a fabricated value (D-01 honesty). |
+| Export control | **new** | `Export log` button (accent fill). On click opens a tiny menu/popover with `Export as CSV` / `Export as JSON`. Hitting either triggers the `/api/audit/export` file download for the full filtered set (D-21). Busy state disables both. |
 | `PageState` | reuse | loading / error / empty (with the copy above) |
 | `Pill` / `StatusDot` | reuse | event-type tags, outcome status |
 | `AgentAvatar` + `teammateColor` | reuse | actor badge for teammates |
@@ -146,13 +148,13 @@ Prescriptive build list for the planner/executor. Reuse first; build the dense a
 
 | Interaction | Behavior |
 |-------------|----------|
-| Row expand | Click the row (or a Detail chevron) toggles a single open row at a time, mirroring Activity's `openRow` single-open model. Expanded detail shows the full technical key/value grid. |
+| Row expand | Click the row (or a Detail chevron) toggles a single open row at a time, mirroring Activity's `openRow` single-open model. Expanded detail shows the full technical key/value grid in a `py-4` block with a top border. |
 | Honest detail | Every field that was not captured for that event renders the literal token `not captured` in faint text. The UI never shows an empty cell that could imply "no value" vs "not recorded". |
 | Type chip (has data) | Toggles a server-side filter; combines with search + date range (AND). Active chip uses the existing `Tab` selected style. |
 | Type chip (no data) | Disabled, non-interactive, carries the `not yet captured` footnote. It is visible (so the operator knows the type exists in the spec) but cannot be selected and never implies coverage. |
 | Search | Debounced text filter applied server-side across description/tool/target/detail; combines with chips + date range. |
 | Date range | Filters the loaded set and, critically, the **Export** scope. |
-| Export | Reveals CSV/JSON choice; downloads the **complete filtered set** (never page-capped). Same token gate + mutations behavior as other `/api/*` routes. Busy → both options disabled; failure → honest toast. |
+| Export | The `Export log` button reveals CSV/JSON choice; downloads the **complete filtered set** (never page-capped). Same token gate + mutations behavior as other `/api/*` routes. Busy → both options disabled; failure → honest toast. |
 | Delete / edit / clear | **Not present.** No affordance exists to mutate the log. |
 
 ---
