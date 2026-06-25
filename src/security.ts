@@ -90,7 +90,12 @@ export type AuditAction =
   | 'delegation'
   | 'kill'
   | 'blocked'
-  | 'permission';
+  | 'permission'
+  // D-12 additions (Phase 5 Audit). The union ships now so the choke point and
+  // writer can carry these; the actual emissions land in plan 04.
+  | 'auth'
+  | 'routine'
+  | 'error';
 
 export interface AuditEntry {
   agentId: string;
@@ -98,6 +103,20 @@ export interface AuditEntry {
   action: AuditAction;
   detail: string;
   blocked: boolean;
+  // D-01/D-11 optional captured fields (Phase 5 Audit). Omit when N/A → the
+  // writer stores NULL → the UI renders "not captured". These carry only
+  // scrubbed, model-supplied params — never env/secrets (L-4 / ASVS V8).
+  eventType?: string;
+  tool?: string;
+  target?: string;
+  project?: string;
+  decision?: string;
+  decidedBy?: string;
+  decidedAt?: number;
+  result?: string;
+  durationMs?: number;
+  model?: string;
+  sessionId?: string;
 }
 
 let _auditCallback: ((entry: AuditEntry) => void) | null = null;

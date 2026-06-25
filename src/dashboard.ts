@@ -2522,7 +2522,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     try {
       setAgentProfile(agentId, { name, description });
       refreshWarRoomRoster();
-      insertAuditLog(agentId, '', 'edit_agent_profile', JSON.stringify({ name, description }), false);
+      insertAuditLog({ agentId, chatId: '', action: 'edit_agent_profile', detail: JSON.stringify({ name, description }), blocked: false });
       const config = loadAgentConfig(agentId);
       return c.json({
         ok: true,
@@ -2562,7 +2562,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
 
     try {
       setAgentSlackChannel(agentId, channel);
-      insertAuditLog(agentId, '', 'edit_agent_slack_channel', JSON.stringify({ channel }), false);
+      insertAuditLog({ agentId, chatId: '', action: 'edit_agent_slack_channel', detail: JSON.stringify({ channel }), blocked: false });
       return c.json({ ok: true, agent: agentId, slackChannel: channel, restartRequired: true });
     } catch (err: any) {
       logger.error({ err, agentId }, 'Failed to update agent slack_channel');
@@ -2728,7 +2728,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           logger.warn({ err: err instanceof Error ? err.message : err }, 'failed to refresh main agentSystemPrompt');
         }
       }
-      insertAuditLog(agentId, '', 'edit_claudemd', `${body.content.length} bytes`, false);
+      insertAuditLog({ agentId, chatId: '', action: 'edit_claudemd', detail: `${body.content.length} bytes`, blocked: false });
       return c.json({ ok: true, takes_effect: 'next-turn' });
     } catch (err) {
       logger.error({ err, agentId }, 'Failed to write CLAUDE.md');
@@ -2795,7 +2795,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       atomicEnvWrite(target, content);
       // Keep restrictive perms — file holds the bot token.
       try { fs.chmodSync(target, 0o600); } catch {}
-      insertAuditLog(agentId, '', 'edit_agent_yaml', `${content.length} bytes`, false);
+      insertAuditLog({ agentId, chatId: '', action: 'edit_agent_yaml', detail: `${content.length} bytes`, blocked: false });
       return c.json({ ok: true, takes_effect: 'restart' });
     } catch (err) {
       logger.error({ err, agentId }, 'Failed to write agent.yaml');
@@ -2871,7 +2871,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           logger.warn({ err: err instanceof Error ? err.message : err }, 'failed to refresh main agentSystemPrompt');
         }
       }
-      insertAuditLog(agentId, '', 'restore_' + row.file_kind, `version ${versionId} (${row.byte_size} bytes)`, false);
+      insertAuditLog({ agentId, chatId: '', action: 'restore_' + row.file_kind, detail: `version ${versionId} (${row.byte_size} bytes)`, blocked: false });
       return c.json({
         ok: true,
         takes_effect: row.file_kind === 'claudemd' ? 'next-turn' : 'restart',
@@ -3014,7 +3014,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       });
       inserted++;
     }
-    insertAuditLog('main', '', 'agent_suggestion_refresh', `inserted=${inserted} skipped=${skipped}`, false);
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'agent_suggestion_refresh', detail: `inserted=${inserted} skipped=${skipped}`, blocked: false });
     return c.json({ ok: true, inserted, skipped, suggestions: listActiveAgentSuggestions() });
   });
 
@@ -3023,7 +3023,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     if (!Number.isFinite(id)) return c.json({ error: 'invalid id' }, 400);
     const ok = dismissAgentSuggestion(id);
     if (!ok) return c.json({ error: 'not found or already dismissed' }, 404);
-    insertAuditLog('main', '', 'agent_suggestion_dismiss', `id=${id}`, false);
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'agent_suggestion_dismiss', detail: `id=${id}`, blocked: false });
     return c.json({ ok: true });
   });
 
@@ -3032,7 +3032,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     if (!Number.isFinite(id)) return c.json({ error: 'invalid id' }, 400);
     const ok = markAgentSuggestionActed(id);
     if (!ok) return c.json({ error: 'not found or already acted' }, 404);
-    insertAuditLog('main', '', 'agent_suggestion_acted', `id=${id}`, false);
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'agent_suggestion_acted', detail: `id=${id}`, blocked: false });
     return c.json({ ok: true });
   });
 
@@ -3269,7 +3269,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
 
     try {
       const result = await writeUploadedAvatar(agentId, bytes);
-      insertAuditLog(agentId, '', 'upload_avatar', `${bytes.length} bytes`, false);
+      insertAuditLog({ agentId, chatId: '', action: 'upload_avatar', detail: `${bytes.length} bytes`, blocked: false });
       return c.json({
         ok: true,
         bytes: result.bytes,
@@ -3292,7 +3292,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     if (!agentExists(agentId)) return c.json({ error: 'agent not found' }, 404);
     try {
       await deleteUploadedAvatar(agentId);
-      insertAuditLog(agentId, '', 'delete_avatar', '', false);
+      insertAuditLog({ agentId, chatId: '', action: 'delete_avatar', detail: '', blocked: false });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: 'failed to delete avatar' }, 500);
@@ -3380,7 +3380,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       if (value.length > 32) value = value.slice(0, 32);
     }
     setDashboardSetting(body.key, value);
-    insertAuditLog('main', '', 'dashboard_setting_change', `${body.key}=${value.slice(0, 80)}`, false);
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'dashboard_setting_change', detail: `${body.key}=${value.slice(0, 80)}`, blocked: false });
     return c.json({ ok: true, key: body.key, value });
   });
 

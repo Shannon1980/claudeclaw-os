@@ -614,6 +614,28 @@ function runMigrations(database: Database.Database): void {
   // CLAUDE.md / MEMORY.md.
   addColumnIfMissing(database, 'scheduled_tasks', 'autonomy', `TEXT NOT NULL DEFAULT 'unattended'`);
 
+  // Audit log enrichment (Phase 5, AUD-01 / D-01). Eleven nullable per-event
+  // columns capturing the technical detail of each audited action. Dual-written
+  // via the versioned migration migrations/v1.2.4/enrich-audit-log.ts for the
+  // production DB; mirrored here so the in-memory test DB (createSchema +
+  // runMigrations, no versioned-migration run) reaches column parity. The DDL
+  // here MUST stay byte-identical (names + types) to that migration — drift
+  // crash-loops the live service on checkPendingMigrations (P-4 / Pitfall 1).
+  // All nullable (no NOT NULL DEFAULT) so pre-migration rows read NULL = "not
+  // captured". cost_usd is intentionally NOT here — cost is resolved read-side
+  // via a JOIN on token_usage (D-11), never written onto the append-only row.
+  addColumnIfMissing(database, 'audit_log', 'event_type', `TEXT`);
+  addColumnIfMissing(database, 'audit_log', 'tool', `TEXT`);
+  addColumnIfMissing(database, 'audit_log', 'target', `TEXT`);
+  addColumnIfMissing(database, 'audit_log', 'project', `TEXT`);
+  addColumnIfMissing(database, 'audit_log', 'decision', `TEXT`);
+  addColumnIfMissing(database, 'audit_log', 'decided_by', `TEXT`);
+  addColumnIfMissing(database, 'audit_log', 'decided_at', `INTEGER`);
+  addColumnIfMissing(database, 'audit_log', 'result', `TEXT`);
+  addColumnIfMissing(database, 'audit_log', 'duration_ms', `INTEGER`);
+  addColumnIfMissing(database, 'audit_log', 'model', `TEXT`);
+  addColumnIfMissing(database, 'audit_log', 'session_id', `TEXT`);
+
   // ── Memory V2 migration ──────────────────────────────────────────────
   // Detect old schema (has 'sector' column but no 'importance') and migrate.
   const memCols = database.prepare(`PRAGMA table_info(memories)`).all() as Array<{ name: string }>;
@@ -3110,16 +3132,58 @@ export function listRecentMeetSessions(limit = 20): MeetSession[] {
 
 // ── Audit Log ────────────────────────────────────────────────────────
 
-export function insertAuditLog(
-  agentId: string,
-  chatId: string,
-  action: string,
-  detail: string,
-  blocked: boolean,
-): void {
+/**
+ * Options for {@link insertAuditLog}. The first five are required (every audit
+ * row has them); the rest are the optional Phase 5 per-event captured fields,
+ * stored as NULL when omitted (honest "not captured"). Carries ONLY scrubbed,
+ * model-supplied params — never env/secrets (L-4 / ASVS V8). INSERT-only: the
+ * audit log is append-only (D-31), there is no update/delete path.
+ */
+export interface InsertAuditLogOptions {
+  agentId: string;
+  chatId: string;
+  action: string;
+  detail: string;
+  blocked: boolean;
+  // Phase 5 (AUD-01 / D-01) optional captured fields.
+  eventType?: string;
+  tool?: string;
+  target?: string;
+  project?: string;
+  decision?: string;
+  decidedBy?: string;
+  decidedAt?: number;
+  result?: string;
+  durationMs?: number;
+  model?: string;
+  sessionId?: string;
+}
+
+export function insertAuditLog(opts: InsertAuditLogOptions): void {
   db.prepare(
-    `INSERT INTO audit_log (agent_id, chat_id, action, detail, blocked, created_at) VALUES (?, ?, ?, ?, ?, strftime('%s','now'))`,
-  ).run(agentId, chatId, action, detail.slice(0, 2000), blocked ? 1 : 0);
+    `INSERT INTO audit_log (
+       agent_id, chat_id, action, detail, blocked,
+       event_type, tool, target, project, decision, decided_by, decided_at,
+       result, duration_ms, model, session_id, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'))`,
+  ).run(
+    opts.agentId,
+    opts.chatId,
+    opts.action,
+    opts.detail.slice(0, 2000),
+    opts.blocked ? 1 : 0,
+    opts.eventType ?? null,
+    opts.tool ?? null,
+    opts.target ?? null,
+    opts.project ?? null,
+    opts.decision ?? null,
+    opts.decidedBy ?? null,
+    opts.decidedAt ?? null,
+    opts.result ?? null,
+    opts.durationMs ?? null,
+    opts.model ?? null,
+    opts.sessionId ?? null,
+  );
 }
 
 export interface AuditLogEntry {
@@ -3130,6 +3194,22 @@ export interface AuditLogEntry {
   detail: string;
   blocked: number;
   created_at: number;
+  // Phase 5 (AUD-01 / D-01) nullable per-event columns.
+  event_type: string | null;
+  tool: string | null;
+  target: string | null;
+  project: string | null;
+  decision: string | null;
+  decided_by: string | null;
+  decided_at: number | null;
+  result: string | null;
+  duration_ms: number | null;
+  model: string | null;
+  session_id: string | null;
+  // The read-side cost JOIN (plan 03) and any future derived columns surface
+  // here; the index signature also lets callers treat a row as a generic record
+  // (e.g. the export serializer / contract tests) without an unsafe double cast.
+  [key: string]: string | number | null | undefined;
 }
 
 export function getAuditLog(limit = 50, offset = 0, agentId?: string): AuditLogEntry[] {
@@ -3141,6 +3221,92 @@ export function getAuditLog(limit = 50, offset = 0, agentId?: string): AuditLogE
   return db.prepare(
     `SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?`,
   ).all(limit, offset) as AuditLogEntry[];
+}
+
+/**
+ * Filters for {@link getAuditLogFiltered}. All optional; an empty object reads
+ * the whole log (newest first). Parameterized everywhere — never string-concat
+ * a filter value into SQL (ASVS V5). When `limit`/`offset` are omitted the full
+ * set is returned (the export reader relies on this — never page-cap the export,
+ * Pitfall 6).
+ */
+export interface AuditLogFilters {
+  agentId?: string;
+  eventType?: string;
+  search?: string;
+  startAt?: number;
+  endAt?: number;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * The single filtered audit reader. Returns enriched rows (with honest NULLs
+ * for fields never captured). Plan 03 layers the read-side cost JOIN and the
+ * /api/audit + /api/audit/export endpoints on top of this builder.
+ */
+export function getAuditLogFiltered(filters: AuditLogFilters = {}): AuditLogEntry[] {
+  const where: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (filters.agentId) {
+    where.push('agent_id = ?');
+    params.push(filters.agentId);
+  }
+  if (filters.eventType) {
+    where.push('event_type = ?');
+    params.push(filters.eventType);
+  }
+  if (filters.search) {
+    where.push('(detail LIKE ? OR tool LIKE ? OR target LIKE ?)');
+    const like = `%${filters.search}%`;
+    params.push(like, like, like);
+  }
+  if (typeof filters.startAt === 'number') {
+    where.push('created_at >= ?');
+    params.push(filters.startAt);
+  }
+  if (typeof filters.endAt === 'number') {
+    where.push('created_at <= ?');
+    params.push(filters.endAt);
+  }
+
+  let sql = `SELECT * FROM audit_log`;
+  if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
+  sql += ` ORDER BY created_at DESC`;
+  if (typeof filters.limit === 'number') {
+    sql += ` LIMIT ?`;
+    params.push(filters.limit);
+    if (typeof filters.offset === 'number') {
+      sql += ` OFFSET ?`;
+      params.push(filters.offset);
+    }
+  }
+
+  return db.prepare(sql).all(...params) as AuditLogEntry[];
+}
+
+// ── Audit retention window (Phase 5, AUD-02 / D-31) ─────────────────────
+//
+// Stored in dashboard_settings under `audit.retention_days`. D-31: the window
+// is STATED here but nothing is pruned this phase — the audit log stays strictly
+// append-only (no DELETE/UPDATE on audit_log anywhere). Default 90 days when
+// unset or when a stored value is non-positive / non-integer.
+
+const AUDIT_RETENTION_KEY = 'audit.retention_days';
+const AUDIT_RETENTION_DEFAULT_DAYS = 90;
+
+export function getAuditRetentionDays(): number {
+  const v = getDashboardSetting(AUDIT_RETENTION_KEY);
+  const n = v !== null ? parseInt(v, 10) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : AUDIT_RETENTION_DEFAULT_DAYS;
+}
+
+export function setAuditRetentionDays(days: number): void {
+  // Reject non-positive / non-integer input — a bad write must never poison the
+  // stored value, so reads keep falling back to the default 90.
+  if (!Number.isInteger(days) || days <= 0) return;
+  setDashboardSetting(AUDIT_RETENTION_KEY, String(days));
 }
 
 export function getAuditLogCount(agentId?: string): number {

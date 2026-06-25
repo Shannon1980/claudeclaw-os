@@ -1182,13 +1182,13 @@ describe('activity API contract', () => {
 
     // An autonomous action that never touched the queue: audit outcome='allow'
     // -> "Ran on its own". detail carries only {tool,tier,outcome}, no params.
-    insertAuditLog(
-      'comms',
-      'chat-1',
-      'permission',
-      JSON.stringify({ tool: 'mcp__gmail__apply-label', tier: 1, outcome: 'allow' }),
-      false,
-    );
+    insertAuditLog({
+      agentId: 'comms',
+      chatId: 'chat-1',
+      action: 'permission',
+      detail: JSON.stringify({ tool: 'mcp__gmail__apply-label', tier: 1, outcome: 'allow' }),
+      blocked: false,
+    });
 
     const res = await get('/api/activity');
     expect(res.status).toBe(200);
@@ -1218,13 +1218,13 @@ describe('activity API contract', () => {
       summary: 'send',
       runId: 'routine-b',
     });
-    insertAuditLog(
-      'ops',
-      'chat-1',
-      'permission',
-      JSON.stringify({ tool: 'mcp__gmail__apply-label', tier: 1, outcome: 'allow' }),
-      false,
-    );
+    insertAuditLog({
+      agentId: 'ops',
+      chatId: 'chat-1',
+      action: 'permission',
+      detail: JSON.stringify({ tool: 'mcp__gmail__apply-label', tier: 1, outcome: 'allow' }),
+      blocked: false,
+    });
 
     const res = await get('/api/activity?filter=needsyou');
     expect(res.status).toBe(200);
