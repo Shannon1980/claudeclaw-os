@@ -15,7 +15,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { _initTestDatabase } from './db.js';
 import { buildDashboardApp } from './dashboard.js';
 import { resolveAgentDir } from './agent-config.js';
@@ -1026,5 +1026,244 @@ describe('approvals API contract', () => {
     const res = await postAction(`/api/approvals/${id}/deny`);
     expect(res.status).toBe(200);
     expect(await jsonOf(res)).toMatchObject({ ok: true });
+  });
+});
+
+describe('activity API contract', () => {
+  it('GET /api/activity is auth-gated (token gate inherited from app mount, T-04-auth)', async () => {
+    const noTok = await getNoToken('/api/activity');
+    expect(noTok.status).toBe(401);
+    expect(await jsonOf(noTok)).toMatchObject({ error: 'Unauthorized' });
+  });
+
+  it('GET /api/activity with the token returns 200 and a rows array', async () => {
+    const res = await get('/api/activity');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ rows: expect.any(Array) });
+  });
+
+  it('returns the curated tagged shape: a queued pending row tagged "Needs you", an autonomous audit "allow" row tagged "Ran on its own", and no secret fields', async () => {
+    const { enqueueApproval } = await import('./approval-queue.js');
+    const { insertAuditLog } = await import('./db.js');
+
+    // A queued, still-pending action: approval_queue owns it -> "Needs you".
+    enqueueApproval({
+      toolName: 'mcp__gmail__send-email',
+      toolInput: { to: 'lead@example.com', body: 'follow up' },
+      tier: 3,
+      modeAtDecision: 'balanced',
+      summary: 'send to lead@example.com',
+      runId: 'routine-a',
+    });
+
+    // An autonomous action that never touched the queue: audit outcome='allow'
+    // -> "Ran on its own". detail carries only {tool,tier,outcome}, no params.
+    insertAuditLog(
+      'comms',
+      'chat-1',
+      'permission',
+      JSON.stringify({ tool: 'mcp__gmail__apply-label', tier: 1, outcome: 'allow' }),
+      false,
+    );
+
+    const res = await get('/api/activity');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    const rows = body.rows as Array<Record<string, unknown>>;
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+
+    const tags = rows.map((r) => r.tag);
+    expect(tags).toContain('Needs you');
+    expect(tags).toContain('Ran on its own');
+
+    // No secret/env material leaks into a feed row (T-04-infodisc-resp).
+    const blob = JSON.stringify(body).toLowerCase();
+    expect(blob).not.toContain('api_key');
+    expect(blob).not.toContain('oauth');
+    expect(blob).not.toContain('process.env');
+  });
+
+  it('respects the read-side filter (needsyou returns only "Needs you" rows, D-11)', async () => {
+    const { enqueueApproval } = await import('./approval-queue.js');
+    const { insertAuditLog } = await import('./db.js');
+    enqueueApproval({
+      toolName: 'mcp__gmail__send-email',
+      toolInput: { to: 'x@y.com' },
+      tier: 3,
+      modeAtDecision: 'balanced',
+      summary: 'send',
+      runId: 'routine-b',
+    });
+    insertAuditLog(
+      'ops',
+      'chat-1',
+      'permission',
+      JSON.stringify({ tool: 'mcp__gmail__apply-label', tier: 1, outcome: 'allow' }),
+      false,
+    );
+
+    const res = await get('/api/activity?filter=needsyou');
+    expect(res.status).toBe(200);
+    const rows = (await jsonOf(res)).rows as Array<Record<string, unknown>>;
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows.every((r) => r.tag === 'Needs you')).toBe(true);
+  });
+});
+
+// Undo write path (TRUST-02 / D-07/D-08/D-09). The route inherits the token
+// gate + DASHBOARD_MUTATIONS_ENABLED kill-switch by mounting on `app`. No MCP
+// server is connected in the contract harness, so an allowlisted approved row's
+// inverse returns an honest "Connect ... in Settings" failure — but the
+// status-guarded CLAIM still acts, so the undo-not-twice invariant is exercised
+// without any real external call.
+describe('activity undo API contract', () => {
+  // Seed an approved, allowlisted (label family), tier<4 row with captured
+  // params — the only shape that is undoable.
+  async function seedApprovedUndoable() {
+    const { enqueueApproval, approve } = await import('./approval-queue.js');
+    const id = enqueueApproval({
+      toolName: 'mcp__gmail__apply-label',
+      toolInput: { message_id: 'msg-1', label: 'Follow up' },
+      tier: 1,
+      modeAtDecision: 'balanced',
+      summary: 'apply label',
+      runId: 'routine-undo',
+    });
+    approve(id, { ok: true });
+    return id;
+  }
+
+  it('400s on a non-integer id', async () => {
+    const res = await postAction('/api/activity/not-a-number/undo');
+    expect(res.status).toBe(400);
+    expect(await jsonOf(res)).toMatchObject({ ok: false });
+  });
+
+  it('is mutation-gated: returns 503 when DASHBOARD_MUTATIONS_ENABLED is off', async () => {
+    const killSwitches = await import('./kill-switches.js');
+    const id = await seedApprovedUndoable();
+    const prev = process.env.DASHBOARD_MUTATIONS_ENABLED;
+    process.env.DASHBOARD_MUTATIONS_ENABLED = 'false';
+    killSwitches._reset();
+    try {
+      const res = await postAction(`/api/activity/${id}/undo`);
+      expect(res.status).toBe(503);
+    } finally {
+      process.env.DASHBOARD_MUTATIONS_ENABLED = prev;
+      killSwitches._reset();
+    }
+  });
+
+  it('undoes an approved undoable row once; a SECOND undo does NOT re-fire (undo-not-twice)', async () => {
+    const id = await seedApprovedUndoable();
+
+    const first = await postAction(`/api/activity/${id}/undo`);
+    expect(first.status).toBe(200);
+    const firstBody = await jsonOf(first);
+    // No MCP server connected here, so the inverse fails honestly (ok:false)
+    // with the verbatim connect-in-Settings reason — never a generic error.
+    expect(firstBody).toHaveProperty('result');
+    expect(String(firstBody.result).toLowerCase()).toContain('connect');
+
+    // The CLAIM acted on the first call, so a second undo is a no-op.
+    const second = await postAction(`/api/activity/${id}/undo`);
+    expect(await jsonOf(second)).toMatchObject({ ok: false, error: 'already undone' });
+  });
+
+  it('honestly rejects a Tier 4 row with no inverse run (D-09)', async () => {
+    const { enqueueApproval, approve } = await import('./approval-queue.js');
+    const id = enqueueApproval({
+      toolName: 'mcp__bank__send-money',
+      toolInput: { to: 'acct-1', amount: 100 },
+      tier: 4,
+      modeAtDecision: 'balanced',
+      summary: 'send money',
+      runId: 'routine-t4',
+    });
+    approve(id, { ok: true });
+    const res = await postAction(`/api/activity/${id}/undo`);
+    const body = await jsonOf(res);
+    expect(body.ok).toBe(false);
+    expect(String(body.error)).toContain("Undo isn't available");
+  });
+
+  it('honestly rejects a non-allowlisted approved row (D-07)', async () => {
+    const { enqueueApproval, approve } = await import('./approval-queue.js');
+    const id = enqueueApproval({
+      toolName: 'mcp__gmail__send-email',
+      toolInput: { to: 'a@b.com' },
+      tier: 3,
+      modeAtDecision: 'balanced',
+      summary: 'send email',
+      runId: 'routine-na',
+    });
+    approve(id, { ok: true });
+    const res = await postAction(`/api/activity/${id}/undo`);
+    const body = await jsonOf(res);
+    expect(body.ok).toBe(false);
+    expect(String(body.error)).toContain("Undo isn't available");
+  });
+});
+
+// Summarize Today (D-10 / T-04-llm-dos). POST, so it inherits the token gate +
+// DASHBOARD_MUTATIONS_ENABLED kill-switch by mounting on `app`. On top of that
+// it is governed by LLM_SPAWN_ENABLED: when off it short-circuits with the
+// honest degrade and makes NO LLM call. With a fresh in-memory DB the feed is
+// empty, so summarizeDay returns the honest degrade WITHOUT a real LLM call
+// either way — the contract harness never reaches Anthropic.
+describe('activity summarize API contract', () => {
+  const DEGRADE = "Couldn't summarize right now. The feed below is complete.";
+
+  it('is mutation-gated: returns 503 when DASHBOARD_MUTATIONS_ENABLED is off', async () => {
+    const killSwitches = await import('./kill-switches.js');
+    const prev = process.env.DASHBOARD_MUTATIONS_ENABLED;
+    process.env.DASHBOARD_MUTATIONS_ENABLED = 'false';
+    killSwitches._reset();
+    try {
+      const res = await postAction('/api/activity/summarize');
+      expect(res.status).toBe(503);
+    } finally {
+      process.env.DASHBOARD_MUTATIONS_ENABLED = prev;
+      killSwitches._reset();
+    }
+  });
+
+  it('short-circuits with the honest degrade and NO LLM call when LLM_SPAWN_ENABLED is off', async () => {
+    const killSwitches = await import('./kill-switches.js');
+    const memory = await import('./memory-ingest.js');
+    const spy = vi.spyOn(memory, 'extractViaClaude');
+    const prev = process.env.LLM_SPAWN_ENABLED;
+    process.env.LLM_SPAWN_ENABLED = 'false';
+    killSwitches._reset();
+    try {
+      const res = await postAction('/api/activity/summarize');
+      expect(res.status).toBe(200);
+      const body = await jsonOf(res);
+      expect(body).toMatchObject({ ok: true, text: DEGRADE, disabled: true });
+      // The kill-switch chokepoint fired before any LLM call.
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      process.env.LLM_SPAWN_ENABLED = prev;
+      killSwitches._reset();
+      spy.mockRestore();
+    }
+  });
+
+  it('returns text-or-honest-failure (degrade on an empty feed, no LLM call)', async () => {
+    const memory = await import('./memory-ingest.js');
+    const spy = vi.spyOn(memory, 'extractViaClaude');
+    try {
+      const res = await postAction('/api/activity/summarize');
+      expect(res.status).toBe(200);
+      const body = await jsonOf(res);
+      expect(body.ok).toBe(true);
+      expect(typeof body.text).toBe('string');
+      // Fresh DB -> empty feed -> honest degrade, summarizeDay never calls the LLM.
+      expect(body.text).toBe(DEGRADE);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

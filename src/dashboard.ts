@@ -121,8 +121,11 @@ import {
   type Mode,
   type OverrideValue,
 } from './permissions-config.js';
-import { listPending, approve, deny, type ApprovalRow } from './approval-queue.js';
+import { listPending, approve, deny, claimUndo, finalizeUndo, getApprovalById, type ApprovalRow } from './approval-queue.js';
+import { buildActivityFeed, isUndoableFamily } from './activity.js';
+import { summarizeDay, SUMMARIZE_DEGRADE } from './activity-summary.js';
 import { replayApproval } from './replay-executor.js';
+import { undoAction } from './undo-executor.js';
 import { UPLOADS_DIR } from './media.js';
 import { collectProjectFiles, collectTaskFiles, allowedProjectDownloadPaths } from './mission-files.js';
 import { getDashboardHtml } from './dashboard-html.js';
@@ -3554,6 +3557,101 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   app.get('/api/audit/blocked', (c) => {
     const limit = parseInt(c.req.query('limit') || '10', 10);
     return c.json({ entries: getRecentBlockedActions(limit) });
+  });
+
+  // ── Activity (operator feed, TRUST-01 / D-06) ──────────────────────
+  //
+  // The curated, plain-language read model the operator looks at. GET, so it
+  // inherits the query-token gate from the app-level middleware above (T-04-auth)
+  // by mounting on `app`, no bespoke auth here. The response carries ONLY the
+  // curated, param-level row fields buildActivityFeed already projects (no env,
+  // no secrets, mirrors the approvalView no-raw-secrets rule, T-04-infodisc-resp).
+  // Read-side filter (all | autonomous | needsyou | <agent_id>, D-11) and a
+  // bounded limit are passed straight through to the plan-01 read model.
+  app.get('/api/activity', (c) => {
+    const filter = c.req.query('filter') || undefined;
+    const rawLimit = parseInt(c.req.query('limit') || '100', 10);
+    const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 100;
+    const rows = buildActivityFeed({ filter, limit });
+    return c.json({ rows });
+  });
+
+  // Undo a reversible action (TRUST-02 / D-07/D-08/D-09). POST, so it inherits
+  // the DASHBOARD_MUTATIONS_ENABLED kill-switch 503 and the token gate from the
+  // app-level middleware above (T-04-undo-auth) by mounting on `app` -- no
+  // bespoke gating here. Flow, mirroring the approve route's status-guarded
+  // "act once" shape:
+  //   1. parseInt + Number.isInteger -> 400 on a bad id (V5).
+  //   2. getApprovalById(id): must exist, be status='approved', undoable
+  //      (allowlisted family, tier<4, has tool_input). Else honest rejection.
+  //   3. claimUndo(id) status-guarded CLAIM, BEFORE any dispatch: only one
+  //      caller claims an approved, not-yet-undone row (T-04-undo-doublefire).
+  //      A second click finds it claimed and is a no-op -- the inverse never
+  //      fires twice because the claim gates the dispatch.
+  //   4. undoAction(tool_name, tool_input, tier) runs the real inverse (or
+  //      refuses Tier 4 before dispatch / returns honest "no undo").
+  //   5. finalizeUndo(id, result) records the verbatim outcome on the claimed row.
+  // The verbatim honest result is returned on failure, never a generic error.
+  app.post('/api/activity/:id/undo', async (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+
+    // Failure branches carry an appropriate non-200 status (WR-01) so monitoring
+    // and future clients can distinguish success from failure by HTTP status,
+    // not just the body. The honest verbatim body is unchanged; only the status
+    // is added. 404 not-found, 409 wrong-state / already-undone, 400 not-undoable.
+    const row = getApprovalById(id);
+    if (!row) {
+      return c.json({ ok: false, error: 'no undoable action for that id' }, 404);
+    }
+    if (row.status !== 'approved') {
+      return c.json({ ok: false, error: 'only an approved action can be undone' }, 409);
+    }
+    const hasInput = Object.keys(row.tool_input).length > 0;
+    if (!isUndoableFamily(row.tool_name) || row.tier >= 4 || !hasInput) {
+      // Honest "no undo": Tier 4, non-allowlisted, or no captured params.
+      return c.json({ ok: false, error: `Undo isn't available for ${row.tool_name}.` }, 400);
+    }
+
+    // Claim BEFORE dispatch so the inverse can never fire twice. If we lost the
+    // race (a second click already claimed it), report ok:false and do NOT run
+    // the inverse again.
+    if (!claimUndo(id)) {
+      return c.json({ ok: false, error: 'already undone' }, 409);
+    }
+
+    // Run the real inverse. undoAction refuses Tier 4 before dispatch and never
+    // throws; it returns the honest verbatim message either way.
+    const result = await undoAction(row.tool_name, row.tool_input, row.tier);
+    finalizeUndo(id, result.message);
+    return c.json({ ok: result.ok, result: result.message });
+  });
+
+  // Summarize Today: the one acceptable on-demand LLM affordance (D-10). POST,
+  // so it inherits the token gate + DASHBOARD_MUTATIONS_ENABLED kill-switch 503
+  // by mounting on `app` (T-04-summarize-auth) -- no bespoke gating here. On top
+  // of that it is governed by the LLM_SPAWN_ENABLED kill-switch (T-04-llm-dos):
+  // when LLM spawning is disabled the route short-circuits with the honest
+  // degrade and makes NO LLM call at all. It is operator-invoked only (no
+  // per-row, no on-mount), and summarizeDay carries only params-free phrases
+  // into the prompt (scrubbed env, bounded timeout, T-04-summarize-infodisc).
+  // It always returns 200 with { text } -- either the digest or the honest
+  // degrade -- and never throws or fabricates (D-05).
+  app.post('/api/activity/summarize', async (c) => {
+    // Kill-switch FIRST: if LLM spawning is off, return the honest degrade and
+    // make no LLM call. This is the DoS chokepoint for the summarize path.
+    if (!killSwitches.isEnabled('LLM_SPAWN_ENABLED')) {
+      return c.json({ ok: true, text: SUMMARIZE_DEGRADE, disabled: true });
+    }
+    // Today's rows only (local midnight forward), so the digest is "today".
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const sinceSeconds = Math.floor(startOfDay.getTime() / 1000);
+    const today = buildActivityFeed({ filter: 'all', limit: 200 }).filter(
+      (r) => r.created_at >= sinceSeconds,
+    );
+    const text = await summarizeDay(today);
+    return c.json({ ok: true, text });
   });
 
   // Hive mind feed

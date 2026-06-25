@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
-status: verifying
+status: ready_to_plan
 last_updated: "2026-06-25T01:31:14.239Z"
 last_activity: 2026-06-24
 progress:
   total_phases: 8
   completed_phases: 3
-  total_plans: 12
-  completed_plans: 12
+  total_plans: 16
+  completed_plans: 16
   percent: 38
+stopped_at: Phase 5 context gathered — ready to plan
 ---
 
 # Project State
@@ -20,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** A local-first desktop AI chief-of-staff for business operators — install with no terminal, runs the real Claude engine on the operator's own machine, keeps work moving and never lets anything fall through.
-**Current focus:** Phase 03 — permissions-autonomy
+**Current focus:** Phase 5 — audit log
 
 ## Current Position
 
-Phase: 03 (permissions-autonomy) — ALL PLANS EXECUTED, VERIFICATION gaps_found (2/4)
-Plan: 4 of 4 executed; gap closure pending
-Status: Verifier found 2 blocking gaps (PERM-04 replay-once race; PERM-02 override-key mismatch). Run /gsd-plan-phase 03 --gaps then /gsd-execute-phase 03 --gaps-only.
-Last activity: 2026-06-24
+Phase: 5
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-25
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 4
+- Total plans completed: 8
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -42,6 +43,7 @@ Last activity: 2026-06-24
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 4 | - | - |
+| 04 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -57,6 +59,10 @@ Last activity: 2026-06-24
 | Phase 03 P02 | 6min | 2 tasks | 4 files |
 | Phase 03 P03 | ~25min | 2 tasks | 12 files |
 | Phase 03 P04 | ~30min | 3 tasks | 12 files |
+| Phase 04 P01 | 6min | 3 tasks | 6 files |
+| Phase 04 P02 | ~6min | 3 tasks | 8 files |
+| Phase 04 P03 | ~14min | 3 tasks | 7 files |
+| Phase 04 P04 | ~4min | 2 of 3 tasks (checkpoint pending) | 5 files |
 
 ## Accumulated Context
 
@@ -81,6 +87,10 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: 03-03: bypassPermissions removed; query() runs canUseTool gate; omitted gateCtx defaults to safe background ask/queue (P-5)
 - [Phase ?]: [Phase 03]: 03-03: approval_queue dual-written (db.ts createSchema + migration v1.2.3); approve/deny status-guarded WHERE status='pending' + .changes===1 = replay-once (L-3); migration AUTHORED + temp-DB validated but NOT applied to live store/ (operator runs npm run migrate before restart)
 - [Phase ?]: [Phase 03]: 03-04: /api/permissions + /api/approvals shipped behind token gate + mutations kill-switch; replay-executor.ts allowlists MCP direct-call + tiny Bash/Write, rejects all else honestly (no eval); Tier 4 approve is per-instance only (D-05); message-core requestInline is bounded-timeout fail-to-deny (D-04). Operator human-verify checkpoint APPROVED 2026-06-24.
+- [Phase ?]: [Phase 04]: 04-01: activity read engine GREEN. isUndoableFamily is the single undo-allowlist source of truth (plan 03 reuses it); audit read filters outcome IN (allow,approved-inline) which IS the dedupe (approval_queue owns queued); undoable requires status=approved + allowlist + tier<4 + tool_input; read-side D-06 tags, no migration, gate.ts untouched
+- [Phase ?]: [Phase 04]: 04-02: GET /api/activity is a thin token-gated wrapper over buildActivityFeed (inherits app gate, no bespoke auth, limit clamped); Activity.tsx renders the day-grouped card/list feed unlike Audit with read-side D-11 filters; nav collision resolved (one /activity -> nav.activity, /audit -> new nav.audit); Home one-click entry point (D-03)
+- [Phase ?]: [Phase 04]: 04-04: Summarize Today (D-10) code GREEN. summarizeDay reuses extractViaClaude (shared Haiku subscription one-shot, scrubbed env, bounded 20s timeout) directly, NOT a new LLM path / NOT the Gemini quota path; POST /api/activity/summarize checks LLM_SPAWN_ENABLED FIRST (off -> honest degrade + NO LLM call), inherits the mutations kill-switch + token gate; prompt carries only the params-free phrase + agent_id + time (no raw params/env/secrets); honest degrade over throw. Activity.tsx Summarize Today is operator-invoked only (click handler, never on mount, never per row). End-of-phase human-verify checkpoint (Task 3) PENDING operator sign-off.
+- [Phase ?]: [Phase 04]: 04-03: Undo vertical slice GREEN. undo-executor.ts mirrors replay-executor (MCP-over-stdio inverse); Tier 4 refused BEFORE dispatch (D-09); reuses isUndoableFamily allowlist; label-remove floor family proven end-to-end; claim-before-dispatch status guard prevents inverse double-fire; undo result in existing result column, NO migration; inverse tool names unconfirmed (no MCP servers connected) -> honest no-undo, logged deferred
 
 ### Pending Todos
 
@@ -108,9 +118,15 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
+<<<<<<< HEAD
 Last session: 2026-06-25T01:31:14.234Z
 Stopped at: Phase 5 context gathered
 Resume file: .planning/phases/05-audit-log/05-CONTEXT.md
+=======
+Last session: 2026-06-24
+Stopped at: 04-04 code complete (Summarize Today digest + route + UI); paused at end-of-phase human-verify checkpoint (Task 3)
+Resume file: .planning/phases/04-activity-feed/04-04-PLAN.md (Task 3 human-verify gate)
+>>>>>>> origin/main
 
 ## Operator Next Steps
 

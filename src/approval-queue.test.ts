@@ -17,7 +17,13 @@ import {
   approve,
   deny,
   expireOlderThan,
+  getApprovalById,
+  listApprovals,
+  undo,
+  claimUndo,
+  finalizeUndo,
 } from './approval-queue.js';
+import { getDb } from './db.js';
 
 beforeEach(() => {
   _initTestDatabase();
@@ -89,5 +95,108 @@ describe('approval-queue', () => {
     const id = enqueueSample({ toolInput: { to: 'x@y.com', body: 'safe' }, summary: 'safe summary' });
     const found = listPending().find((p) => p.id === id);
     expect(JSON.stringify(found)).not.toContain(secret);
+  });
+});
+
+describe('approval-queue read helpers (Undo prep)', () => {
+  it('getApprovalById returns a hydrated row of any status (pending/approved/denied/expired)', () => {
+    const pendingId = enqueueSample();
+    const approvedId = enqueueSample();
+    approve(approvedId, { ok: true });
+    const deniedId = enqueueSample();
+    deny(deniedId, { ok: false });
+
+    const pending = getApprovalById(pendingId);
+    expect(pending?.status).toBe('pending');
+    // tool_input hydrated to an object, not the raw JSON string.
+    expect(typeof pending?.tool_input).toBe('object');
+    expect(pending?.tool_input).toMatchObject({ to: 'a@b.com' });
+
+    expect(getApprovalById(approvedId)?.status).toBe('approved');
+    expect(getApprovalById(deniedId)?.status).toBe('denied');
+  });
+
+  it('getApprovalById returns undefined for a missing id', () => {
+    expect(getApprovalById(999_999)).toBeUndefined();
+  });
+
+  it('listApprovals(statuses) returns only rows in those statuses, most-recent-first', () => {
+    const pendingId = enqueueSample();
+    const approvedId = enqueueSample();
+    approve(approvedId, { ok: true });
+    const deniedId = enqueueSample();
+    deny(deniedId, { ok: false });
+
+    const rows = listApprovals(['approved', 'denied']);
+    const ids = rows.map((r) => r.id);
+    expect(ids).toContain(approvedId);
+    expect(ids).toContain(deniedId);
+    expect(ids).not.toContain(pendingId);
+    // Ordered created_at DESC, id DESC — the later-inserted denied id comes first.
+    expect(ids.indexOf(deniedId)).toBeLessThan(ids.indexOf(approvedId));
+  });
+
+  it('listApprovals([]) returns no rows (empty status set)', () => {
+    enqueueSample();
+    expect(listApprovals([])).toEqual([]);
+  });
+
+  it('a corrupt tool_input JSON string hydrates to {} and does not throw', () => {
+    const id = enqueueSample();
+    // Force a corrupt JSON blob directly into the row.
+    getDb()
+      .prepare(`UPDATE approval_queue SET tool_input = ? WHERE id = ?`)
+      .run('{not valid json', id);
+    expect(() => getApprovalById(id)).not.toThrow();
+    expect(getApprovalById(id)?.tool_input).toEqual({});
+  });
+});
+
+describe('undo write (status-guarded, no double-fire, T-04-undo-doublefire)', () => {
+  it('records the undo result on an approved row and returns true', () => {
+    const id = enqueueSample();
+    approve(id, { ok: true });
+    const acted = undo(id, { ok: true, message: 'Removed label.' });
+    expect(acted).toBe(true);
+    const row = getApprovalById(id);
+    expect(row?.status).toBe('approved'); // status unchanged; only result stamped
+    expect(row?.result).toContain('Removed label.');
+  });
+
+  it('a SECOND undo of the same row is a no-op returning false (no double-fire)', () => {
+    const id = enqueueSample();
+    approve(id, { ok: true });
+    const first = undo(id, { ok: true, message: 'Removed label.' });
+    expect(first).toBe(true);
+    const second = undo(id, { ok: true, message: 'Removed label.' });
+    expect(second).toBe(false); // status-guarded: already undone
+  });
+
+  it('a SECOND claimUndo BEFORE finalize is refused (CR-01: marker matches the LIKE guard during the MCP window)', () => {
+    // Reproduces the double-fire window: claimUndo stamps the row, then the
+    // async inverse runs (no finalize yet). A second concurrent request must
+    // find the row already claimed and be refused, so the inverse never fires
+    // twice. The bug was claimUndo stamping a marker without the trailing space
+    // ('[undone]') that the SQL guard ('[undone] %') failed to match.
+    const id = enqueueSample();
+    approve(id, { ok: true });
+    const firstClaim = claimUndo(id);
+    expect(firstClaim).toBe(true);
+    // No finalizeUndo() yet -- we are inside the async MCP call window.
+    const secondClaim = claimUndo(id);
+    expect(secondClaim).toBe(false); // refused: row already claimed
+    // Finalizing the first (winning) claim still works and keeps the guard set.
+    finalizeUndo(id, { ok: true, message: 'Removed label.' });
+    expect(claimUndo(id)).toBe(false); // still refused after finalize
+  });
+
+  it('undo on a non-approved (pending) row is a no-op returning false', () => {
+    const id = enqueueSample(); // stays pending
+    const acted = undo(id, { ok: true, message: 'x' });
+    expect(acted).toBe(false);
+  });
+
+  it('undo on an unknown id returns false', () => {
+    expect(undo(999_999, { ok: true })).toBe(false);
   });
 });

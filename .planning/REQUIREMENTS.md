@@ -36,8 +36,8 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 - [x] **PERM-04**: A gated action is prepared and queued as a "Needs you" item for one-tap approval
 
 ### Activity & Audit (TRUST)
-- [ ] **TRUST-01**: A user can see an activity feed of what the team did, each item tagged autonomous vs approved
-- [ ] **TRUST-02**: A user can undo a reversible action from the activity feed (D9)
+- [x] **TRUST-01**: A user can see an activity feed of what the team did, each item tagged autonomous vs approved
+- [x] **TRUST-02**: A user can undo a reversible action from the activity feed (D9)
 - [ ] **AUD-01**: An admin can view a complete, read-only, append-only audit log of every event with technical detail
 - [ ] **AUD-02**: An admin can export the audit log (CSV/JSON); log retention is bounded and configurable (D10)
 
@@ -83,8 +83,8 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 | PERM-02 | Phase 3 | Complete |
 | PERM-03 | Phase 3 | Complete |
 | PERM-04 | Phase 3 | Complete |
-| TRUST-01 | Phase 4 | Pending |
-| TRUST-02 | Phase 4 | Pending |
+| TRUST-01 | Phase 4 | Complete |
+| TRUST-02 | Phase 4 | Complete |
 | AUD-01 | Phase 5 | Pending |
 | AUD-02 | Phase 5 | Pending |
 | MEM-01 | Phase 6 | Pending |
