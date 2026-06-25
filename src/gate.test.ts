@@ -17,6 +17,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { setAuditCallback, type AuditEntry } from './security.js';
 import {
+  _initTestDatabase,
+  insertAuditLog,
+  getAuditLogFiltered,
+} from './db.js';
+import {
   classifyTier,
   resolveOutcome,
   makeCanUseTool,
@@ -244,5 +249,46 @@ describe('audit recorded', () => {
       // `token`, so target should be omitted entirely here.
       expect(e.target ?? '').not.toContain(secret);
     }
+  });
+});
+
+// ── End-to-end model capture (D-01) ──────────────────────────────────────────
+//
+// This proves the FULL chain, not a synthetic fixture row:
+//   GateContext.model → recordDecision → audit() → insertAuditLog → audit_log →
+//   getAuditLogFiltered (the same reader /api/audit uses).
+// A permission decision fired inside a GateContext carrying a known model must
+// yield a persisted audit_log row whose `model` column equals that value and is
+// non-null. If the turn-boundary model never reaches the row, this is RED.
+
+describe('model capture is persisted end-to-end (D-01)', () => {
+  const SENTINEL_MODEL = 'claude-test-model';
+
+  beforeEach(() => {
+    // Real in-memory audit_log (createSchema + the v1.2.4 enrich columns).
+    _initTestDatabase();
+    // Wire the choke point to the real writer, exactly as src/index.ts does.
+    setAuditCallback((e) => insertAuditLog(e));
+  });
+
+  it('a permission decision in a GateContext carrying a model persists that model on the audit_log row', async () => {
+    const ctx: GateContext = {
+      attended: false,
+      mode: 'autonomous',
+      overrides: {},
+      enqueue: vi.fn(),
+      sessionId: 'sess-e2e',
+      model: SENTINEL_MODEL,
+    };
+    const canUseTool = makeCanUseTool(ctx);
+    await canUseTool('Read', { file_path: '/tmp/x' }, OPTS);
+
+    const rows = getAuditLogFiltered({ eventType: 'permission' });
+    const permRows = rows.filter((r) => r.action === 'permission');
+    expect(permRows.length).toBeGreaterThanOrEqual(1);
+    const row = permRows[0];
+    expect(row.model).not.toBeNull();
+    expect(row.model).toBe(SENTINEL_MODEL);
+    expect(row.session_id).toBe('sess-e2e');
   });
 });
