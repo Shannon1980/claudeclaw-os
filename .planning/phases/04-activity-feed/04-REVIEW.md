@@ -21,7 +21,17 @@ findings:
   warning: 4
   info: 2
   total: 8
-status: issues_found
+status: resolved
+fixed_at: 2026-06-24
+resolved:
+  - CR-01
+  - CR-02
+  - WR-01
+  - WR-02
+  - WR-03
+  - WR-04
+  - IN-01
+  - IN-02
 ---
 
 # Phase 04: Code Review Report
@@ -29,7 +39,7 @@ status: issues_found
 **Reviewed:** 2026-06-24
 **Depth:** standard
 **Files Reviewed:** 12
-**Status:** issues_found
+**Status:** resolved (all 8 findings fixed 2026-06-24)
 
 ## Summary
 
@@ -44,6 +54,8 @@ Four warnings and two info-level items cover HTTP status correctness, a duplicat
 ## Critical Issues
 
 ### CR-01: `claimUndo` stamps the wrong marker, defeating double-fire protection
+
+**Status:** RESOLVED (commit 7968dbe) — stamped full `UNDONE_MARKER` (trailing space) and added a regression test proving a second `claimUndo` before finalize is refused.
 
 **File:** `src/approval-queue.ts:250`
 
@@ -63,6 +75,8 @@ After this change, the SQL LIKE guard `result NOT LIKE '[undone] %'` will see `'
 ---
 
 ### CR-02: `buildActivityFeed` fetches all audit permission rows without a DB-level LIMIT
+
+**Status:** RESOLVED (commit 7837cc8) — pushed the outcome filter into SQL and added `LIMIT limit*2` to the audit read.
 
 **File:** `src/activity.ts:193-199`
 
@@ -98,6 +112,8 @@ The LIKE pre-filter is a heuristic (a valid outcome JSON string always contains 
 
 ### WR-01: Undo route returns HTTP 200 for all failure cases
 
+**Status:** RESOLVED (commit 9013403) — 404 not-found, 409 wrong-state/already-undone, 400 not-undoable. Honest body and success-path shape unchanged.
+
 **File:** `src/dashboard.ts:3600-3616`
 
 **Issue:** Every failure branch in `POST /api/activity/:id/undo` returns HTTP 200:
@@ -123,6 +139,8 @@ if (!claimUndo(id)) return c.json({ ok: false, error: 'already undone' }, 409);
 
 ### WR-02: `/usage` and `/activity` routes share the same sidebar icon
 
+**Status:** RESOLVED (commit 7e4f535) — `/activity` now uses `ListChecks`, distinct from the Usage `Activity` chart icon.
+
 **File:** `web/src/lib/routes.ts:36-37`
 
 **Issue:** Both the `/usage` and `/activity` routes are assigned the `Activity` icon from `lucide-preact`:
@@ -145,6 +163,8 @@ import { ..., ListChecks, ... } from 'lucide-preact';
 ---
 
 ### WR-03: Label undo dispatches with an empty `label` param when no label key is in `tool_input`
+
+**Status:** RESOLVED (commit db0d033) — added `if (!label) return { args: {}, missing: 'no label id in the captured action' }` so an empty-label inverse is never dispatched; honest failure instead.
 
 **File:** `src/undo-executor.ts:91-95`
 
@@ -172,6 +192,8 @@ return { args: { message_id: messageId, label } };
 ---
 
 ### WR-04: Em dashes in user-facing rendered text in `Home.tsx`
+
+**Status:** RESOLVED (commit 9c3812b) — all em dashes removed from `Home.tsx` (the three user-facing strings plus the file-header comments).
 
 **File:** `web/src/pages/Home.tsx:208,249,287`
 
@@ -202,6 +224,8 @@ body: 'Calendar, email, and the rest, so I can act.'
 
 ### IN-01: Em dashes in code comments across multiple files
 
+**Status:** RESOLVED (commit 5ab735d) — em dashes removed from the listed `approval-queue.ts` comments and the new activity-route comments in `dashboard.ts`. Note: dashboard.ts retains ~73 pre-existing em dashes outside the phase-04 surfaces; those belong to earlier phases and were left out of scope.
+
 **File:** `src/approval-queue.ts:2,14,95,129,180,197,228` and `src/dashboard.ts:3581,3589,3628,3634,3635`
 
 **Issue:** The CLAUDE.md hard rule "No em dashes. Ever." is not limited to user-facing copy. These files contain em dashes in JSDoc comments and inline code comments. The Home.tsx violations (WR-04) are higher priority because they surface to the operator; these are lower severity but still a rule violation.
@@ -211,6 +235,8 @@ body: 'Calendar, email, and the rest, so I can act.'
 ---
 
 ### IN-02: `buildActivityFeed` applies the `limit` cap after an unfiltered merge
+
+**Status:** RESOLVED (commit 7837cc8) — `listApprovals` now takes a bounded `limit` (default `DEFAULT_LIST_LIMIT=1000`) applied at the DB layer; `buildActivityFeed` passes `limit*2` to both sources so neither read is unbounded.
 
 **File:** `src/activity.ts:209-214`
 
