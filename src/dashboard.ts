@@ -3578,7 +3578,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
 
   // Undo a reversible action (TRUST-02 / D-07/D-08/D-09). POST, so it inherits
   // the DASHBOARD_MUTATIONS_ENABLED kill-switch 503 and the token gate from the
-  // app-level middleware above (T-04-undo-auth) by mounting on `app` — no
+  // app-level middleware above (T-04-undo-auth) by mounting on `app` -- no
   // bespoke gating here. Flow, mirroring the approve route's status-guarded
   // "act once" shape:
   //   1. parseInt + Number.isInteger -> 400 on a bad id (V5).
@@ -3586,7 +3586,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   //      (allowlisted family, tier<4, has tool_input). Else honest rejection.
   //   3. claimUndo(id) status-guarded CLAIM, BEFORE any dispatch: only one
   //      caller claims an approved, not-yet-undone row (T-04-undo-doublefire).
-  //      A second click finds it claimed and is a no-op — the inverse never
+  //      A second click finds it claimed and is a no-op -- the inverse never
   //      fires twice because the claim gates the dispatch.
   //   4. undoAction(tool_name, tool_input, tier) runs the real inverse (or
   //      refuses Tier 4 before dispatch / returns honest "no undo").
@@ -3629,14 +3629,14 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
 
   // Summarize Today: the one acceptable on-demand LLM affordance (D-10). POST,
   // so it inherits the token gate + DASHBOARD_MUTATIONS_ENABLED kill-switch 503
-  // by mounting on `app` (T-04-summarize-auth) — no bespoke gating here. On top
+  // by mounting on `app` (T-04-summarize-auth) -- no bespoke gating here. On top
   // of that it is governed by the LLM_SPAWN_ENABLED kill-switch (T-04-llm-dos):
   // when LLM spawning is disabled the route short-circuits with the honest
   // degrade and makes NO LLM call at all. It is operator-invoked only (no
   // per-row, no on-mount), and summarizeDay carries only params-free phrases
   // into the prompt (scrubbed env, bounded timeout, T-04-summarize-infodisc).
-  // It always returns 200 with { text } — either the digest or the honest
-  // degrade — and never throws or fabricates (D-05).
+  // It always returns 200 with { text } -- either the digest or the honest
+  // degrade -- and never throws or fabricates (D-05).
   app.post('/api/activity/summarize', async (c) => {
     // Kill-switch FIRST: if LLM spawning is off, return the honest degrade and
     // make no LLM call. This is the DoS chokepoint for the summarize path.

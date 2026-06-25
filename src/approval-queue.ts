@@ -1,5 +1,5 @@
 /**
- * The approval queue (PERM-04) — persistence + state machine for background
+ * The approval queue (PERM-04) -- persistence + state machine for background
  * "ask" outcomes from the permission gate.
  *
  * When a non-attended run (scheduler / mission / routine step) hits a Tier 3/4
@@ -11,7 +11,7 @@
  * reports whether it actually changed a row (`.changes === 1`).
  *
  * Security (L-4 / ASVS V8): `tool_input` stores ONLY the model-supplied tool
- * params as JSON — never env, secrets, or the scrubbed SDK environment. Long
+ * params as JSON -- never env, secrets, or the scrubbed SDK environment. Long
  * text fields are capped (mirrors the saveRoutineRun .slice precedent). On
  * read, tool_input is JSON.parsed defensively (never eval'd).
  */
@@ -98,7 +98,7 @@ export function enqueueApproval(input: EnqueueApprovalInput): number {
  * Adapter matching the gate's `GateContext.enqueue` signature
  * (`{toolName,input,tier,mode,agentId,chatId,runId}` → id). Maps the gate's
  * field names onto enqueueApproval and derives a plain-language summary that
- * carries ONLY the tool name + tier (never the input params — L-4). Wired into
+ * carries ONLY the tool name + tier (never the input params -- L-4). Wired into
  * runAgent as the default background enqueue path.
  */
 export function gateEnqueue(item: {
@@ -132,7 +132,7 @@ function parseToolInput(raw: string): Record<string, unknown> {
       return parsed as Record<string, unknown>;
     }
   } catch {
-    /* fall through to empty object — corrupt row never crashes a read */
+    /* fall through to empty object -- corrupt row never crashes a read */
   }
   return {};
 }
@@ -196,7 +196,7 @@ export function listApprovals(
 /**
  * Approve a pending row, recording the replay result. STATUS-GUARDED (L-3):
  * only acts if the row is still `pending`. Returns true iff exactly one row
- * changed — a second approve (or a poll race) is a no-op returning false.
+ * changed -- a second approve (or a poll race) is a no-op returning false.
  */
 export function approve(id: number, result?: unknown): boolean {
   const now = Math.floor(Date.now() / 1000);
@@ -213,7 +213,7 @@ export function approve(id: number, result?: unknown): boolean {
 }
 
 /**
- * Deny a pending row. STATUS-GUARDED (L-3) — same replay-once semantics as
+ * Deny a pending row. STATUS-GUARDED (L-3) -- same replay-once semantics as
  * approve. Returns true iff exactly one row changed.
  */
 export function deny(id: number, result?: unknown): boolean {
@@ -244,7 +244,7 @@ const UNDONE_MARKER = '[undone] ';
  * CLAIM an approved row for undo, BEFORE running the inverse. STATUS-GUARDED
  * (Tampering / T-04-undo-doublefire): the UPDATE only fires when the row is
  * `status='approved'` AND its `result` is not already an undo marker. Returns
- * true iff exactly one row changed — that boolean is the single source of truth
+ * true iff exactly one row changed -- that boolean is the single source of truth
  * for "this caller, and only this caller, gets to run the inverse." A second
  * click or retry finds the row already marked and returns false, so the route
  * never dispatches the inverse twice.
