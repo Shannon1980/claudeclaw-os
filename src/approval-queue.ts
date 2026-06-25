@@ -1,5 +1,5 @@
 /**
- * The approval queue (PERM-04) — persistence + state machine for background
+ * The approval queue (PERM-04) -- persistence + state machine for background
  * "ask" outcomes from the permission gate.
  *
  * When a non-attended run (scheduler / mission / routine step) hits a Tier 3/4
@@ -11,7 +11,7 @@
  * reports whether it actually changed a row (`.changes === 1`).
  *
  * Security (L-4 / ASVS V8): `tool_input` stores ONLY the model-supplied tool
- * params as JSON — never env, secrets, or the scrubbed SDK environment. Long
+ * params as JSON -- never env, secrets, or the scrubbed SDK environment. Long
  * text fields are capped (mirrors the saveRoutineRun .slice precedent). On
  * read, tool_input is JSON.parsed defensively (never eval'd).
  */
@@ -58,6 +58,12 @@ export interface EnqueueApprovalInput {
 // (e.g. a giant email body) can't bloat the row unbounded.
 const TEXT_CAP = 4000;
 
+// Default upper bound for listApprovals reads (IN-02). The Activity feed only
+// renders a capped window, so an unbounded SELECT just to slice it down wastes
+// memory in a long-running install. Generous enough to never truncate a real
+// queue read, bounded enough to never load tens of thousands of rows.
+const DEFAULT_LIST_LIMIT = 1000;
+
 /**
  * Insert a `pending` approval row and return its id. Stores ONLY the captured
  * model-supplied tool params (never env/secrets, L-4). The serialized
@@ -92,7 +98,7 @@ export function enqueueApproval(input: EnqueueApprovalInput): number {
  * Adapter matching the gate's `GateContext.enqueue` signature
  * (`{toolName,input,tier,mode,agentId,chatId,runId}` → id). Maps the gate's
  * field names onto enqueueApproval and derives a plain-language summary that
- * carries ONLY the tool name + tier (never the input params — L-4). Wired into
+ * carries ONLY the tool name + tier (never the input params -- L-4). Wired into
  * runAgent as the default background enqueue path.
  */
 export function gateEnqueue(item: {
@@ -126,7 +132,7 @@ function parseToolInput(raw: string): Record<string, unknown> {
       return parsed as Record<string, unknown>;
     }
   } catch {
-    /* fall through to empty object — corrupt row never crashes a read */
+    /* fall through to empty object -- corrupt row never crashes a read */
   }
   return {};
 }
@@ -146,9 +152,51 @@ export function listPending(): ApprovalRow[] {
 }
 
 /**
+ * Fetch a single approval row by id, in ANY status (the Activity feed and Undo
+ * target approved/denied/expired rows, not just pending). Read-only: same
+ * defensive hydrate as listPending, so a corrupt tool_input yields {} and never
+ * crashes the read. Returns undefined when no row matches.
+ */
+export function getApprovalById(id: number): ApprovalRow | undefined {
+  const row = getDb()
+    .prepare(`SELECT * FROM approval_queue WHERE id = ?`)
+    .get(id) as RawApprovalRow | undefined;
+  return row ? hydrate(row) : undefined;
+}
+
+/**
+ * Rows in any of the given statuses, most recent first (created_at DESC, id
+ * DESC, matching listPending). Uses a parameterized IN list so no status value
+ * is string-interpolated into the SQL. An empty status set returns no rows.
+ *
+ * A bounded `limit` keeps queue reads from growing unbounded (IN-02): the
+ * Activity feed only ever renders a capped window, so fetching the whole table
+ * just to slice it down wastes memory in a long-running install. The limit is
+ * applied at the DB layer. Callers that genuinely want every row pass a large
+ * limit; omitted defaults to a generous DEFAULT_LIST_LIMIT.
+ *
+ * @param statuses - The statuses to include (parameterized IN list).
+ * @param limit - Max rows to return, applied at the DB layer. Defaults to DEFAULT_LIST_LIMIT.
+ */
+export function listApprovals(
+  statuses: ApprovalRow['status'][],
+  limit: number = DEFAULT_LIST_LIMIT,
+): ApprovalRow[] {
+  if (statuses.length === 0) return [];
+  const placeholders = statuses.map(() => '?').join(', ');
+  const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_LIST_LIMIT;
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM approval_queue WHERE status IN (${placeholders}) ORDER BY created_at DESC, id DESC LIMIT ?`,
+    )
+    .all(...statuses, safeLimit) as RawApprovalRow[];
+  return rows.map(hydrate);
+}
+
+/**
  * Approve a pending row, recording the replay result. STATUS-GUARDED (L-3):
  * only acts if the row is still `pending`. Returns true iff exactly one row
- * changed — a second approve (or a poll race) is a no-op returning false.
+ * changed -- a second approve (or a poll race) is a no-op returning false.
  */
 export function approve(id: number, result?: unknown): boolean {
   const now = Math.floor(Date.now() / 1000);
@@ -165,7 +213,7 @@ export function approve(id: number, result?: unknown): boolean {
 }
 
 /**
- * Deny a pending row. STATUS-GUARDED (L-3) — same replay-once semantics as
+ * Deny a pending row. STATUS-GUARDED (L-3) -- same replay-once semantics as
  * approve. Returns true iff exactly one row changed.
  */
 export function deny(id: number, result?: unknown): boolean {
@@ -180,6 +228,79 @@ export function deny(id: number, result?: unknown): boolean {
     )
     .run(now, resultText, id);
   return info.changes === 1;
+}
+
+/**
+ * A recognizable prefix the undo write stamps into the existing `result`
+ * column. Reusing `result` (no new column, no migration, RESEARCH A2) means we
+ * need an in-band marker so the status-guarded UPDATE can refuse a second undo
+ * of the SAME row without a dedicated `undone` status. The prefix is matched in
+ * SQL with a leading-anchored LIKE so a normal replay result can never be
+ * mistaken for an undo marker.
+ */
+const UNDONE_MARKER = '[undone] ';
+
+/**
+ * CLAIM an approved row for undo, BEFORE running the inverse. STATUS-GUARDED
+ * (Tampering / T-04-undo-doublefire): the UPDATE only fires when the row is
+ * `status='approved'` AND its `result` is not already an undo marker. Returns
+ * true iff exactly one row changed -- that boolean is the single source of truth
+ * for "this caller, and only this caller, gets to run the inverse." A second
+ * click or retry finds the row already marked and returns false, so the route
+ * never dispatches the inverse twice.
+ *
+ * The stamp is the bare UNDONE_MARKER so the row reads as "undo in progress"
+ * until finalizeUndo() overwrites it with the real outcome. The status stays
+ * 'approved' throughout (the action did happen and was approved); only the
+ * existing `result` column is used. No new column, no migration (RESEARCH A2).
+ *
+ * @param id - The approval_queue row id to claim for undo.
+ * @returns True iff this call claimed exactly one not-yet-undone approved row.
+ */
+export function claimUndo(id: number): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const info = getDb()
+    .prepare(
+      `UPDATE approval_queue
+          SET result = ?, decided_at = ?
+        WHERE id = ? AND status = 'approved'
+          AND (result IS NULL OR result NOT LIKE '[undone] %')`,
+    )
+    .run(UNDONE_MARKER, now, id);
+  return info.changes === 1;
+}
+
+/**
+ * Finalize an undo by overwriting the claimed row's `result` with the verbatim
+ * honest outcome from undoAction. Called only after claimUndo() returned true,
+ * so it always targets the row this caller claimed. Keeps the UNDONE_MARKER
+ * prefix so the row stays recognizably undone and a later claim still refuses.
+ *
+ * @param id - The approval_queue row id previously claimed via claimUndo.
+ * @param result - The undo outcome to record (serialized + capped, marker-stamped).
+ */
+export function finalizeUndo(id: number, result: unknown): void {
+  const body = result === undefined ? '' : JSON.stringify(result);
+  const resultText = (UNDONE_MARKER + body).slice(0, TEXT_CAP);
+  getDb()
+    .prepare(`UPDATE approval_queue SET result = ? WHERE id = ?`)
+    .run(resultText, id);
+}
+
+/**
+ * Convenience for non-route callers (and tests): claim + finalize in one step,
+ * status-guarded against a double-fire. Returns true iff this call performed the
+ * undo (claimed the row); a second call returns false. Prefer claimUndo() +
+ * finalizeUndo() in the route so the inverse is gated by the claim BEFORE it runs.
+ *
+ * @param id - The approval_queue row id to undo.
+ * @param result - The undo outcome to record.
+ * @returns True iff this call performed the undo (no double-fire).
+ */
+export function undo(id: number, result: unknown): boolean {
+  if (!claimUndo(id)) return false;
+  finalizeUndo(id, result);
+  return true;
 }
 
 /**

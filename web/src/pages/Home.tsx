@@ -1,9 +1,9 @@
-// Home — the operator's daily loop (operator-product spec 03-home.md).
+// Home -- the operator's daily loop (operator-product spec 03-home.md).
 //
 // One skeleton, two states. Day-one and steady-state share this layout; the
 // slots fill in as work accumulates, nothing rearranges. Top to bottom:
 //   1. Greeting + one-line status
-//   2. Activation strip (large day-one, thin steady — D3: persists)
+//   2. Activation strip (large day-one, thin steady -- D3: persists)
 //   3. "Needs you" / "Today" card
 //   4. Three zones: On my plate · Waiting on others · Shipped this week
 //   5. Capture bar (always present)
@@ -12,7 +12,7 @@
 // one call and holds no grouping logic. The zone/card pieces live in
 // components/DailyLoop so the project detail can render the same loop scoped
 // to one project. Degraded slots (no permission feed, no calendar) fail
-// honestly — see DailyLoop and the summary endpoint for the specifics.
+// honestly -- see DailyLoop and the summary endpoint for the specifics.
 
 import { useMemo, useRef, useState } from 'preact/hooks';
 import { useLocation } from 'wouter-preact';
@@ -176,6 +176,17 @@ export function Home() {
               onSuggest={(text) => focusCapture(text)}
             />
 
+            {/* Quiet one-click shortcut into the Activity feed (D-03). Not a
+             *  second loud card; a daily-glance link beneath Needs you. */}
+            <button
+              type="button"
+              onClick={() => navigate('/activity')}
+              class="flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
+            >
+              What your team did
+              <ArrowRight size={12} />
+            </button>
+
             {/* 4. Three zones */}
             <LoopZones onPlate={onPlate} waiting={waiting} shipped={shipped} agentById={agentById} onChange={refresh} />
           </div>
@@ -194,7 +205,7 @@ export function Home() {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submitCapture(); }
               }}
               rows={1}
-              placeholder="Tell me anything — forward an email, drop a note, hand me a task. (⌘↵ to send)"
+              placeholder="Tell me anything. Forward an email, drop a note, hand me a task. (⌘↵ to send)"
               class="flex-1 resize-none bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md px-3 py-2 text-[12.5px] outline-none focus:border-[var(--color-accent)] leading-relaxed max-h-32"
             />
             <button
@@ -235,7 +246,7 @@ function GreetingBlock({ dayOne, needs, waiting, shipped }: {
         <h2 class="text-[20px] font-semibold text-[var(--color-text)] leading-tight">{greeting()}.</h2>
         {dayOne ? (
           <p class="text-[13px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
-            I'm set up and running. I don't know much about your work yet — point me at something below and I'll get going.
+            I'm set up and running. I don't know much about your work yet. Point me at something below and I'll get going.
           </p>
         ) : (
           <p class="text-[13px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
@@ -273,7 +284,7 @@ function ActivationStrip({ dayOne, onTellWork, onConnect, onBrief }: {
 
   const actions = [
     { icon: FileText, title: 'Tell me what you are working on', body: 'A sentence is enough to get started.', onClick: onTellWork },
-    { icon: Plug, title: 'Finish connecting your tools', body: 'Calendar, email, and the rest — so I can act.', onClick: onConnect },
+    { icon: Plug, title: 'Finish connecting your tools', body: 'Calendar, email, and the rest, so I can act.', onClick: onConnect },
     { icon: Sparkles, title: 'Give me a one-paragraph brief', body: 'Who you are and what you do, in your words.', onClick: onBrief },
   ];
 

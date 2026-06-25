@@ -11,6 +11,7 @@ import { Memories } from '@/pages/Memories';
 import { HiveMind } from '@/pages/HiveMind';
 import { Team } from '@/pages/Team';
 import { Routines } from '@/pages/Routines';
+import { Activity } from '@/pages/Activity';
 import { Audit } from '@/pages/Audit';
 import { Usage } from '@/pages/Usage';
 import { Settings } from '@/pages/Settings';
@@ -56,6 +57,7 @@ export function App() {
           <Route path="/memories"><Memories /></Route>
           <Route path="/hive"><HiveMind /></Route>
           <Route path="/usage"><Usage /></Route>
+          <Route path="/activity"><Activity /></Route>
           <Route path="/audit"><Audit /></Route>
           <Route path="/warroom"><WarRoom /></Route>
           <Route path="/voices"><Voices /></Route>

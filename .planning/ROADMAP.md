@@ -27,7 +27,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [x] **Phase 1: Desktop Shell & Onboarding** - Zero-terminal install: Electron shell boots the service and drives Claude login/auth (completed 2026-06-23)
 - [ ] **Phase 2: Routines** - Plain-language scheduled multi-step workflows the operator builds by describing
 - [ ] **Phase 3: Permissions & Autonomy** - The four-tier autonomy model that gates every external action (plans executed 2026-06-24; verification gaps_found 2/4 — gap closure pending)
-- [ ] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo
+- [x] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo (executed 2026-06-24; end-of-phase human-verify pending) (completed 2026-06-25)
 - [ ] **Phase 5: Audit Log** - Admin-facing immutable, append-only, exportable record of every event
 - [ ] **Phase 6: Memory Surface** - "What your assistant knows": editable, provenance-tagged knowledge base
 - [ ] **Phase 7: Power Surfaces** - War room decision tool + live team pulse, reframed off the daily path
@@ -121,16 +121,19 @@ Plans:
 **Plans**: 4 plansPlans:
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Wave 0: failing tests (TRUST-01 tag/dedup/phrase, TRUST-02 undo allowlist/Tier-4/never-throw) + formatClock + Summarize JSON-prose seam
-- [ ] 04-02-PLAN.md — Slice A (TRUST-01): src/activity.ts curated join+dedup+read-side tags+phrase map, GET /api/activity, Activity.tsx, nav/route/vocab rewire, Home entry point
+- [x] 04-01-PLAN.md: Read-side engine + Wave 0 tests: phrase map (D-04/05), buildActivityFeed merge/dedupe/tag derivation (D-06), approval-queue read helpers
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-03-PLAN.md — Slice B (TRUST-02): src/undo-executor.ts allowlisted inverse + Tier-4 lock, POST /api/activity/:id/undo, in-feed Undo UI (D-08 floor: >=1 family end-to-end)
+- [x] 04-02-PLAN.md: First vertical slice: GET /api/activity + Activity.tsx surface + filter chips (D-11) + nav/route/vocab fix (D-01/02) + Home entry (D-03)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-04-PLAN.md — Summarize daily digest (D-10): POST /api/activity/summarize Gemini one-shot + header CTA
+- [x] 04-03-PLAN.md: Undo slice: undo-executor allowlist inverse (D-07/08), Tier 4 refused (D-09), status-guarded POST /api/activity/:id/undo + conditional Undo UI
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [~] 04-04-PLAN.md: Summarize slice (D-10) code complete + committed; end-of-phase human-verify of the live surface PENDING operator sign-off
 
 **UI hint**: yes
 
@@ -203,7 +206,7 @@ Plans:
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
-| 4. Activity Feed | 0/4 | Planned | - |
+| 4. Activity Feed | 4/4 | Complete    | 2026-06-25 |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |
