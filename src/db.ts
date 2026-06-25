@@ -3271,9 +3271,19 @@ export function getAuditLogFiltered(filters: AuditLogFilters = {}): AuditLogEntr
     params.push(filters.endAt);
   }
 
-  let sql = `SELECT * FROM audit_log`;
+  // Cost is resolved READ-SIDE per D-11 (never mutate the append-only row). A
+  // correlated subquery on session_id attaches the turn's cost to each row.
+  // Critically this is NOT a JOIN: a JOIN against token_usage would fan out (N
+  // audit rows sharing a session_id Ã— M token_usage rows) and either drop the
+  // cost or multiply it. The subquery returns the single per-turn SUM for every
+  // row, so 3 audit rows sharing one session each get that turn's cost, not 0
+  // and not 3Ã— (Pitfall 4). Rows with no session_id / no token_usage read 0.
+  let sql =
+    `SELECT a.*, ` +
+    `(SELECT COALESCE(SUM(t.cost_usd), 0) FROM token_usage t WHERE t.session_id = a.session_id) AS cost_usd ` +
+    `FROM audit_log a`;
   if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
-  sql += ` ORDER BY created_at DESC`;
+  sql += ` ORDER BY a.created_at DESC`;
   if (typeof filters.limit === 'number') {
     sql += ` LIMIT ?`;
     params.push(filters.limit);
@@ -3284,6 +3294,20 @@ export function getAuditLogFiltered(filters: AuditLogFilters = {}): AuditLogEntr
   }
 
   return db.prepare(sql).all(...params) as AuditLogEntry[];
+}
+
+/**
+ * Distinct event_type values currently present in audit_log. Drives the HONEST
+ * type chips in the UI (Task 2): a chip is rendered ACTIVE only for a type that
+ * has backing data here; spec types with no rows are shown disabled + footnoted
+ * "not yet captured" so the surface never implies coverage it does not have.
+ * NULL event_type rows (pre-enrichment legacy) are excluded.
+ */
+export function getAuditLogTypes(): string[] {
+  const rows = db.prepare(
+    `SELECT DISTINCT event_type FROM audit_log WHERE event_type IS NOT NULL ORDER BY event_type ASC`,
+  ).all() as Array<{ event_type: string }>;
+  return rows.map((r) => r.event_type);
 }
 
 // ── Audit retention window (Phase 5, AUD-02 / D-31) ─────────────────────

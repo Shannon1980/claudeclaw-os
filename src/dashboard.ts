@@ -59,9 +59,12 @@ import {
   setMissionTaskBlocked,
   unblockMissionTask,
   getUpcomingScheduledTasks,
-  getAuditLog,
   getAuditLogCount,
+  getAuditLogFiltered,
+  getAuditLogTypes,
+  getAuditRetentionDays,
   getRecentBlockedActions,
+  type AuditLogEntry,
   listActiveMeetSessions,
   listRecentMeetSessions,
   getMeetSession,
@@ -149,6 +152,73 @@ import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
 import { logger } from './logger.js';
 import { getTelegramConnected, getBotInfo, chatEvents, getIsProcessing, abortActiveQuery, ChatEvent } from './state.js';
 import { killProcess, isProcessAlive, findProcessesByPattern } from './platform.js';
+
+// ── Audit export serializers (Phase 5, AUD-02) ─────────────────────────────
+//
+// The audit log exports the COMPLETE filtered set as a downloadable CSV or JSON
+// file (D-21). audit_log.detail is free-text and WILL contain commas, quotes,
+// and newlines, and a cell whose first character is `= + - @` executes as a
+// formula when the file is opened in Excel (CSV injection, Pitfall 3 / ASVS V8).
+// Both serializers live here (not in a CSV library — none is installed) and are
+// unit-tested in src/audit-export.test.ts.
+
+/** Neutralize formula injection: prefix a cell starting with `= + - @` (after
+ * any leading whitespace, which Excel ignores) with a single quote. */
+function neutralizeFormula(value: string): string {
+  // Excel evaluates a cell as a formula when its first non-space char is one of
+  // these — prefix with ' so it is treated as literal text.
+  if (/^[\s]*[=+\-@]/.test(value)) return `'${value}`;
+  return value;
+}
+
+/** RFC-4180-quote a single field: double embedded quotes and wrap the field in
+ * quotes when it contains a comma, quote, CR, or LF. */
+function csvField(value: unknown): string {
+  // null / undefined export as an empty cell (honest absence in a flat file).
+  const raw = value === null || value === undefined ? '' : String(value);
+  const neutralized = neutralizeFormula(raw);
+  if (/[",\r\n]/.test(neutralized)) {
+    return `"${neutralized.replace(/"/g, '""')}"`;
+  }
+  return neutralized;
+}
+
+/**
+ * Serialize rows to RFC-4180 CSV with a header row. Column order is taken from
+ * the union of keys across all rows (first-seen order), so a sparse row still
+ * lands its values under the right header. The detail/target/etc. fields are
+ * free-text and pass through {@link csvField} (quoting) + formula neutralization
+ * — NEVER `.join(',')` raw values.
+ */
+export function toCsv(rows: Array<Record<string, unknown>>): string {
+  if (rows.length === 0) return '';
+  const columns: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        columns.push(key);
+      }
+    }
+  }
+  const lines: string[] = [];
+  lines.push(columns.map(csvField).join(','));
+  for (const row of rows) {
+    lines.push(columns.map((col) => csvField(row[col])).join(','));
+  }
+  // RFC-4180 uses CRLF line breaks.
+  return lines.join('\r\n');
+}
+
+/** JSON export envelope: { exported_at, count, rows }. */
+export function toJsonEnvelope(rows: Array<Record<string, unknown>>): {
+  exported_at: string;
+  count: number;
+  rows: Array<Record<string, unknown>>;
+} {
+  return { exported_at: new Date().toISOString(), count: rows.length, rows };
+}
 
 async function classifyTaskAgent(prompt: string): Promise<string | null> {
   const agentIds = listAgentIds();
@@ -3545,13 +3615,93 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return c.json({ ok: true });
   });
 
-  app.get('/api/audit', (c) => {
-    const limit = parseInt(c.req.query('limit') || '50', 10);
-    const offset = parseInt(c.req.query('offset') || '0', 10);
+  // Parse the shared audit filter params off a request. Used by BOTH the read
+  // endpoint and the export so they apply identical filtering (the export scope
+  // must match what is on screen). Every value binds via `?` placeholders in
+  // getAuditLogFiltered — nothing here is concatenated into SQL (T-05-05).
+  // Dates arrive as either epoch seconds or an ISO/date string; both are parsed
+  // to integer epoch seconds and silently dropped when unparseable (clamp, not
+  // fail) so a malformed date can never poison the query.
+  function parseAuditFilters(c: import('hono').Context): {
+    agentId?: string;
+    eventType?: string;
+    search?: string;
+    startAt?: number;
+    endAt?: number;
+  } {
     const agentId = c.req.query('agent') || undefined;
-    const entries = getAuditLog(limit, offset, agentId);
-    const total = getAuditLogCount(agentId);
-    return c.json({ entries, total });
+    const type = c.req.query('type') || undefined;
+    const search = c.req.query('search') || undefined;
+    const parseEpoch = (raw: string | undefined): number | undefined => {
+      if (!raw) return undefined;
+      // Bare integer => already epoch seconds.
+      if (/^\d+$/.test(raw)) {
+        const n = parseInt(raw, 10);
+        return Number.isInteger(n) ? n : undefined;
+      }
+      const ms = Date.parse(raw);
+      return Number.isNaN(ms) ? undefined : Math.floor(ms / 1000);
+    };
+    return {
+      agentId,
+      eventType: type,
+      search,
+      startAt: parseEpoch(c.req.query('from')),
+      endAt: parseEpoch(c.req.query('to')),
+    };
+  }
+
+  app.get('/api/audit', (c) => {
+    const rawLimit = parseInt(c.req.query('limit') || '50', 10);
+    const rawOffset = parseInt(c.req.query('offset') || '0', 10);
+    const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 50;
+    const offset = Number.isInteger(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+    const filters = parseAuditFilters(c);
+    // Enriched read: filtered rows carry the read-side cost (cost_usd subquery)
+    // and honest NULLs for uncaptured fields. The retention window + the set of
+    // event types with backing data ride in the same envelope so the UI can
+    // render the retention banner and HONEST type chips without a second call.
+    const entries = getAuditLogFiltered({ ...filters, limit, offset });
+    const total = getAuditLogCount(filters.agentId);
+    return c.json({
+      entries,
+      total,
+      retention_days: getAuditRetentionDays(),
+      types: getAuditLogTypes(),
+    });
+  });
+
+  // Complete-set export (D-21). Mounted under /api/ so it inherits the existing
+  // query-token gate (T-05-07); GET is mutations-exempt by design. Streams the
+  // FULL filtered set — NO limit/offset — so a copy-pasted page cap can never
+  // truncate the download (Pitfall 6). format âˆˆ {csv,json}; anything else falls
+  // back to csv. Returned as a download via Content-Disposition: attachment,
+  // mirroring the project file-download precedent. No [SEND_FILE] marker — this
+  // is an HTTP response, not a chat-bot attachment.
+  app.get('/api/audit/export', (c) => {
+    const rawFormat = (c.req.query('format') || 'csv').toLowerCase();
+    const format = rawFormat === 'json' ? 'json' : 'csv';
+    const filters = parseAuditFilters(c);
+    const rows = getAuditLogFiltered(filters) as Array<AuditLogEntry>;
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+
+    if (format === 'json') {
+      const body = JSON.stringify(toJsonEnvelope(rows as Array<Record<string, unknown>>));
+      return new Response(body, {
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Disposition': `attachment; filename="audit-${ts}.json"`,
+        },
+      });
+    }
+
+    const body = toCsv(rows as Array<Record<string, unknown>>);
+    return new Response(body, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="audit-${ts}.csv"`,
+      },
+    });
   });
 
   app.get('/api/audit/blocked', (c) => {
