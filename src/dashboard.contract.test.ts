@@ -487,6 +487,129 @@ describe('GET /api/audit/blocked', () => {
   });
 });
 
+// ── Phase 5 Audit Log: enriched read + export (Wave 0 RED — AUD-01/AUD-02) ──
+//
+// These pin the two contracts plans 02/03 build against. RED on purpose:
+//   - /api/audit does not yet return enriched columns or the cost JOIN.
+//   - /api/audit/export does not exist yet.
+//   - insertAuditLog's options-object signature is authored by plan 02.
+
+describe('GET /api/audit enriched (Pitfall 4: cost is per-turn, not per-row)', () => {
+  it('returns 3 audit rows sharing one session_id each with that turn\'s cost (not 0, not 3x) + honest NULLs', async () => {
+    const { insertAuditLog, saveTokenUsage } = await import('./db.js');
+
+    // Three per-action audit rows from ONE agent turn share one session_id.
+    for (let i = 0; i < 3; i++) {
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-cost',
+        action: 'permission',
+        detail: JSON.stringify({ tool: 'Bash', tier: 1, outcome: 'allow' }),
+        blocked: false,
+        eventType: 'permission',
+        tool: 'Bash',
+        result: 'allow',
+        sessionId: 'sess-turn-1',
+        model: 'claude-opus-4',
+        // target/project/duration deliberately omitted -> must read back NULL
+      });
+    }
+
+    // Exactly ONE token_usage row records that turn's cost.
+    const TURN_COST = 0.0123;
+    saveTokenUsage('chat-cost', 'sess-turn-1', 100, 50, 0, 0, TURN_COST, false, 'main');
+
+    const res = await get('/api/audit?limit=50');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    const rows = (body.entries as Array<Record<string, unknown>>).filter(
+      (r) => r.session_id === 'sess-turn-1',
+    );
+    expect(rows).toHaveLength(3);
+
+    for (const row of rows) {
+      // The JOIN must attach the turn cost to each row — NOT 0 (fan-out lost it)
+      // and NOT 3x (fan-out summed it). It is exactly the one turn's cost.
+      expect(row.cost_usd).toBeCloseTo(TURN_COST, 6);
+      // Uncaptured fields surface as null, never fabricated or blank.
+      expect(row.target).toBeNull();
+      expect(row.project).toBeNull();
+      expect(row.duration_ms).toBeNull();
+    }
+  });
+});
+
+describe('GET /api/audit/export (Pitfall 6: full filtered set, never page-capped)', () => {
+  // Insert strictly more rows than the read endpoint's default page size so a
+  // copy-pasted LIMIT would visibly truncate the export.
+  const ROW_COUNT = 120; // > the /api/audit default page (50)
+
+  async function seedRows() {
+    const { insertAuditLog } = await import('./db.js');
+    for (let i = 0; i < ROW_COUNT; i++) {
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-export',
+        action: 'message',
+        detail: `event ${i}`,
+        blocked: false,
+        eventType: 'message',
+        sessionId: 'sess-export',
+      });
+    }
+  }
+
+  it('CSV export returns the FULL filtered set with attachment Content-Disposition + text/csv', async () => {
+    await seedRows();
+
+    const res = await get('/api/audit/export?format=csv');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/csv');
+    const disp = res.headers.get('content-disposition') ?? '';
+    expect(disp).toContain('attachment');
+    expect(disp).toMatch(/filename="audit-[^"]+\.csv"/);
+
+    const text = await res.text();
+    // Count data rows (drop the header line). RFC-4180 fields may contain
+    // newlines, but our seeded `event N` details do not, so a line count of
+    // non-empty rows minus the header equals the full row count.
+    const lines = text.replace(/\r\n/g, '\n').split('\n').filter((l) => l.length > 0);
+    expect(lines.length - 1).toBe(ROW_COUNT);
+  });
+
+  it('JSON export returns the FULL filtered set with attachment Content-Disposition + application/json', async () => {
+    await seedRows();
+
+    const res = await get('/api/audit/export?format=json');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    const disp = res.headers.get('content-disposition') ?? '';
+    expect(disp).toContain('attachment');
+    expect(disp).toMatch(/filename="audit-[^"]+\.json"/);
+
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({
+      exported_at: expect.anything(),
+      count: ROW_COUNT,
+      rows: expect.any(Array),
+    });
+    expect(body.rows).toHaveLength(ROW_COUNT);
+  });
+
+  it('an invalid format value falls back to csv', async () => {
+    await seedRows();
+
+    const res = await get('/api/audit/export?format=xml');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/csv');
+  });
+
+  it('requires the dashboard token (mounted under /api/, inherits the gate)', async () => {
+    const res = await getNoToken('/api/audit/export?format=csv');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('GET /api/security/status', () => {
   it('returns 200 with an object', async () => {
     const res = await get('/api/security/status');
