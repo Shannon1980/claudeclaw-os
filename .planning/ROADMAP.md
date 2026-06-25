@@ -163,7 +163,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 05-03-PLAN.md — Slice B (visible slice): enriched /api/audit (read-side cost JOIN) + /api/audit/export CSV/JSON full set + dense Audit surface rework + relocation under Settings > Security
+- [x] 05-03-PLAN.md — Slice B (visible slice): enriched /api/audit (read-side cost JOIN) + /api/audit/export CSV/JSON full set + dense Audit surface rework + relocation under Settings > Security
 
 **Wave 4** *(blocked on Wave 3)*
 
@@ -224,7 +224,7 @@ Plans:
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
 | 4. Activity Feed | 4/4 | Complete    | 2026-06-25 |
-| 5. Audit Log | 2/4 | In Progress|  |
+| 5. Audit Log | 3/4 | In Progress|  |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |
 | 8. Billing & Licensing | 0/? | Not started | - |
