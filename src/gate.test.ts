@@ -168,6 +168,53 @@ describe('audit recorded', () => {
     expect(detail).toMatchObject({ tool: 'Read', tier: 1, mode: 'autonomous', outcome: 'allow' });
   });
 
+  it('enriches the permission audit with tool/target/decision/decidedBy/decidedAt/durationMs/session/model (D-01)', async () => {
+    await runDecision(
+      {
+        attended: false,
+        mode: 'autonomous',
+        overrides: {},
+        enqueue: vi.fn(),
+        sessionId: 'sess-xyz',
+        model: 'claude-opus-4',
+      },
+      'Write',
+      { file_path: '/tmp/report.md', content: 'hi' },
+    );
+    const perm = entries.filter((e) => e.action === ('permission' as AuditEntry['action']));
+    expect(perm).toHaveLength(1);
+    const e = perm[0];
+    expect(e.eventType).toBe('permission');
+    expect(e.tool).toBe('Write');
+    // safeTarget whitelists file_path for Write, never the raw input/content.
+    expect(e.target).toBe('/tmp/report.md');
+    expect(e.decision).toBe('allow');
+    expect(e.decidedBy).toBe('system');
+    expect(typeof e.decidedAt).toBe('number');
+    expect(typeof e.durationMs).toBe('number');
+    expect(e.durationMs).toBeGreaterThanOrEqual(0);
+    expect(e.sessionId).toBe('sess-xyz');
+    expect(e.model).toBe('claude-opus-4');
+  });
+
+  it('marks an inline approval as decidedBy=operator', async () => {
+    await runDecision(
+      {
+        attended: true,
+        mode: 'cautious',
+        overrides: {},
+        requestInline: vi.fn().mockResolvedValue(true),
+      },
+      'mcp__gmail__send-email',
+      { to: 'a@b.com', subject: 'hi' },
+    );
+    const perm = entries.filter((e) => e.action === ('permission' as AuditEntry['action']));
+    expect(perm).toHaveLength(1);
+    expect(perm[0].decidedBy).toBe('operator');
+    // whitelisted, non-secret recipient is recorded as the target.
+    expect(perm[0].target).toBe('a@b.com');
+  });
+
   it('records exactly one permission audit on the queued (background-deny) path', async () => {
     await runDecision(
       { attended: false, mode: 'balanced', overrides: {}, enqueue: vi.fn().mockReturnValue(7) },
@@ -192,6 +239,10 @@ describe('audit recorded', () => {
     expect(perm.length).toBeGreaterThanOrEqual(1);
     for (const e of perm) {
       expect(e.detail).not.toContain(secret);
+      // The secret must not leak into the new structured target field either
+      // (T-05-02 / D-10 / L-4). slack post-message whitelists `channel`, not
+      // `token`, so target should be omitted entirely here.
+      expect(e.target ?? '').not.toContain(secret);
     }
   });
 });
