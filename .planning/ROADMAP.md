@@ -206,7 +206,7 @@ Plans:
 | 1. Desktop Shell & Onboarding | 4/4 | Complete    | 2026-06-23 |
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
-| 4. Activity Feed | 4/4 | Complete   | 2026-06-25 |
+| 4. Activity Feed | 4/4 | Complete    | 2026-06-25 |
 | 5. Audit Log | 0/? | Not started | - |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |
