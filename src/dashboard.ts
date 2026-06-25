@@ -3596,24 +3596,28 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const id = parseInt(c.req.param('id'), 10);
     if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
 
+    // Failure branches carry an appropriate non-200 status (WR-01) so monitoring
+    // and future clients can distinguish success from failure by HTTP status,
+    // not just the body. The honest verbatim body is unchanged; only the status
+    // is added. 404 not-found, 409 wrong-state / already-undone, 400 not-undoable.
     const row = getApprovalById(id);
     if (!row) {
-      return c.json({ ok: false, error: 'no undoable action for that id' });
+      return c.json({ ok: false, error: 'no undoable action for that id' }, 404);
     }
     if (row.status !== 'approved') {
-      return c.json({ ok: false, error: 'only an approved action can be undone' });
+      return c.json({ ok: false, error: 'only an approved action can be undone' }, 409);
     }
     const hasInput = Object.keys(row.tool_input).length > 0;
     if (!isUndoableFamily(row.tool_name) || row.tier >= 4 || !hasInput) {
       // Honest "no undo": Tier 4, non-allowlisted, or no captured params.
-      return c.json({ ok: false, error: `Undo isn't available for ${row.tool_name}.` });
+      return c.json({ ok: false, error: `Undo isn't available for ${row.tool_name}.` }, 400);
     }
 
     // Claim BEFORE dispatch so the inverse can never fire twice. If we lost the
     // race (a second click already claimed it), report ok:false and do NOT run
     // the inverse again.
     if (!claimUndo(id)) {
-      return c.json({ ok: false, error: 'already undone' });
+      return c.json({ ok: false, error: 'already undone' }, 409);
     }
 
     // Run the real inverse. undoAction refuses Tier 4 before dispatch and never
