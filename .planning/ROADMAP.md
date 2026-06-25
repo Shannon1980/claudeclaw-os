@@ -167,7 +167,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 05-04-PLAN.md — Slice C (widen): auth/routine/error emissions + turn-boundary session/model/duration capture + honest chips on real data + end-of-phase human-verify
+- [~] 05-04-PLAN.md — Slice C (widen): auth/routine/error emissions + turn-boundary session/model/duration capture + honest chips on real data + end-of-phase human-verify — Task 1 (emissions) COMPLETE/GREEN; Task 2 human-verify AWAITING operator sign-off
 **UI hint**: yes
 
 ### Phase 6: Memory Surface

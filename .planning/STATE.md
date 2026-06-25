@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 Phase: 5 (Audit Log) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Plan 04 Task 1 complete (emissions GREEN); Task 2 human-verify AWAITING operator sign-off
 Last activity: 2026-06-25
 
 ## Performance Metrics
@@ -64,6 +64,7 @@ Last activity: 2026-06-25
 | Phase 04 P04 | ~4min | 2 of 3 tasks (checkpoint pending) | 5 files |
 | Phase 05-audit-log P02 | 9min | 2 tasks | 11 files |
 | Phase 05 P03 | ~14min | 2 tasks | 5 files |
+| Phase 05 P04 | ~25min | 1 of 2 tasks (human-verify pending) | 7 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-03: Undo vertical slice GREEN. undo-executor.ts mirrors replay-executor (MCP-over-stdio inverse); Tier 4 refused BEFORE dispatch (D-09); reuses isUndoableFamily allowlist; label-remove floor family proven end-to-end; claim-before-dispatch status guard prevents inverse double-fire; undo result in existing result column, NO migration; inverse tool names unconfirmed (no MCP servers connected) -> honest no-undo, logged deferred
 - [Phase ?]: 05-02: insertAuditLog widened to a single options object; all positional call sites migrated (no half-migrated signature)
 - [Phase ?]: 05-02: audit retention storage in db.ts (default 90, append-only); audited setAuditRetention wrapper in permissions-config.ts mirrors setMode
+- [Phase 05]: 05-04: auth/routine/error events emit at their sources through the single audit() choke point; checkOAuthHealth exported + dependency-injected so the auth row has a REAL automated seam (not manual-only); auth event fires per determination, decoupled from the anti-spam sender; no auth event when neither credentials file nor env auth exists (Open Q3, no fake refresh events); error detail = first-line + 500-cap (no stack frames, T-05-10); turn model/session/_startMs threaded via GateContext per-turn (no module globals, T-05-11). Task 2 end-of-phase human-verify checkpoint AWAITING operator sign-off.
 
 ### Pending Todos
 
@@ -122,8 +124,8 @@ Items acknowledged and carried forward:
 ## Session Continuity
 
 Last session: 2026-06-25T21:35:26.836Z
-Stopped at: Phase 5 Plan 01 complete (Wave 0 RED baseline)
-Resume file: None
+Stopped at: Phase 5 Plan 04 Task 1 complete (auth/routine/error emissions + turn-boundary capture GREEN); Task 2 human-verify checkpoint awaiting operator sign-off
+Resume file: .planning/phases/05-audit-log/05-04-PLAN.md (Task 2)
 
 ## Operator Next Steps
 
