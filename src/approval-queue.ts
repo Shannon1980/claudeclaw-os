@@ -247,7 +247,7 @@ export function claimUndo(id: number): boolean {
         WHERE id = ? AND status = 'approved'
           AND (result IS NULL OR result NOT LIKE '[undone] %')`,
     )
-    .run(UNDONE_MARKER.trim(), now, id);
+    .run(UNDONE_MARKER, now, id);
   return info.changes === 1;
 }
 

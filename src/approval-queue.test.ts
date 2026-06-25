@@ -20,6 +20,8 @@ import {
   getApprovalById,
   listApprovals,
   undo,
+  claimUndo,
+  finalizeUndo,
 } from './approval-queue.js';
 import { getDb } from './db.js';
 
@@ -168,6 +170,24 @@ describe('undo write (status-guarded, no double-fire, T-04-undo-doublefire)', ()
     expect(first).toBe(true);
     const second = undo(id, { ok: true, message: 'Removed label.' });
     expect(second).toBe(false); // status-guarded: already undone
+  });
+
+  it('a SECOND claimUndo BEFORE finalize is refused (CR-01: marker matches the LIKE guard during the MCP window)', () => {
+    // Reproduces the double-fire window: claimUndo stamps the row, then the
+    // async inverse runs (no finalize yet). A second concurrent request must
+    // find the row already claimed and be refused, so the inverse never fires
+    // twice. The bug was claimUndo stamping a marker without the trailing space
+    // ('[undone]') that the SQL guard ('[undone] %') failed to match.
+    const id = enqueueSample();
+    approve(id, { ok: true });
+    const firstClaim = claimUndo(id);
+    expect(firstClaim).toBe(true);
+    // No finalizeUndo() yet -- we are inside the async MCP call window.
+    const secondClaim = claimUndo(id);
+    expect(secondClaim).toBe(false); // refused: row already claimed
+    // Finalizing the first (winning) claim still works and keeps the guard set.
+    finalizeUndo(id, { ok: true, message: 'Removed label.' });
+    expect(claimUndo(id)).toBe(false); // still refused after finalize
   });
 
   it('undo on a non-approved (pending) row is a no-op returning false', () => {
