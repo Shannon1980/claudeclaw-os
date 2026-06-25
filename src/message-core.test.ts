@@ -164,10 +164,13 @@ describe('processUserMessage', () => {
   // message. NEVER stack frames, NEVER secrets (Pattern D / T-05-10).
 
   it('emits one error audit event on a classified AgentError, reusing err.category', async () => {
-    const agentErr = new AgentError(
-      'auth',
-      { userMessage: 'Auth failed, please re-login.', shouldRetry: false },
-    );
+    const agentErr = new AgentError('auth', {
+      userMessage: 'Auth failed, please re-login.',
+      shouldRetry: false,
+      shouldNewChat: false,
+      shouldSwitchModel: false,
+      retryAfterMs: 0,
+    });
     vi.mocked(runAgentWithRetry).mockRejectedValue(agentErr);
 
     const cb = mockCb();
@@ -177,7 +180,7 @@ describe('processUserMessage', () => {
       (c) => (c[0] as { action?: string }).action === 'error',
     );
     expect(errorCalls).toHaveLength(1);
-    const entry = errorCalls[0][0] as Record<string, unknown>;
+    const entry = errorCalls[0][0] as unknown as Record<string, unknown>;
     expect(entry.eventType).toBe('error');
     expect(entry.result).toBe('error');
     expect(entry.blocked).toBe(false);
@@ -201,7 +204,7 @@ describe('processUserMessage', () => {
       (c) => (c[0] as { action?: string }).action === 'error',
     );
     expect(errorCalls).toHaveLength(1);
-    const entry = errorCalls[0][0] as Record<string, unknown>;
+    const entry = errorCalls[0][0] as unknown as Record<string, unknown>;
     const detail = JSON.parse(entry.detail as string);
     expect(detail.category).toBe('unknown');
     // Message capped at 500 chars.
