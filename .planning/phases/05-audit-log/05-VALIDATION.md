@@ -42,9 +42,9 @@ created: 2026-06-25
 |--------|----------|-----------|-------------------|-------------|
 | AUD-01 | New `audit_log` columns exist in BOTH test DB and `v1.2.4` migration (P-4 dual-write) | unit | `npx vitest run src/migrations.test.ts -t "audit"` | ❌ W0 (extend `migrations.test.ts`) |
 | AUD-01 | `insertAuditLog` persists + filtered reader returns new fields | unit | `npx vitest run src/db.test.ts -t "audit"` | ❌ W0 (add to `db.test.ts`) |
-| AUD-01 | Permission decision records enriched detail (tool/target/result/duration); no secrets in detail/target | unit | `npx vitest run src/gate.test.ts` | ✅ extend (`gate.test.ts:146` "audit recorded", `:184` no-secrets) |
-| AUD-01 | New event types emit (`auth` / `routine` / `error`) | unit | `npx vitest run src/routine-runner.test.ts src/message-core.test.ts` | ✅ extend |
-| AUD-01 | `/api/audit` returns enriched rows + cost via LEFT JOIN token_usage + honest NULLs | contract | `npx vitest run src/dashboard.contract.test.ts -t "audit"` | ✅ extend |
+| AUD-01 | Permission decision records enriched detail (tool/target/result/duration); no secrets in detail/target; `model` captured end-to-end | unit | `npx vitest run src/gate.test.ts` | ✅ extend (`gate.test.ts:146` "audit recorded", `:184` no-secrets + model end-to-end: GateContext.model → recordDecision → insertAuditLog → row.model non-null) |
+| AUD-01 | New event types emit (`auth` / `routine` / `error`) | unit | `npx vitest run src/routine-runner.test.ts src/message-core.test.ts src/oauth-health.test.ts` (auth seam stubs `checkOAuthHealth`'s audit callback in `oauth-health.test.ts`; routine/error in their runners) | ✅ extend / ❌ W0 new `oauth-health.test.ts` |
+| AUD-01 | `/api/audit` returns enriched rows + cost via LEFT JOIN token_usage + honest NULLs (Pitfall 4: 3 audit rows sharing 1 session_id + 1 token_usage row → each returns that turn's cost, not 0, not 3x) | contract | `npx vitest run src/dashboard.contract.test.ts -t "audit"` | ✅ extend |
 | AUD-01 | NULL fields surface as "not captured" (never blank); honest type chips | component/manual | UI render check | manual-only (no headless web test infra) |
 | AUD-02 | `/api/audit/export` returns FULL filtered set (not page-capped), CSV + JSON, `Content-Disposition` | contract | `npx vitest run src/dashboard.contract.test.ts -t "export"` | ❌ W0 |
 | AUD-02 | CSV serializer RFC-4180 + formula-injection safe (comma/quote/newline/leading `=`+`-`@`) | unit | `npx vitest run src/audit-export.test.ts` (or `db.test.ts -t "csv"`) | ❌ W0 |
@@ -61,6 +61,7 @@ created: 2026-06-25
 - [ ] `src/db.test.ts` — audit insert/read with new fields; cost LEFT JOIN; the "no DELETE on audit_log" invariant
 - [ ] `src/audit-export.test.ts` (new) OR extend `db.test.ts` — CSV RFC-4180 + formula-injection cases; JSON envelope shape
 - [ ] `src/dashboard.contract.test.ts` — `/api/audit` enriched rows + `/api/audit/export` full-set + `Content-Disposition` headers + `format` validation
+- [ ] `src/oauth-health.test.ts` (new) — stub `checkOAuthHealth`'s audit callback; assert `auth` emission shape per alert level (none/warning/expired)
 - [ ] Retention get/set unit test — default 90, input validation
 - [ ] Framework install: **none** — Vitest already present
 
