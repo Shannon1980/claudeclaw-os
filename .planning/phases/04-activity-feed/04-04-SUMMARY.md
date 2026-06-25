@@ -106,6 +106,12 @@ No new threat surface beyond the plan's register.
 - Created files exist: `src/activity-summary.ts`, `src/activity-summary.test.ts`, `04-04-SUMMARY.md`.
 - Commits exist: d06e4fa (Task 1), d992a8e (Task 2).
 
-## Status: AWAITING HUMAN-VERIFY CHECKPOINT (Task 3)
+## Status: COMPLETE (human-verify approved 2026-06-24)
+
+Task 3 (the blocking end-of-phase `checkpoint:human-verify` gate) was approved by the operator on 2026-06-24. All 3 tasks for plan 04-04 are now complete. Phase 4 code is fully shipped and signed off.
+
+> Outstanding deferred follow-up carried into phase close: the MCP inverse tool names for Undo (D-08) still need confirmation against the operator's live `tools/list` the first time a floor-family undo is exercised in the real app (no MCP servers were connected in the build environment). Tracked in `deferred-items.md`.
+
+### (historical) Pre-approval checkpoint state
 
 Task 3 is the blocking end-of-phase `checkpoint:human-verify` gate. No code is written in this task. The executor has paused and returned the structured checkpoint state to the orchestrator. The operator must exercise the running app (feed unlike Audit, legible tags, Undo present only when undoable and never on Tier 4 / autonomous, a real floor-family undo end to end, the Home one-click entry, and the Summarize Today digest) and type "approved" or report issues for gap closure. This gate is NOT self-approved.
