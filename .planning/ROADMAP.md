@@ -159,7 +159,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 05-02-PLAN.md — Slice A (data spine): audit_log 11-column dual-write migration + widened audit() choke point + permission events fully instrumented via GateContext + retention config
+- [x] 05-02-PLAN.md — Slice A (data spine): audit_log 11-column dual-write migration + widened audit() choke point + permission events fully instrumented via GateContext + retention config
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -224,7 +224,7 @@ Plans:
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
 | 4. Activity Feed | 4/4 | Complete    | 2026-06-25 |
-| 5. Audit Log | 1/4 | In Progress|  |
+| 5. Audit Log | 2/4 | In Progress|  |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |
 | 8. Billing & Licensing | 0/? | Not started | - |
