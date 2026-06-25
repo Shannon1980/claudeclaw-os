@@ -91,6 +91,11 @@ function inverseFor(toolName: string): Inverse | undefined {
         const messageId = pick(input, ['message_id', 'messageId', 'id', 'thread_id', 'threadId']);
         const label = pick(input, ['label', 'label_id', 'labelId', 'label_name', 'labelName']);
         if (!messageId) return { args: {}, missing: 'no message id in the captured action' };
+        // Guard label the same way as messageId (WR-03 / D-09): dispatching
+        // remove-label with an empty label can silently no-op on the MCP server
+        // while still reporting ok, faking a successful undo that did nothing.
+        // Report an honest failure instead of dispatching an empty-label call.
+        if (!label) return { args: {}, missing: 'no label id in the captured action' };
         return { args: { message_id: messageId, label } };
       },
     };
