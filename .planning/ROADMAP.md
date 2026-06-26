@@ -28,7 +28,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [ ] **Phase 2: Routines** - Plain-language scheduled multi-step workflows the operator builds by describing
 - [ ] **Phase 3: Permissions & Autonomy** - The four-tier autonomy model that gates every external action (plans executed 2026-06-24; verification gaps_found 2/4 — gap closure pending)
 - [x] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo (executed 2026-06-24; end-of-phase human-verify pending) (completed 2026-06-25)
-- [ ] **Phase 5: Audit Log** - Admin-facing immutable, append-only, exportable record of every event
+- [x] **Phase 5: Audit Log** - Admin-facing immutable, append-only, exportable record of every event (completed 2026-06-26)
 - [ ] **Phase 6: Memory Surface** - "What your assistant knows": editable, provenance-tagged knowledge base
 - [ ] **Phase 7: Power Surfaces** - War room decision tool + live team pulse, reframed off the daily path
 - [ ] **Phase 8: Billing & Licensing** - Flat per-seat subscription gated by a license key; spend-and-outcomes view
@@ -155,19 +155,19 @@ Plans:
 
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — Wave 0 test scaffolding: failing tests pinning AUD-01/02 (migration v1.2.4, enriched insert/read, export full-set + CSV safety, retention, no-DELETE invariant)
+- [x] 05-01-PLAN.md — Wave 0 test scaffolding: failing tests pinning AUD-01/02 (migration v1.2.4, enriched insert/read, export full-set + CSV safety, retention, no-DELETE invariant)
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 05-02-PLAN.md — Slice A (data spine): audit_log 11-column dual-write migration + widened audit() choke point + permission events fully instrumented via GateContext + retention config
+- [x] 05-02-PLAN.md — Slice A (data spine): audit_log 11-column dual-write migration + widened audit() choke point + permission events fully instrumented via GateContext + retention config
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 05-03-PLAN.md — Slice B (visible slice): enriched /api/audit (read-side cost JOIN) + /api/audit/export CSV/JSON full set + dense Audit surface rework + relocation under Settings > Security
+- [x] 05-03-PLAN.md — Slice B (visible slice): enriched /api/audit (read-side cost JOIN) + /api/audit/export CSV/JSON full set + dense Audit surface rework + relocation under Settings > Security
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 05-04-PLAN.md — Slice C (widen): auth/routine/error emissions + turn-boundary session/model/duration capture + honest chips on real data + end-of-phase human-verify
+- [~] 05-04-PLAN.md — Slice C (widen): auth/routine/error emissions + turn-boundary session/model/duration capture + honest chips on real data + end-of-phase human-verify — Task 1 (emissions) COMPLETE/GREEN; Task 2 human-verify AWAITING operator sign-off
 **UI hint**: yes
 
 ### Phase 6: Memory Surface
@@ -224,7 +224,7 @@ Plans:
 | 2. Routines | 4/4 | Executed (live checks pending) | 2026-06-23 |
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
 | 4. Activity Feed | 4/4 | Complete    | 2026-06-25 |
-| 5. Audit Log | 0/? | Not started | - |
+| 5. Audit Log | 4/4 | Complete    | 2026-06-26 |
 | 6. Memory Surface | 0/? | Not started | - |
 | 7. Power Surfaces | 0/? | Not started | - |
 | 8. Billing & Licensing | 0/? | Not started | - |

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { setAuditCallback, type AuditEntry } from './security.js';
 
 // ── RED scaffolding (Phase 2 Wave 0) ────────────────────────────────────────
 // These symbols do not exist yet — 02-02 creates src/routine-runner.ts. Until
@@ -249,5 +250,79 @@ describe('runRoutineOnce notify-transition', () => {
     } as any);
 
     expect(sender).not.toHaveBeenCalled();
+  });
+});
+
+// ── D-12: routine event emission (Slice C) ───────────────────────────────────
+//
+// Every run emits exactly one audit({action:'routine'}) at the source, after
+// outcome derivation, carrying the derived outcome, a duration, and blocked set
+// for a failed run. Detail JSON carries only routineId/outcome/steps — never raw
+// step output or secrets (Pattern D).
+
+describe('runRoutineOnce emits a routine audit event (D-12)', () => {
+  let entries: AuditEntry[];
+  beforeEach(() => {
+    entries = [];
+    setAuditCallback((e) => entries.push(e));
+  });
+
+  it('emits one routine event with result=ok + durationMs + blocked=false on a clean run', async () => {
+    const steps = [step({ id: 1, step_order: 0, agent_id: 'main' })];
+    const delegateToAgent = vi.fn(async () => ({ text: 'real work', aborted: false }));
+
+    await runRoutineOnce(routine(), steps, Date.now() / 1000 + 300, {
+      sender: vi.fn(async () => {}),
+      delegateToAgent: delegateToAgent as any,
+      isAgentPaused: () => false,
+      getLastRoutineOutcome: () => null,
+    } as any);
+
+    const routineEvents = entries.filter((e) => e.action === ('routine' as AuditEntry['action']));
+    expect(routineEvents).toHaveLength(1);
+    const e = routineEvents[0];
+    expect(e.eventType).toBe('routine');
+    expect(e.result).toBe('ok');
+    expect(e.blocked).toBe(false);
+    expect(typeof e.durationMs).toBe('number');
+    expect(e.durationMs).toBeGreaterThanOrEqual(0);
+    const detail = JSON.parse(e.detail);
+    expect(detail).toMatchObject({ routineId: 'r-1', outcome: 'ok', steps: 1 });
+  });
+
+  it('emits result=failed + blocked=true when a stop-on-error step halts the run', async () => {
+    const steps = [step({ id: 1, on_error: 'stop' })];
+    const delegateToAgent = vi.fn(async () => {
+      throw new Error('hard gate failed');
+    });
+
+    await runRoutineOnce(routine(), steps, Date.now() / 1000 + 300, {
+      sender: vi.fn(async () => {}),
+      delegateToAgent: delegateToAgent as any,
+      isAgentPaused: () => false,
+      getLastRoutineOutcome: () => null,
+    } as any);
+
+    const routineEvents = entries.filter((e) => e.action === ('routine' as AuditEntry['action']));
+    expect(routineEvents).toHaveLength(1);
+    expect(routineEvents[0].result).toBe('failed');
+    expect(routineEvents[0].blocked).toBe(true);
+  });
+
+  it('detail carries no raw step output (only routineId/outcome/steps)', async () => {
+    const SECRET = 'SECRET_STEP_OUTPUT_TOKEN';
+    const steps = [step({ id: 1, agent_id: 'main' })];
+    const delegateToAgent = vi.fn(async () => ({ text: SECRET, aborted: false }));
+
+    await runRoutineOnce(routine(), steps, Date.now() / 1000 + 300, {
+      sender: vi.fn(async () => {}),
+      delegateToAgent: delegateToAgent as any,
+      isAgentPaused: () => false,
+      getLastRoutineOutcome: () => null,
+    } as any);
+
+    const routineEvents = entries.filter((e) => e.action === ('routine' as AuditEntry['action']));
+    expect(routineEvents).toHaveLength(1);
+    expect(routineEvents[0].detail).not.toContain(SECRET);
   });
 });

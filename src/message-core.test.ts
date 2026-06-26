@@ -41,6 +41,8 @@ import { runAgentWithRetry } from './agent.js';
 import { formatForSlack } from './format.js';
 import { processUserMessage, type TransportCallbacks } from './message-core.js';
 import { parseDelegation, delegateToAgent } from './orchestrator.js';
+import { audit } from './security.js';
+import { AgentError } from './errors.js';
 
 const USAGE = {
   inputTokens: 1, outputTokens: 1, lastCallCacheRead: 0, lastCallInputTokens: 1,
@@ -153,5 +155,61 @@ describe('processUserMessage', () => {
 
     expect(cb.sendPlain).toHaveBeenCalled();
     expect(cb.sendFormatted).not.toHaveBeenCalled();
+  });
+
+  // ── D-12: error event emission (Slice C) ──────────────────────────────────
+  //
+  // A caught error in the turn emits exactly one audit({action:'error'}) through
+  // the single audit() choke point, carrying a category + a capped, scrubbed
+  // message. NEVER stack frames, NEVER secrets (Pattern D / T-05-10).
+
+  it('emits one error audit event on a classified AgentError, reusing err.category', async () => {
+    const agentErr = new AgentError('auth', {
+      userMessage: 'Auth failed, please re-login.',
+      shouldRetry: false,
+      shouldNewChat: false,
+      shouldSwitchModel: false,
+      retryAfterMs: 0,
+    });
+    vi.mocked(runAgentWithRetry).mockRejectedValue(agentErr);
+
+    const cb = mockCb();
+    await processUserMessage('do a thing', cb);
+
+    const errorCalls = vi.mocked(audit).mock.calls.filter(
+      (c) => (c[0] as { action?: string }).action === 'error',
+    );
+    expect(errorCalls).toHaveLength(1);
+    const entry = errorCalls[0][0] as unknown as Record<string, unknown>;
+    expect(entry.eventType).toBe('error');
+    expect(entry.result).toBe('error');
+    expect(entry.blocked).toBe(false);
+    const detail = JSON.parse(entry.detail as string);
+    expect(detail.category).toBe('auth');
+    expect(typeof detail.message).toBe('string');
+    // Operator still gets the recovery message.
+    expect(cb.sendPlain).toHaveBeenCalled();
+  });
+
+  it('emits an error event for an unclassified throw with category=unknown and a capped, stack-free message', async () => {
+    // A long error string with a fake stack frame line and a secret-shaped token.
+    const SECRET = 'sk-live-DEADBEEF-secret-key';
+    const longMsg = 'boom '.repeat(200) + `\n    at Object.<anonymous> (/Users/x/secret.ts:1:1) ${SECRET}`;
+    vi.mocked(runAgentWithRetry).mockRejectedValue(new Error(longMsg));
+
+    const cb = mockCb();
+    await processUserMessage('do a thing', cb);
+
+    const errorCalls = vi.mocked(audit).mock.calls.filter(
+      (c) => (c[0] as { action?: string }).action === 'error',
+    );
+    expect(errorCalls).toHaveLength(1);
+    const entry = errorCalls[0][0] as unknown as Record<string, unknown>;
+    const detail = JSON.parse(entry.detail as string);
+    expect(detail.category).toBe('unknown');
+    // Message capped at 500 chars.
+    expect(detail.message.length).toBeLessThanOrEqual(500);
+    // No stack frame markers leak through.
+    expect(detail.message).not.toContain('at Object.<anonymous>');
   });
 });

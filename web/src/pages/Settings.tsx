@@ -1,5 +1,6 @@
 import { useState } from 'preact/hooks';
-import { Check, Pipette, RotateCcw, ChevronDown, ChevronRight, Lock } from 'lucide-preact';
+import { useLocation } from 'wouter-preact';
+import { Check, Pipette, RotateCcw, ChevronDown, ChevronRight, Lock, ScrollText } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { Toggle } from '@/components/Toggle';
@@ -80,6 +81,8 @@ export function Settings() {
         <div class="flex-1 overflow-y-auto p-6 space-y-5 max-w-3xl">
 
           <PermissionsSection />
+
+          <SecuritySection />
 
           <Section
             title="Workspace"
@@ -589,6 +592,34 @@ function PermissionsSection() {
           </Card>
         </div>
       )}
+    </Section>
+  );
+}
+
+// ── Security (D-13: the relocated Audit surface lives under here) ──────
+//
+// The Audit log is opened deliberately from Settings, not glanced at daily —
+// so it is demoted out of the main intelligence nav (routes.ts) and surfaced
+// here as a link. The route still exists at /audit for deep-linking and the
+// command palette; this is its operator-visible home.
+function SecuritySection() {
+  const [, navigate] = useLocation();
+  return (
+    <Section title="Security" subtitle="Admin tools. The audit log is the complete, append-only record of every event.">
+      <Card>
+        <button
+          type="button"
+          onClick={() => navigate('/audit')}
+          class="w-full flex items-center gap-3 py-1.5 text-left group"
+        >
+          <ScrollText size={16} class="text-[var(--color-text-muted)] shrink-0" />
+          <div class="flex-1 min-w-0">
+            <div class="text-[13px] text-[var(--color-text)]">{term('page.audit')}</div>
+            <div class="text-[11px] text-[var(--color-text-faint)] mt-0.5">Complete, read-only record of every event. Filter and export the full set.</div>
+          </div>
+          <ChevronRight size={15} class="text-[var(--color-text-faint)] group-hover:text-[var(--color-text-muted)] shrink-0" />
+        </button>
+      </Card>
     </Section>
   );
 }

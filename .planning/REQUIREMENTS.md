@@ -38,8 +38,8 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 ### Activity & Audit (TRUST)
 - [x] **TRUST-01**: A user can see an activity feed of what the team did, each item tagged autonomous vs approved
 - [x] **TRUST-02**: A user can undo a reversible action from the activity feed (D9)
-- [ ] **AUD-01**: An admin can view a complete, read-only, append-only audit log of every event with technical detail
-- [ ] **AUD-02**: An admin can export the audit log (CSV/JSON); log retention is bounded and configurable (D10)
+- [x] **AUD-01**: An admin can view a complete, read-only, append-only audit log of every event with technical detail
+- [x] **AUD-02**: An admin can export the audit log (CSV/JSON); log retention is bounded and configurable (D10)
 
 ### Memory (MEM)
 - [ ] **MEM-01**: A user can view what the assistant knows about them, grouped by category
@@ -85,8 +85,8 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 | PERM-04 | Phase 3 | Complete |
 | TRUST-01 | Phase 4 | Complete |
 | TRUST-02 | Phase 4 | Complete |
-| AUD-01 | Phase 5 | Pending |
-| AUD-02 | Phase 5 | Pending |
+| AUD-01 | Phase 5 | Complete |
+| AUD-02 | Phase 5 | Complete |
 | MEM-01 | Phase 6 | Pending |
 | MEM-02 | Phase 6 | Pending |
 | PWR-01 | Phase 7 | Pending |

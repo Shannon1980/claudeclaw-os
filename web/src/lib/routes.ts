@@ -1,6 +1,6 @@
 import {
   LayoutGrid, FolderKanban, Repeat, Users, MessageSquare,
-  Brain, Network, Activity, ListChecks, ShieldCheck,
+  Brain, Network, Activity, ListChecks,
   Swords,
   Settings,
 } from 'lucide-preact';
@@ -35,7 +35,10 @@ export const ROUTES: RouteDef[] = [
   { path: '/hive',       label: 'Hive Mind',       vocabKey: 'nav.pulse',     section: 'intelligence', icon: Network,       shortcut: 'g h' },
   { path: '/usage',      label: 'Usage',           vocabKey: 'nav.usage',     section: 'intelligence', icon: Activity,      shortcut: 'g u' },
   { path: '/activity',   label: 'Activity',        vocabKey: 'nav.activity',  section: 'intelligence', icon: ListChecks                    },
-  { path: '/audit',      label: 'Audit',           vocabKey: 'nav.audit',     section: 'intelligence', icon: ShieldCheck                   },
+  // Audit (D-13): demoted OUT of the daily intelligence nav and into
+  // Settings > Security. The route still exists in App.tsx for deep-linking
+  // and the command palette; it is no longer a primary sidebar item. vocabKey
+  // nav.audit / page.audit are kept — only the placement changed.
 
   { path: '/warroom',    label: 'War Room',        vocabKey: 'nav.warroom',   section: 'collaborate',  icon: Swords,        shortcut: 'g w' },
 
