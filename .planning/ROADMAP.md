@@ -183,7 +183,25 @@ Plans:
   3. A user can edit or delete any fact in place, and a deleted fact is not silently re-derived
   4. A user can add a fact, and a prominent assurance states it is stored on this machine
 
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+
+**Wave 1**
+
+- [ ] 06-01-PLAN.md — Wave 0 failing tests pinning MEM-01/02 + D-03/04/05/06/08 (migration, provenance, confirmed gate, tombstone, mutation contract)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 06-02-PLAN.md — Data spine: v1.2.5 dual-write migration (category/confirmed/memory_tombstones) + deriveProvenance + confirmed behavior gate + operator-surface reader + tombstone/Add-fact helpers
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 06-03-PLAN.md — Operator UI slice: /api/memory* routes + new /memory page (grouped + provenance hero + Add/Edit/Delete/Confirm) + Labs demotion of the developer view (human-verify)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 06-04-PLAN.md — Enforcement slice: tombstone gate on ingest + consolidation (D-08), category classification on ingest (D-06), idempotent category backfill script
+
 **UI hint**: yes
 
 ### Phase 7: Power Surfaces
