@@ -1160,6 +1160,207 @@ export function saveStructuredMemoryAtomic(
   return txn();
 }
 
+// ── Memory surface operator seam (Phase 6, MEM-01 / D-08 / D-09) ───────────
+//
+// These functions are the ONLY seam plan 03's /api/memory* routes call. No
+// raw SQL lives in dashboard.ts; every reader/mutator here binds via `?`
+// placeholders (T-06-03 SQLi mitigation).
+
+/** The three-value operator category enum (D-06). */
+export const OPERATOR_FACT_CATEGORIES = ['your-business', 'your-clients', 'how-you-work'] as const;
+export type OperatorFactCategory = (typeof OPERATOR_FACT_CATEGORIES)[number];
+
+/**
+ * Secondary tombstone match threshold (D-08). When a tombstone carries an
+ * embedding and a candidate embedding is available, a cosine similarity above
+ * this value is treated as the same suppressed fact. The sha256 hash floor is
+ * always checked first; this only widens suppression to near-duplicates.
+ */
+export const TOMBSTONE_COSINE_THRESHOLD = 0.88;
+
+/**
+ * Normalize a summary for hashing: lowercase, strip punctuation, collapse
+ * whitespace. Mirrors extractKeywords' normalization spirit so a re-derived
+ * fact with trivial punctuation/casing differences hashes identically. The
+ * sha256 of this is the tombstone primary key.
+ */
+export function normalizeSummary(text: string): string {
+  return text
+    .replace(/[“”]/g, '"')
+    .replace(/[^\w\s]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+/** sha256 hex of the normalized summary (tombstone primary key). */
+function summaryHash(summary: string): string {
+  return crypto.createHash('sha256').update(normalizeSummary(summary)).digest('hex');
+}
+
+/**
+ * Operator-surface reader (MEM-01). Returns BOTH confirmed and unconfirmed
+ * rows scoped to chatId, each carrying the fields the operator UI groups by
+ * category. DISTINCT from the behavior readers: it does NOT filter confirmed,
+ * so the surface can show "needs review" (confirmed=0) rows. Ordered so equal
+ * categories sit together (NULLs last) for the UI's grouped render.
+ */
+export function getMemoriesForOperatorSurface(
+  chatId: string,
+): Array<{
+  id: number;
+  source: string;
+  category: string | null;
+  confirmed: number;
+  summary: string;
+  importance: number;
+  created_at: number;
+}> {
+  return db
+    .prepare(
+      `SELECT id, source, category, confirmed, summary, importance, created_at
+       FROM memories
+       WHERE chat_id = ? AND superseded_by IS NULL
+       ORDER BY (category IS NULL), category ASC, confirmed ASC, created_at DESC`,
+    )
+    .all(chatId) as Array<{
+      id: number;
+      source: string;
+      category: string | null;
+      confirmed: number;
+      summary: string;
+      importance: number;
+      created_at: number;
+    }>;
+}
+
+/**
+ * Write a tombstone for a memory (D-08). Reads the row, records the sha256 of
+ * its normalized summary (plus its embedding/summary/chat_id) into
+ * memory_tombstones so the fact cannot re-derive via ingest/consolidation.
+ * Returns false if the memory id does not exist (so DELETE can 404). Called
+ * BEFORE deleteMemory (tombstone-first, Pitfall 6).
+ */
+export function writeTombstoneForMemory(id: number): boolean {
+  const row = db
+    .prepare(`SELECT chat_id, summary, embedding FROM memories WHERE id = ?`)
+    .get(id) as { chat_id: string; summary: string; embedding: string | null } | undefined;
+  if (!row) return false;
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `INSERT INTO memory_tombstones (chat_id, text_hash, embedding, summary, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(row.chat_id, summaryHash(row.summary), row.embedding ?? null, row.summary, now);
+  return true;
+}
+
+/**
+ * Is a fact tombstoned (D-08)? Hash floor always: true if the sha256 of the
+ * normalized summary matches any tombstone for the chat. Secondary: when an
+ * embedding is supplied, true if cosine vs any tombstone embedding exceeds
+ * TOMBSTONE_COSINE_THRESHOLD. Accepts either a raw summary or a precomputed
+ * hash for the first arg's flexibility at the call site.
+ */
+export function isTombstoned(chatId: string, summaryOrHash: string, embedding?: number[]): boolean {
+  // Treat a 64-char hex string as an already-computed hash; otherwise hash it.
+  const hash = /^[0-9a-f]{64}$/.test(summaryOrHash) ? summaryOrHash : summaryHash(summaryOrHash);
+  const hit = db
+    .prepare(`SELECT 1 FROM memory_tombstones WHERE chat_id = ? AND text_hash = ? LIMIT 1`)
+    .get(chatId, hash);
+  if (hit) return true;
+
+  if (embedding && embedding.length > 0) {
+    const rows = db
+      .prepare(`SELECT embedding FROM memory_tombstones WHERE chat_id = ? AND embedding IS NOT NULL`)
+      .all(chatId) as Array<{ embedding: string }>;
+    for (const r of rows) {
+      try {
+        const tombEmb = JSON.parse(r.embedding) as number[];
+        if (cosineSimilarity(embedding, tombEmb) > TOMBSTONE_COSINE_THRESHOLD) return true;
+      } catch {
+        // Malformed stored embedding — skip; hash floor already covers exacts.
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Operator Add-fact writer (D-09 / MEM-02). Stamps source='you-told-me',
+ * confirmed=1, high importance, and the validated category. Rejects a category
+ * outside the three-value enum. Returns the new memory id.
+ */
+export function addOperatorFact(
+  chatId: string,
+  summary: string,
+  category: string,
+): number {
+  if (!OPERATOR_FACT_CATEGORIES.includes(category as OperatorFactCategory)) {
+    throw new Error(`invalid category: ${category}`);
+  }
+  const id = saveStructuredMemory(
+    chatId,
+    summary,            // operator-authored: raw_text == summary
+    summary,
+    [],
+    [],
+    0.9,                // operator facts are high importance (D-09)
+    'you-told-me',      // forward-stamped provenance (Pitfall 4)
+    'main',
+    1,                  // confirmed: operator-authored facts skip the gate
+  );
+  db.prepare(`UPDATE memories SET category = ? WHERE id = ?`).run(category, id);
+  return id;
+}
+
+/**
+ * Confirm an unconfirmed memory (D-04). Status-guarded: flips confirmed 0->1
+ * only when currently 0, so a double-call is a no-op. Returns true exactly
+ * once per memory.
+ */
+export function confirmMemory(id: number): boolean {
+  const info = db
+    .prepare(`UPDATE memories SET confirmed = 1 WHERE id = ? AND confirmed = 0`)
+    .run(id);
+  return info.changes === 1;
+}
+
+/**
+ * Update an operator fact's summary and/or category (Edit). Validates category
+ * against the enum when provided. Returns true if a row changed.
+ */
+export function updateOperatorFact(
+  id: number,
+  fields: { summary?: string; category?: string },
+): boolean {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (typeof fields.summary === 'string') {
+    sets.push('summary = ?');
+    params.push(fields.summary);
+  }
+  if (typeof fields.category === 'string') {
+    if (!OPERATOR_FACT_CATEGORIES.includes(fields.category as OperatorFactCategory)) {
+      throw new Error(`invalid category: ${fields.category}`);
+    }
+    sets.push('category = ?');
+    params.push(fields.category);
+  }
+  if (sets.length === 0) return false;
+  params.push(id);
+  const info = db.prepare(`UPDATE memories SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  return info.changes === 1;
+}
+
+/**
+ * Delete a memory row (called AFTER writeTombstoneForMemory by the route,
+ * Pitfall 6). Returns true if a row was removed.
+ */
+export function deleteMemory(id: number): boolean {
+  const info = db.prepare(`DELETE FROM memories WHERE id = ?`).run(id);
+  return info.changes === 1;
+}
+
 export function getMemoriesWithEmbeddings(
   chatId: string,
   agentId?: string,

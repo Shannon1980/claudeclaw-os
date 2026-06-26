@@ -1,7 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { cosineSimilarity, embedText } from './embeddings.js';
-import { getMemoriesWithEmbeddings, saveStructuredMemoryAtomic } from './db.js';
+import { getMemoriesWithEmbeddings, isTombstoned, saveStructuredMemoryAtomic } from './db.js';
 import { logger } from './logger.js';
 import { readEnvFile } from './env.js';
 import { getScrubbedSdkEnv } from './security.js';
@@ -214,6 +214,17 @@ export async function ingestConversationTurn(
       embedding = await embedText(embeddingText);
     } catch (embErr) {
       logger.warn({ err: embErr }, 'Failed to generate embedding for duplicate check');
+    }
+
+    // Tombstone suppression (D-08): a deleted fact must not re-derive. Check
+    // BEFORE the cosine dedupe and BEFORE save. Hash floor always; the optional
+    // embedding widens to near-duplicates. If tombstoned, skip with no new row.
+    if (isTombstoned(chatId, result.summary, embedding.length > 0 ? embedding : undefined)) {
+      logger.debug(
+        { summary: result.summary.slice(0, 60) },
+        'Skipping tombstoned memory (D-08 suppression)',
+      );
+      return false;
     }
 
     // Duplicate detection: skip if a very similar memory already exists
