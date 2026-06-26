@@ -150,7 +150,24 @@ Plans:
   3. An admin can export the audit log as CSV/JSON
   4. Log retention is bounded by a configurable window and the window is stated (D10)
 
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — Wave 0 test scaffolding: failing tests pinning AUD-01/02 (migration v1.2.4, enriched insert/read, export full-set + CSV safety, retention, no-DELETE invariant)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 05-02-PLAN.md — Slice A (data spine): audit_log 11-column dual-write migration + widened audit() choke point + permission events fully instrumented via GateContext + retention config
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 05-03-PLAN.md — Slice B (visible slice): enriched /api/audit (read-side cost JOIN) + /api/audit/export CSV/JSON full set + dense Audit surface rework + relocation under Settings > Security
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 05-04-PLAN.md — Slice C (widen): auth/routine/error emissions + turn-boundary session/model/duration capture + honest chips on real data + end-of-phase human-verify
 **UI hint**: yes
 
 ### Phase 6: Memory Surface

@@ -3,120 +3,101 @@
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.
 
-**Date:** 2026-06-24
-**Phase:** 5-audit-log
-**Areas discussed:** Capture completeness, Retention (D10), Export (CSV/JSON), Surface & placement
+**Date:** 2026-06-25
+**Phase:** 05-audit-log
+**Areas discussed:** Field coverage, Instrument scope, New event types, Retention (D10), Export shape, Placement & filters
 
 ---
 
-## Capture completeness — Data model
+## Field coverage
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Enrich audit_log schema | Add real columns (event_type, target, project_id, outcome, duration_ms, cost_usd, session_id, model); old rows NULL/honestly flagged | ✓ |
-| Derive read-side via joins | Keep thin table; join token_usage + parse detail JSON at read time | |
-| Hybrid | Add only columns with no source; join token_usage for cost/duration/model/session | |
+| Honest-coverage, no write-path change | Render existing audit_log + approval_queue, state missing fields as uncaptured | |
+| Hybrid: cheap joins + state the rest | Above + join token_usage for cost/model/session, state genuinely-missing | |
+| Instrument the write path now | Add real columns + capture tool/target/project/session/model/cost/duration at write time | ✓ |
 
-**User's choice:** Enrich audit_log schema
-**Notes:** Cleanest queries and export; pre-capture rows shown as "not captured before vN," not zeroed.
-
-## Capture completeness — Coverage
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| All four, real capture | Add capture sites so Actions, Permissions, Auth, Errors all genuinely log | ✓ |
-| Permissions+Actions now, rest stated | Capture existing flows; banner the uncaptured Auth/Errors | |
-| All four, but Auth/Errors best-effort | Wire all four; label specific gaps inline where capture is partial | |
-
-**User's choice:** All four, real capture
-**Notes:** New write sites in scope for Auth (login/token refresh) and Errors (tool failures, recovered timeouts).
-
-## Capture completeness — No-drop integrity
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| Record the gap | Counter / "audit-write-failed" marker so the log surfaces possible misses | |
-| Surface in UI banner | Same tracking plus a prominent integrity-warning banner when failures > 0 | ✓ |
-| Leave as-is | Treat as rare; no tracking (violates no-silent-dropping) | |
-
-**User's choice:** Surface in UI banner
-**Notes:** Fixes the silent `catch` in `src/security.ts:111`; operations stay non-blocking.
+**User's choice:** Instrument the write path now.
+**Notes:** Fullest fidelity; deliberately reopens the Phase 3/4 write path. Flagged as the largest-scope option and the bulk of phase work.
 
 ---
 
-## Retention (D10) — Window
+## Instrument scope
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| 90 days, hard prune | Delete oldest past 90 days (stated, configurable policy) | |
-| 90 days full, then archive | Keep 90 days live; roll older rows into on-disk archive, nothing deleted | ✓ |
-| 180 days, hard prune | Longer default, same hard-prune behavior | |
+| Core events first (must-have) | Instrument trust-chain events fully; others partial + stated | |
+| All event types, full fidelity | Every column + all fields across every audited event type; wire token_usage↔audit_log; add duration timing | ✓ |
 
-**User's choice:** 90 days full, then archive
-**Notes:** Nothing lost — archive over delete.
-
-## Retention (D10) — Config UI
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| Settings + header line | Configurable in Settings>Security and stated inline in the Audit page header | ✓ |
-| Settings only | Configurable but not restated on the Audit page | |
-| Config file only | Set via config value, no dedicated UI this phase | |
-
-**User's choice:** Settings + header line
-**Notes:** Promise stated where the data is read.
-
-## Retention (D10) — Archive reachability
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| Export-only | Archived events not in live table but includable in export | |
-| Queryable on demand | A load-archived toggle / date-range reads archive back into the view | ✓ |
-| Sealed archive | Written for safekeeping but neither shown nor exported this phase | |
-
-**User's choice:** Queryable on demand
-**Notes:** Archive is not a dead end; live view stays bounded by default.
+**User's choice:** All event types, full fidelity.
+**Notes:** Per-action audit rows vs per-turn cost/model/session (token_usage) resolution is a planner call; duration timing must be added where none exists.
 
 ---
 
-## Export (CSV/JSON)
+## New event types
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Current filter, browser download | Reflects active filters/range, include-archived option, browser download | ✓ |
-| Whole log always | Ignores filters; always dumps complete log | |
-| Both, admin picks | Export dialog for scope + format + include-archive | |
+| Stick to existing + state gaps | No new emissions; honest chips for existing types only | |
+| Add auth + routine + error too | Emit auth/routine/error at their sources so the full chip set has data | ✓ |
 
-**User's choice:** Current filter, browser download
-**Notes:** WYSIWYG export matching the investigative use; both CSV and JSON (locked by criteria).
+**User's choice:** Add auth + routine + error too.
+**Notes:** config-change events are already audited; adds emissions at auth/session, routine-run, and error sources.
 
 ---
 
-## Surface & placement
+## Retention (D10)
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Under Settings>Security | Move off main nav into a Security/admin Settings section (spec-faithful) | ✓ |
-| Keep top-level /audit | Leave route in nav, just formalize page contents | |
-| Settings entry, same route | Keep /audit route, remove from nav, link from Settings | |
+| Archive-then-prune, stated | Roll old rows to archive file before removing; surface window + archive note | |
+| State window, no auto-prune yet | Configurable + displayed window; no deletion this phase; defer enforcement | ✓ |
+| Hard-prune oldest, stated | Delete past-window rows directly, window stated | |
 
-**User's choice:** Under Settings>Security
-**Notes:** Audit is an admin tool opened deliberately, not a daily-glance surface.
+**User's choice:** State window, no auto-prune yet.
+**Notes:** Strictly honors append-only/no-delete. Disk-growth risk acknowledged; archive-then-prune enforcement logged as deferred follow-up.
+
+---
+
+## Export shape
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Server-side, full filtered set | New endpoint streams complete set matching active filters/date-range, CSV+JSON download | ✓ |
+| Server-side, entire log always | Export ignores filters, dumps whole log | |
+| Client-side from loaded rows | Export only loaded page; incomplete | |
+
+**User's choice:** Server-side, full filtered set.
+**Notes:** Completeness answer for "what did the AI do with our data"; must not cap at page size; inherits dashboard token gate.
+
+---
+
+## Placement & filters
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Move under Settings/admin + honest chips | Relocate /audit out of main nav; chips only for event types with data | ✓ |
+| Keep top-level route + honest chips | Leave /audit top-level; honest chips | |
+| Move under Settings/admin + all spec chips | Relocate + show all four chips even when empty | |
+
+**User's choice:** Move under Settings/admin + honest chips.
+**Notes:** Spec says Audit is admin-facing, not in main nav. D-12's new event types make more chips real this phase. Keep dense/technical look, unlike Activity.
 
 ---
 
 ## Claude's Discretion
 
-- Final column set/types for enriched `audit_log` (validated against token_usage / approval_queue / encoded detail).
-- Archive file format and location; prune/archive job on the existing single scheduler (no second cron path).
-- Event-type taxonomy mapping (AuditAction → the four UI chips).
-- Settings>Security sub-route shape, page layout, empty/loading states, pagination vs infinite scroll.
-- Export endpoint shape (streaming vs in-memory), filename convention.
-- Whether the demoted `/audit` route is removed or kept as an internal redirect.
+- Default retention window value (~90 days per spec) — must be stated wherever shown.
+- How a per-action row resolves turn-level cost/model/session from token_usage.
+- How duration is measured per event type (start/stop boundaries).
+- Export file naming, CSV column order, JSON envelope shape.
+- Settings/admin nav grouping + route/vocabKey for the relocated Audit page.
+- Migration sequencing + backfill/defaults for rows predating the new columns.
+- New columns on audit_log directly vs a companion detail table.
 
 ## Deferred Ideas
 
-- Enterprise security wrapper (SSO-gated access, compliance export formats, tamper-evidence/hash-chaining).
-- Admin vs operator access control beyond the dashboard token ("who is an admin").
-- Per-project filter chip for Audit (project_id captured this phase; chip folds in with Projects work).
-- Configurable archive destinations (external storage / log shipping) — local on-disk only this phase.
+- Automatic retention enforcement (archive-then-prune / roll-up at the window boundary).
+- Enterprise compliance wrapper — SSO-gated access, compliance formats, tamper-evidence/hash-chaining.
+- Per-project filter UI (project field is captured this phase; filter UI can follow with Projects work).
+- Scheduled/automated exports (on-demand only this phase).
