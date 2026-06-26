@@ -151,6 +151,10 @@ export interface GateContext {
   runId?: string;
   routineId?: string;
   routineAutonomy?: 'unattended' | 'queue_approval';
+  // Phase 5 audit enrichment (D-01). Per-turn carriers — NO module globals.
+  sessionId?: string; // SDK session id for this turn (read-side cost JOIN key)
+  model?: string; // effective model for this turn (token_usage has no model col)
+  _startMs?: number; // turn-start epoch ms, stamped in makeCanUseTool for durationMs
   /** Background-path enqueue. Plan 03 supplies the real approval-queue module. */
   enqueue?: (item: {
     toolName: string;
@@ -176,16 +180,67 @@ function encodeDecision(d: {
   return JSON.stringify(d);
 }
 
+/**
+ * Per-tool whitelist of the ONE model-supplied field worth recording as the
+ * decision target. Mirrors summarize()'s tool→field intent: emit only a known,
+ * non-secret param (e.g. the file a Write touches, the recipient an email goes
+ * to) — never the raw input object, never anything secret-shaped. Anything not
+ * whitelisted reads back as NULL → "not captured" in the UI (Open Q2, Pattern D).
+ */
+const TARGET_FIELD_BY_TOOL: Array<{ match: RegExp; field: string }> = [
+  { match: /^(Write|Edit|Read|NotebookEdit|NotebookRead)$/, field: 'file_path' },
+  { match: /send[-_]?email|gmail/i, field: 'to' },
+  { match: /slack/i, field: 'channel' },
+  { match: /calendar/i, field: 'summary' },
+];
+
+// Field names that may carry a secret/credential — never recorded as a target.
+const SECRET_FIELD_PATTERN = /token|secret|key|password|passwd|auth|credential/i;
+const TARGET_MAX_LEN = 256;
+
+/**
+ * Extract a safe, scrubbed target string from model-supplied tool input, or
+ * undefined when nothing is whitelisted/safe. Never returns the raw input and
+ * never an env/secret value (T-05-02 / ASVS V8). Bash is special-cased to its
+ * command (already classified read-only/destructive upstream); secret-shaped
+ * field names are dropped even when whitelisted.
+ */
+function safeTarget(toolName: string, input: Record<string, unknown>): string | undefined {
+  let raw: unknown;
+  if (toolName === 'Bash') {
+    raw = input.command;
+  } else {
+    const rule = TARGET_FIELD_BY_TOOL.find((r) => r.match.test(toolName));
+    if (!rule || SECRET_FIELD_PATTERN.test(rule.field)) return undefined;
+    raw = input[rule.field];
+  }
+  if (typeof raw !== 'string' || raw.length === 0) return undefined;
+  return raw.slice(0, TARGET_MAX_LEN);
+}
+
 function recordDecision(
   ctx: GateContext,
+  input: Record<string, unknown>,
   d: { tool: string; tier: Tier; mode: Mode; outcome: string; queueId?: number | string },
   blocked: boolean,
 ): void {
+  // D-01 records what was decided; it does not re-decide (classifyTier /
+  // resolveOutcome are untouched). detail keeps the existing {tool,tier,mode,
+  // outcome,queueId} shape; the structured columns ride alongside.
   audit({
     agentId: ctx.agentId ?? 'main',
     chatId: ctx.chatId ?? '',
     action: 'permission',
+    eventType: 'permission',
     detail: encodeDecision(d),
+    tool: d.tool,
+    target: safeTarget(d.tool, input),
+    decision: d.outcome,
+    decidedBy: d.outcome.includes('inline') ? 'operator' : 'system',
+    decidedAt: Date.now(),
+    durationMs: ctx._startMs !== undefined ? Date.now() - ctx._startMs : undefined,
+    sessionId: ctx.sessionId,
+    model: ctx.model,
     blocked,
   });
 }
@@ -206,6 +261,10 @@ export function makeCanUseTool(ctx: GateContext): CanUseTool {
     input: Record<string, unknown>,
     _options?: unknown,
   ): Promise<PermissionResult> => {
+    // Stamp the turn-start for durationMs (D-01). Idempotent per gate call; the
+    // first canUseTool of a turn sets it, later calls reuse the caller's value.
+    if (ctx._startMs === undefined) ctx._startMs = Date.now();
+
     const mode: Mode = ctx.mode ?? getMode();
     let tier: Tier;
     let outcome: 'allow' | 'ask';
@@ -227,7 +286,7 @@ export function makeCanUseTool(ctx: GateContext): CanUseTool {
     }
 
     if (outcome === 'allow') {
-      recordDecision(ctx, { tool: toolName, tier, mode, outcome: 'allow' }, false);
+      recordDecision(ctx, input, { tool: toolName, tier, mode, outcome: 'allow' }, false);
       return { behavior: 'allow' };
     }
 
@@ -236,6 +295,7 @@ export function makeCanUseTool(ctx: GateContext): CanUseTool {
       const ok = await ctx.requestInline({ summary: summarize(toolName, tier), tier, toolName });
       recordDecision(
         ctx,
+        input,
         { tool: toolName, tier, mode, outcome: ok ? 'approved-inline' : 'denied-inline' },
         !ok,
       );
@@ -254,7 +314,7 @@ export function makeCanUseTool(ctx: GateContext): CanUseTool {
       chatId: ctx.chatId,
       runId: ctx.runId,
     });
-    recordDecision(ctx, { tool: toolName, tier, mode, outcome: 'queued', queueId }, true);
+    recordDecision(ctx, input, { tool: toolName, tier, mode, outcome: 'queued', queueId }, true);
     return {
       behavior: 'deny',
       message:

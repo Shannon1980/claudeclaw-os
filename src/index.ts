@@ -159,7 +159,27 @@ async function main(): Promise<void> {
     killPhrase: EMERGENCY_KILL_PHRASE || undefined,
   });
   setAuditCallback((entry) => {
-    insertAuditLog(entry.agentId, entry.chatId, entry.action, entry.detail, entry.blocked);
+    // The single mapping point from the audit() choke point to the writer.
+    // Forward every optional captured field (Phase 5, D-01) — do not add a
+    // second writer.
+    insertAuditLog({
+      agentId: entry.agentId,
+      chatId: entry.chatId,
+      action: entry.action,
+      detail: entry.detail,
+      blocked: entry.blocked,
+      eventType: entry.eventType,
+      tool: entry.tool,
+      target: entry.target,
+      project: entry.project,
+      decision: entry.decision,
+      decidedBy: entry.decidedBy,
+      decidedAt: entry.decidedAt,
+      result: entry.result,
+      durationMs: entry.durationMs,
+      model: entry.model,
+      sessionId: entry.sessionId,
+    });
   });
 
   initOrchestrator();

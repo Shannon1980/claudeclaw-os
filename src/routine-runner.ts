@@ -10,6 +10,7 @@ import {
 import { delegateToAgent as delegateToAgentFn } from './orchestrator.js';
 import type { GateContext } from './gate.js';
 import { logger } from './logger.js';
+import { audit } from './security.js';
 import { TASK_TIMEOUT_MS } from './scheduler.js';
 
 /**
@@ -92,6 +93,11 @@ export async function runRoutineOnce(
   const persistRun = deps.saveRoutineRun ?? saveRoutineRun;
   const persistTask = deps.updateTaskAfterRun ?? updateTaskAfterRun;
 
+  // D-12 / Pattern 4: stamp the run start so the routine audit row carries a
+  // real durationMs (gate-evaluation + step execution). Monotonic Date.now()
+  // delta, no external timing lib.
+  const startedAt = Date.now();
+
   // Autonomy context (D-07). Carried into each step's run. Phase 3 (D-06) now
   // threads this into the permission gate: each routine step enters the gate as
   // a BACKGROUND run (attended:false → ask/queue, never inline) carrying its
@@ -159,6 +165,21 @@ export async function runRoutineOnce(
   }
 
   const outcome = deriveOutcome(results, steps, halted);
+
+  // D-12: emit a 'routine' audit event at the source through the single audit()
+  // choke point. detail carries ONLY routineId/outcome/steps — never raw step
+  // output (which may contain secrets, Pattern D). durationMs is the full-run
+  // boundary; blocked reflects a failed run (halted or no useful output).
+  audit({
+    agentId: 'main',
+    chatId: ALLOWED_CHAT_ID || 'routine',
+    action: 'routine',
+    eventType: 'routine',
+    detail: JSON.stringify({ routineId: task.id, outcome, steps: results.length }),
+    result: outcome,
+    durationMs: Date.now() - startedAt,
+    blocked: outcome === 'failed',
+  });
 
   // D-10: read the prior outcome BEFORE persisting this run so the transition
   // check sees yesterday's state, not today's.

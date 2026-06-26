@@ -43,7 +43,16 @@ import {
   saveRoutineRun,
   getRoutineRuns,
   getLastRoutineOutcome,
+  // ── Phase 5 Audit Log (Wave 0 RED — enriched writer/reader + retention) ──
+  // These do not exist yet; the imports make the cases RED at the assertion
+  // boundary (the widened insertAuditLog options object + filtered reader +
+  // retention get/set are authored by plan 02).
+  insertAuditLog,
+  getAuditLogFiltered,
+  getAuditRetentionDays,
+  setAuditRetentionDays,
 } from './db.js';
+import fs from 'fs';
 import path from 'path';
 import { STORE_DIR, PROJECT_ROOT, TRANSPORT } from './config.js';
 
@@ -664,6 +673,141 @@ describe('database', () => {
       saveRoutineRun('rt-4', 'ok', [], '');
       saveRoutineRun('rt-4', 'failed', [], 'broke');
       expect(getLastRoutineOutcome('rt-4')).toBe('failed');
+    });
+  });
+
+  // ── Phase 5 Audit Log: enriched columns (Wave 0 RED — AUD-01) ───────────
+  //
+  // These pin the widened write/read path. They are RED on purpose: today's
+  // insertAuditLog takes positional (agentId, chatId, action, detail, blocked)
+  // and getAuditLogFiltered does not exist. Plan 02 widens insertAuditLog to
+  // accept an options object carrying the new fields and adds the filtered
+  // reader that returns them (with honest NULLs for omitted fields).
+
+  describe('audit_log enriched columns', () => {
+    it('insertAuditLog persists all new fields and the filtered reader returns them', () => {
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-aud',
+        action: 'permission',
+        detail: 'tool=Bash',
+        blocked: false,
+        eventType: 'permission',
+        tool: 'Bash',
+        target: 'ls -la',
+        project: 'claudeclaw',
+        decision: 'allow',
+        decidedBy: 'system',
+        decidedAt: 1_700_000_000,
+        result: 'allow',
+        durationMs: 42,
+        model: 'claude-opus-4',
+        sessionId: 'sess-enriched',
+      });
+
+      const [row] = getAuditLogFiltered({}) as Array<Record<string, unknown>>;
+      expect(row).toBeTruthy();
+      expect(row.event_type).toBe('permission');
+      expect(row.tool).toBe('Bash');
+      expect(row.target).toBe('ls -la');
+      expect(row.project).toBe('claudeclaw');
+      expect(row.decision).toBe('allow');
+      expect(row.decided_by).toBe('system');
+      expect(row.decided_at).toBe(1_700_000_000);
+      expect(row.result).toBe('allow');
+      expect(row.duration_ms).toBe(42);
+      expect(row.model).toBe('claude-opus-4');
+      expect(row.session_id).toBe('sess-enriched');
+    });
+
+    it('an omitted field reads back as null (honest absence, never fabricated)', () => {
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-min',
+        action: 'message',
+        detail: 'plain message',
+        blocked: false,
+        // tool/target/model/etc. intentionally omitted
+      });
+
+      const [row] = getAuditLogFiltered({}) as Array<Record<string, unknown>>;
+      expect(row).toBeTruthy();
+      expect(row.tool).toBeNull();
+      expect(row.target).toBeNull();
+      expect(row.model).toBeNull();
+      expect(row.duration_ms).toBeNull();
+      expect(row.session_id).toBeNull();
+    });
+  });
+
+  // ── Phase 5 Audit Log: append-only invariant (Wave 0 RED — AUD-02) ──────
+  //
+  // The audit log is append-only by hard rule. This is a static source guard:
+  // no `DELETE FROM audit_log` may exist anywhere in src/ (comment lines are
+  // filtered out so a documented mention does not trip it). D-31 ships a stated
+  // retention window but deletes nothing this phase.
+
+  describe('audit_log is append-only', () => {
+    it('has no DELETE FROM audit_log statement anywhere in src/ (excluding comments)', () => {
+      const srcDir = path.join(PROJECT_ROOT, 'src');
+
+      function walk(dir: string): string[] {
+        const out: string[] = [];
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            out.push(...walk(full));
+          } else if (entry.isFile() && /\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name)) {
+            out.push(full);
+          }
+        }
+        return out;
+      }
+
+      const offenders: string[] = [];
+      const deletePattern = /delete\s+from\s+audit_log/i;
+      for (const file of walk(srcDir)) {
+        const lines = fs.readFileSync(file, 'utf-8').split('\n');
+        lines.forEach((line, idx) => {
+          // Strip line comments so a documented mention never trips the guard.
+          const code = line.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
+          if (deletePattern.test(code)) {
+            offenders.push(`${path.relative(PROJECT_ROOT, file)}:${idx + 1}`);
+          }
+        });
+      }
+
+      expect(offenders, `DELETE FROM audit_log found at: ${offenders.join(', ')}`).toEqual([]);
+    });
+  });
+
+  // ── Phase 5 Audit Log: retention window get/set (Wave 0 RED — AUD-02) ────
+  //
+  // Stored in dashboard_settings under `audit.retention_days` (05-PATTERNS.md
+  // Pattern E). Default 90 when unset; integer round-trip when set; non-positive
+  // and non-integer input is rejected/ignored so reads fall back to the default.
+
+  describe('audit retention window', () => {
+    it('returns the default 90 days when unset', () => {
+      expect(getAuditRetentionDays()).toBe(90);
+    });
+
+    it('round-trips a stored integer value', () => {
+      setAuditRetentionDays(30);
+      expect(getAuditRetentionDays()).toBe(30);
+    });
+
+    it('rejects/ignores non-positive input — read stays at the default 90', () => {
+      setAuditRetentionDays(0);
+      expect(getAuditRetentionDays()).toBe(90);
+
+      setAuditRetentionDays(-5);
+      expect(getAuditRetentionDays()).toBe(90);
+    });
+
+    it('rejects/ignores non-integer input — read stays at the default 90', () => {
+      setAuditRetentionDays(12.5);
+      expect(getAuditRetentionDays()).toBe(90);
     });
   });
 });

@@ -1646,13 +1646,13 @@ async function runAgentTurn(args: RunAgentTurnArgs): Promise<string> {
             // actually did during an incident. Best-effort — failure
             // here must not block the turn.
             try {
-              insertAuditLog(
+              insertAuditLog({
                 agentId,
-                meetingChatId || '',
-                'tool_call',
-                `${b.name} ${argsPreview}`.slice(0, 2000),
-                false,
-              );
+                chatId: meetingChatId || '',
+                action: 'tool_call',
+                detail: `${b.name} ${argsPreview}`.slice(0, 2000),
+                blocked: false,
+              });
             } catch (auditErr) {
               logger.warn({ err: auditErr instanceof Error ? auditErr.message : auditErr }, 'audit log write failed');
             }

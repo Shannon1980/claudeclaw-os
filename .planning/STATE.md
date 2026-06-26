@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
-status: executing
-last_updated: "2026-06-25T20:53:27.685Z"
-last_activity: 2026-06-25 -- Phase 5 planning complete
+status: ready_to_plan
+last_updated: 2026-06-26T03:02:19.144Z
+last_activity: 2026-06-25
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 20
-  completed_plans: 16
+  completed_plans: 20
   percent: 50
+stopped_at: Phase 5 complete (4/4) — ready to discuss Phase 6
 ---
 
 # Project State
@@ -20,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** A local-first desktop AI chief-of-staff for business operators — install with no terminal, runs the real Claude engine on the operator's own machine, keeps work moving and never lets anything fall through.
-**Current focus:** Phase 5 — audit log
+**Current focus:** Phase 6 — memory surface
 
 ## Current Position
 
-Phase: 5
+Phase: 6
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-25 -- Phase 5 planning complete
+Status: Ready to plan
+Last activity: 2026-06-26
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 8
+- Total plans completed: 12
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -43,6 +44,7 @@ Last activity: 2026-06-25 -- Phase 5 planning complete
 |-------|-------|-------|----------|
 | 01 | 4 | - | - |
 | 04 | 4 | - | - |
+| 5 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -62,6 +64,9 @@ Last activity: 2026-06-25 -- Phase 5 planning complete
 | Phase 04 P02 | ~6min | 3 tasks | 8 files |
 | Phase 04 P03 | ~14min | 3 tasks | 7 files |
 | Phase 04 P04 | ~4min | 2 of 3 tasks (checkpoint pending) | 5 files |
+| Phase 05-audit-log P02 | 9min | 2 tasks | 11 files |
+| Phase 05 P03 | ~14min | 2 tasks | 5 files |
+| Phase 05 P04 | ~25min | 1 of 2 tasks (human-verify pending) | 7 files |
 
 ## Accumulated Context
 
@@ -90,6 +95,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-02: GET /api/activity is a thin token-gated wrapper over buildActivityFeed (inherits app gate, no bespoke auth, limit clamped); Activity.tsx renders the day-grouped card/list feed unlike Audit with read-side D-11 filters; nav collision resolved (one /activity -> nav.activity, /audit -> new nav.audit); Home one-click entry point (D-03)
 - [Phase ?]: [Phase 04]: 04-04: Summarize Today (D-10) code GREEN. summarizeDay reuses extractViaClaude (shared Haiku subscription one-shot, scrubbed env, bounded 20s timeout) directly, NOT a new LLM path / NOT the Gemini quota path; POST /api/activity/summarize checks LLM_SPAWN_ENABLED FIRST (off -> honest degrade + NO LLM call), inherits the mutations kill-switch + token gate; prompt carries only the params-free phrase + agent_id + time (no raw params/env/secrets); honest degrade over throw. Activity.tsx Summarize Today is operator-invoked only (click handler, never on mount, never per row). End-of-phase human-verify checkpoint (Task 3) PENDING operator sign-off.
 - [Phase ?]: [Phase 04]: 04-03: Undo vertical slice GREEN. undo-executor.ts mirrors replay-executor (MCP-over-stdio inverse); Tier 4 refused BEFORE dispatch (D-09); reuses isUndoableFamily allowlist; label-remove floor family proven end-to-end; claim-before-dispatch status guard prevents inverse double-fire; undo result in existing result column, NO migration; inverse tool names unconfirmed (no MCP servers connected) -> honest no-undo, logged deferred
+- [Phase ?]: 05-02: insertAuditLog widened to a single options object; all positional call sites migrated (no half-migrated signature)
+- [Phase ?]: 05-02: audit retention storage in db.ts (default 90, append-only); audited setAuditRetention wrapper in permissions-config.ts mirrors setMode
+- [Phase 05]: 05-04: auth/routine/error events emit at their sources through the single audit() choke point; checkOAuthHealth exported + dependency-injected so the auth row has a REAL automated seam (not manual-only); auth event fires per determination, decoupled from the anti-spam sender; no auth event when neither credentials file nor env auth exists (Open Q3, no fake refresh events); error detail = first-line + 500-cap (no stack frames, T-05-10); turn model/session/_startMs threaded via GateContext per-turn (no module globals, T-05-11). Task 2 end-of-phase human-verify checkpoint AWAITING operator sign-off.
 
 ### Pending Todos
 
@@ -117,9 +125,9 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-25T20:53:27.681Z
-Stopped at: Phase 5 planned (4 plans, 4 waves)
-Resume file: .planning/phases/05-audit-log/05-01-PLAN.md
+Last session: 2026-06-25T21:35:26.836Z
+Stopped at: Phase 5 Plan 04 Task 1 complete (auth/routine/error emissions + turn-boundary capture GREEN); Task 2 human-verify checkpoint awaiting operator sign-off
+Resume file: .planning/phases/05-audit-log/05-04-PLAN.md (Task 2)
 
 ## Operator Next Steps
 
