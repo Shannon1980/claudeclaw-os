@@ -188,7 +188,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — Wave 0 failing tests pinning MEM-01/02 + D-03/04/05/06/08 (migration, provenance, confirmed gate, tombstone, mutation contract)
+- [x] 06-01-PLAN.md — Wave 0 failing tests pinning MEM-01/02 + D-03/04/05/06/08 (migration, provenance, confirmed gate, tombstone, mutation contract)
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -243,7 +243,7 @@ Plans:
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
 | 4. Activity Feed | 4/4 | Complete    | 2026-06-25 |
 | 5. Audit Log | 4/4 | Complete    | 2026-06-26 |
-| 6. Memory Surface | 0/? | Not started | - |
+| 6. Memory Surface | 1/4 | In Progress|  |
 | 7. Power Surfaces | 0/? | Not started | - |
 | 8. Billing & Licensing | 0/? | Not started | - |
 
