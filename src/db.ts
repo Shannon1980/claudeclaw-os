@@ -793,6 +793,33 @@ function runMigrations(database: Database.Database): void {
     logger.info('Migration: added pinned column to memories table');
   }
 
+  // Phase 6 Memory Surface (MEM-01/MEM-02, v1.2.5 dual-write). These three
+  // artifacts MUST stay byte-identical to migrations/v1.2.5/add-memory-surface-columns.ts
+  // (Pitfall 1 / T-06-01 — drift crash-loops the live service on the next restart).
+  // NEW inserts default confirmed=0 (machine-inferred facts land unconfirmed,
+  // D-04); the grandfather UPDATE that flips EXISTING rows to confirmed=1 lives
+  // ONLY in the versioned migration, never here.
+  if (!memColsPost.some((c: { name: string }) => c.name === 'category')) {
+    database.exec(`ALTER TABLE memories ADD COLUMN category TEXT`);
+    logger.info('Migration: added category column to memories table');
+  }
+  if (!memColsPost.some((c: { name: string }) => c.name === 'confirmed')) {
+    database.exec(`ALTER TABLE memories ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 0`);
+    logger.info('Migration: added confirmed column to memories table');
+  }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS memory_tombstones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT,
+      text_hash TEXT NOT NULL,
+      embedding TEXT,
+      summary TEXT,
+      created_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_tombstones_chat_hash
+      ON memory_tombstones(chat_id, text_hash);
+  `);
+
   // Mission Control: migrate assigned_agent from NOT NULL to nullable (allow unassigned tasks)
   const missionCols = database.prepare(`PRAGMA table_info(mission_tasks)`).all() as Array<{ name: string; notnull: number }>;
   const assignedCol = missionCols.find((c) => c.name === 'assigned_agent');

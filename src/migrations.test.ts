@@ -269,7 +269,7 @@ describe('audit log migration v1.2.4', () => {
     expect(versionJson.migrations['v1.2.4']).toEqual(['enrich-audit-log']);
   });
 
-  it('v1.2.4 is the highest registered version (a clean increment over v1.2.3)', () => {
+  it('v1.2.4 is a clean increment over v1.2.3 (sorts immediately after it)', () => {
     const versionJson = JSON.parse(
       fs.readFileSync(
         path.join(process.cwd(), 'migrations', 'version.json'),
@@ -277,8 +277,12 @@ describe('audit log migration v1.2.4', () => {
       ),
     ) as { migrations: Record<string, string[]> };
 
-    const highest = Object.keys(versionJson.migrations).sort(compareSemver).pop();
-    expect(highest).toBe('v1.2.4');
+    // v1.2.4 is no longer the highest version (Phase 6 added v1.2.5), but it
+    // must remain a clean increment sitting directly after v1.2.3 in order.
+    const ordered = Object.keys(versionJson.migrations).sort(compareSemver);
+    const idx = ordered.indexOf('v1.2.4');
+    expect(idx).toBeGreaterThan(0);
+    expect(ordered[idx - 1]).toBe('v1.2.3');
   });
 
   it('applies idempotently — building the schema twice leaves all 11 new columns present exactly once', () => {
