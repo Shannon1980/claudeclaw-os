@@ -310,3 +310,117 @@ describe('audit log migration v1.2.4', () => {
     expect(cols).not.toContain('cost_usd');
   });
 });
+
+// ── memory surface migration v1.2.5 (Phase 6, MEM-01/MEM-02 — Wave 0 RED) ──────
+//
+// These cases pin the v1.2.5 dual-write (P-4) contract for the memory surface:
+//   - D-06: a `category` column (TEXT, nullable) on memories.
+//   - D-04: a `confirmed` column (INTEGER NOT NULL DEFAULT 0) on memories.
+//   - D-08: a `memory_tombstones` table for provable no-re-derivation.
+//
+// They are RED on purpose: v1.2.5 is not yet registered in version.json and the
+// new columns/table do not yet exist in createSchema/runMigrations. Plan 02 turns
+// these GREEN by registering the version and adding the columns/table to BOTH the
+// in-memory test DB (PRAGMA-guarded ADDs in runMigrations) AND the versioned
+// migrations/v1.2.5/<name>.ts for the live store (byte-identical names/types,
+// Pitfall 1).
+
+describe('memory surface migration v1.2.5', () => {
+  it('registers a "v1.2.5" key in version.json mapping to a one-element migration list', () => {
+    const versionJson = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'migrations', 'version.json'),
+        'utf-8',
+      ),
+    ) as { migrations: Record<string, string[]> };
+
+    expect(versionJson.migrations).toHaveProperty('v1.2.5');
+    expect(Array.isArray(versionJson.migrations['v1.2.5'])).toBe(true);
+    expect(versionJson.migrations['v1.2.5']).toHaveLength(1);
+  });
+
+  it('v1.2.5 is the highest registered version (a clean increment over v1.2.4)', () => {
+    const versionJson = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'migrations', 'version.json'),
+        'utf-8',
+      ),
+    ) as { migrations: Record<string, string[]> };
+
+    const highest = Object.keys(versionJson.migrations).sort(compareSemver).pop();
+    expect(highest).toBe('v1.2.5');
+  });
+
+  it('adds category (TEXT, nullable) + confirmed (INTEGER NOT NULL DEFAULT 0) to memories, idempotently', () => {
+    // _initTestDatabase runs createSchema + runMigrations; calling it twice
+    // exercises the PRAGMA-guarded ADD COLUMN idempotency (no drift, no throw).
+    _initTestDatabase();
+    _initTestDatabase();
+
+    const cols = getDb().prepare(`PRAGMA table_info(memories)`).all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+    }>;
+
+    const category = cols.find((c) => c.name === 'category');
+    expect(category, 'memories should have a "category" column').toBeTruthy();
+    expect(category?.type.toUpperCase()).toBe('TEXT');
+    expect(category?.notnull, 'category must be nullable').toBe(0);
+
+    const confirmed = cols.find((c) => c.name === 'confirmed');
+    expect(confirmed, 'memories should have a "confirmed" column').toBeTruthy();
+    expect(confirmed?.type.toUpperCase()).toBe('INTEGER');
+    expect(confirmed?.notnull, 'confirmed must be NOT NULL').toBe(1);
+    expect(String(confirmed?.dflt_value), 'confirmed default must be 0').toBe('0');
+
+    // Each new column appears exactly once (idempotent ADD COLUMN, no duplicate).
+    expect(cols.filter((c) => c.name === 'category')).toHaveLength(1);
+    expect(cols.filter((c) => c.name === 'confirmed')).toHaveLength(1);
+  });
+
+  it('creates a memory_tombstones table with the documented shape + (chat_id, text_hash) index, idempotently', () => {
+    _initTestDatabase();
+    _initTestDatabase();
+    const db = getDb();
+
+    const tombCols = db.prepare(`PRAGMA table_info(memory_tombstones)`).all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+    }>;
+    const tombColNames = tombCols.map((c) => c.name);
+
+    // id, chat_id, text_hash (TEXT NOT NULL), embedding (TEXT), summary (TEXT), created_at.
+    for (const col of ['id', 'chat_id', 'text_hash', 'embedding', 'summary', 'created_at']) {
+      expect(tombColNames, `memory_tombstones should have column "${col}"`).toContain(col);
+    }
+    const textHash = tombCols.find((c) => c.name === 'text_hash');
+    expect(textHash?.type.toUpperCase()).toBe('TEXT');
+    expect(textHash?.notnull, 'text_hash must be NOT NULL').toBe(1);
+
+    // An index covering (chat_id, text_hash) so the suppression lookup is fast.
+    const indexes = db.prepare(`PRAGMA index_list(memory_tombstones)`).all() as Array<{ name: string }>;
+    const hasCompositeIndex = indexes.some((idx) => {
+      const idxCols = (
+        db.prepare(`PRAGMA index_info(${idx.name})`).all() as Array<{ name: string }>
+      ).map((c) => c.name);
+      return idxCols.includes('chat_id') && idxCols.includes('text_hash');
+    });
+    expect(hasCompositeIndex, 'expected an index on (chat_id, text_hash)').toBe(true);
+  });
+
+  it('drift guard: createSchema/runMigrations adds the same artifacts the migration would (no schema drift, Pitfall 1)', () => {
+    // The in-memory DB built by _initTestDatabase (createSchema + runMigrations)
+    // MUST carry the exact same column names the versioned migration adds. If the
+    // dual-write halves drift, the live service crash-loops on the next restart.
+    _initTestDatabase();
+    const memCols = (
+      getDb().prepare(`PRAGMA table_info(memories)`).all() as Array<{ name: string }>
+    ).map((c) => c.name);
+
+    expect(memCols).toContain('category');
+    expect(memCols).toContain('confirmed');
+  });
+});

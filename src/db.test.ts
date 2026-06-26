@@ -929,4 +929,89 @@ describe('database', () => {
       expect(getAuditRetentionDays()).toBe(90);
     });
   });
+
+  // ── Phase 6 Memory Surface: schema artifacts (Wave 0 RED — MEM-01/MEM-02) ──
+  //
+  // createSchema (via _initTestDatabase) must produce the same three artifacts
+  // the v1.2.5 migration adds for the live store (dual-write, P-4 / Pitfall 1):
+  //   - D-06: memories.category (TEXT, nullable).
+  //   - D-04: memories.confirmed (INTEGER NOT NULL DEFAULT 0).
+  //   - D-08: a memory_tombstones table + (chat_id, text_hash) index.
+  // RED on purpose: db.ts does not yet define these. Plan 02 turns them GREEN.
+
+  describe('memory surface schema (createSchema)', () => {
+    it('memories has a category column: TEXT, nullable (D-06)', () => {
+      const cols = getDb().prepare(`PRAGMA table_info(memories)`).all() as Array<{
+        name: string; type: string; notnull: number;
+      }>;
+      const category = cols.find((c) => c.name === 'category');
+      expect(category, 'memories.category should exist').toBeTruthy();
+      expect(category?.type.toUpperCase()).toBe('TEXT');
+      expect(category?.notnull, 'category must be nullable').toBe(0);
+    });
+
+    it('memories has a confirmed column: INTEGER NOT NULL DEFAULT 0 (D-04)', () => {
+      const cols = getDb().prepare(`PRAGMA table_info(memories)`).all() as Array<{
+        name: string; type: string; notnull: number; dflt_value: string | null;
+      }>;
+      const confirmed = cols.find((c) => c.name === 'confirmed');
+      expect(confirmed, 'memories.confirmed should exist').toBeTruthy();
+      expect(confirmed?.type.toUpperCase()).toBe('INTEGER');
+      expect(confirmed?.notnull, 'confirmed must be NOT NULL').toBe(1);
+      expect(String(confirmed?.dflt_value)).toBe('0');
+    });
+
+    it('inserting a memory without specifying confirmed defaults it to 0 (new facts land unconfirmed)', () => {
+      // Bind via ? placeholders only (no value interpolation, SQLi mitigation).
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      db.prepare(
+        `INSERT INTO memories (chat_id, raw_text, summary, created_at, accessed_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run('chat-conf', 'raw', 'a fresh inferred fact', now, now);
+      const row = db
+        .prepare(`SELECT confirmed, category FROM memories WHERE chat_id = ?`)
+        .get('chat-conf') as { confirmed: number; category: string | null };
+      expect(row.confirmed).toBe(0);
+      expect(row.category).toBeNull();
+    });
+
+    it('memory_tombstones table exists with the documented columns + (chat_id, text_hash) index (D-08)', () => {
+      const db = getDb();
+      const tombCols = db.prepare(`PRAGMA table_info(memory_tombstones)`).all() as Array<{
+        name: string; type: string; notnull: number;
+      }>;
+      const names = tombCols.map((c) => c.name);
+      for (const col of ['id', 'chat_id', 'text_hash', 'embedding', 'summary', 'created_at']) {
+        expect(names, `memory_tombstones should have column "${col}"`).toContain(col);
+      }
+      const textHash = tombCols.find((c) => c.name === 'text_hash');
+      expect(textHash?.type.toUpperCase()).toBe('TEXT');
+      expect(textHash?.notnull, 'text_hash must be NOT NULL').toBe(1);
+
+      const indexes = db.prepare(`PRAGMA index_list(memory_tombstones)`).all() as Array<{ name: string }>;
+      const hasCompositeIndex = indexes.some((idx) => {
+        const idxCols = (
+          db.prepare(`PRAGMA index_info(${idx.name})`).all() as Array<{ name: string }>
+        ).map((c) => c.name);
+        return idxCols.includes('chat_id') && idxCols.includes('text_hash');
+      });
+      expect(hasCompositeIndex, 'expected an index on (chat_id, text_hash)').toBe(true);
+    });
+
+    it('a tombstone row round-trips via parameterized SQL (text_hash floor, optional embedding/summary)', () => {
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      db.prepare(
+        `INSERT INTO memory_tombstones (chat_id, text_hash, embedding, summary, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run('chat-tomb', 'deadbeefhash', null, 'a deleted fact', now);
+      const row = db
+        .prepare(`SELECT chat_id, text_hash, summary FROM memory_tombstones WHERE chat_id = ?`)
+        .get('chat-tomb') as { chat_id: string; text_hash: string; summary: string };
+      expect(row.chat_id).toBe('chat-tomb');
+      expect(row.text_hash).toBe('deadbeefhash');
+      expect(row.summary).toBe('a deleted fact');
+    });
+  });
 });
