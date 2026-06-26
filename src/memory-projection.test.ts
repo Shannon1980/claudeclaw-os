@@ -102,4 +102,29 @@ describe('renderMemoryProjection', () => {
     expect(src).not.toMatch(/\bwa_/);
     expect(src).not.toContain('slack_messages');
   });
+
+  // ── D-04 confirmed gate, second behavior read path (Wave 0 RED) ──────
+  //
+  // renderMemoryProjection is the OTHER place memory influences behavior
+  // (it writes the projected summaries the agent reads back). An unconfirmed
+  // fact must never be projected. The reader getRecentHighImportanceMemories
+  // is the gate point; the projection module must source its rows through a
+  // confirmed=1 path. RED today: the projection has no confirmed gate, so an
+  // unconfirmed row would be written into the projection file.
+  it('does not project an unconfirmed (confirmed=0) memory (D-04, second read path)', () => {
+    // The gated reader returns nothing for an unconfirmed-only store.
+    memoryRows.length = 0;
+    vi.mocked(getRecentHighImportanceMemories).mockReturnValue([] as never);
+
+    const out = renderMemoryProjection('aos', new Date('2026-06-15T12:00:00Z'));
+    if (out) {
+      const content = fs.readFileSync(out as string, 'utf8');
+      expect(content).not.toContain('Operator has not confirmed this guess');
+    }
+
+    // The projection module must source rows through a confirmed-gated path.
+    // Plan 02 threads the confirmed=1 filter; until then this is RED.
+    const src = fs.readFileSync(path.join(__dirname, 'memory-projection.ts'), 'utf8');
+    expect(src).toContain('confirmed');
+  });
 });

@@ -74,6 +74,7 @@ function makeMemory(overrides: Record<string, unknown> = {}) {
     salience: 1.0,
     consolidated: 0,
     pinned: 0,
+    confirmed: 1,
     embedding: null,
     created_at: 100,
     accessed_at: 100,
@@ -154,6 +155,50 @@ describe('buildMemoryContext', () => {
 
     expect(mockSearchMemories.mock.calls[0][4]).toBeUndefined();
     expect(mockGetRecentHighImportance.mock.calls[0][2]).toBeUndefined();
+  });
+
+  // ── D-04 confirmed gate (Wave 0 RED) ─────────────────────────────────
+  //
+  // An unconfirmed (confirmed=0) memory must NOT influence behavior: it is
+  // absent from buildMemoryContext until the operator confirms it. The gate
+  // is enforced at the db.ts reader (the readers are mocked here), so the
+  // contract pinned at THIS layer is: when an unconfirmed row exists in the
+  // store, the reader does not hand it to buildMemoryContext — i.e. the
+  // behavior context omits unconfirmed facts and includes them once flipped
+  // to confirmed=1. RED today because the reader does not yet filter on
+  // `confirmed`, so an unconfirmed row leaks straight through.
+
+  it('omits an unconfirmed (confirmed=0) memory from the behavior context (D-04)', async () => {
+    // The gate lives in the reader; once it filters `confirmed = 1`, an
+    // unconfirmed row never reaches buildMemoryContext. Simulate the gated
+    // reader so this stays a unit-level contract: an unconfirmed row is
+    // suppressed at the read boundary -> nothing to surface.
+    mockSearchMemories.mockImplementation(
+      ((...args: unknown[]) => [] as never) as never,
+    );
+    mockGetRecentHighImportance.mockReturnValue([]);
+
+    // The unconfirmed fact that exists in the store but must be gated out.
+    const unconfirmed = makeMemory({ summary: 'Operator has not confirmed this guess', confirmed: 0 });
+
+    const { contextText, surfacedMemorySummaries } = await buildMemoryContext('chat1', 'guess');
+    // The unconfirmed fact is absent from the surfaced behavior context.
+    expect(contextText).not.toContain(unconfirmed.summary);
+    expect([...surfacedMemorySummaries.values()]).not.toContain(unconfirmed.summary);
+    // And the readers must be asked to filter on confirmed (gate must exist).
+    // Plan 02 threads a confirmed=1 filter into the reader; until then the
+    // behavior reader has no such gate and the contract below is RED.
+    const { isMemoryReaderConfirmedGated } = await import('./memory.js');
+    expect(isMemoryReaderConfirmedGated()).toBe(true);
+  });
+
+  it('includes the same fact once it is confirmed (confirmed=1) (D-04)', async () => {
+    const confirmed = makeMemory({ summary: 'Operator confirmed this fact', confirmed: 1, importance: 0.8 });
+    mockSearchMemories.mockReturnValue([confirmed]);
+    mockGetRecentHighImportance.mockReturnValue([]);
+
+    const { contextText } = await buildMemoryContext('chat1', 'fact');
+    expect(contextText).toContain('Operator confirmed this fact');
   });
 });
 
