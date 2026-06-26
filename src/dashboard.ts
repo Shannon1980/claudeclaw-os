@@ -28,6 +28,14 @@ import {
   getDashboardMemoryTimeline,
   getDashboardConsolidations,
   getDashboardMemoriesList,
+  getMemoriesForOperatorSurface,
+  addOperatorFact,
+  updateOperatorFact,
+  confirmMemory,
+  writeTombstoneForMemory,
+  deleteMemory,
+  OPERATOR_FACT_CATEGORIES,
+  type OperatorFactCategory,
   getDashboardTokenStats,
   getDashboardCostTimeline,
   getDashboardRecentTokenUsage,
@@ -148,6 +156,7 @@ import {
 import { messageQueue } from './message-queue.js';
 import * as killSwitches from './kill-switches.js';
 import { getIngestionQuotaStatus, extractViaClaude } from './memory-ingest.js';
+import { deriveProvenance, provenanceLabelsForSurface } from './memory-provenance.js';
 import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
 import { logger } from './logger.js';
 import { getTelegramConnected, getBotInfo, chatEvents, getIsProcessing, abortActiveQuery, ChatEvent } from './state.js';
@@ -2321,6 +2330,91 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const sortBy = (c.req.query('sort') || 'importance') as 'importance' | 'salience' | 'recent';
     const result = getDashboardMemoriesList(chatId, limit, offset, sortBy);
     return c.json(result);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Operator Memory surface (Phase 6, MEM-01/MEM-02/D-04/D-08/D-09).
+  // GET is read-only; POST/PATCH/DELETE inherit the query-token gate (:432),
+  // the DASHBOARD_MUTATIONS_ENABLED kill switch on non-GET (:449), and the
+  // CSRF Origin allowlist (:495) from app middleware. NO per-route auth here
+  // (RESEARCH "Don't Hand-Roll"). All SQL is delegated to db.ts seams.
+  // ---------------------------------------------------------------------------
+
+  // GET /api/memory — operator-surface rows, provenance-tagged, groupable by
+  // category. Advertises the email tag only when an email-sourced row exists
+  // (D-05 honest coverage).
+  app.get('/api/memory', (c) => {
+    const chatId = c.req.query('chatId') || ALLOWED_CHAT_ID || '';
+    const rows = getMemoriesForOperatorSurface(chatId);
+    const memories = rows.map((r) => ({
+      id: r.id,
+      summary: r.summary,
+      category: r.category,
+      confirmed: r.confirmed === 1,
+      provenance: deriveProvenance(r),
+      importance: r.importance,
+      created_at: r.created_at,
+    }));
+    return c.json({
+      memories,
+      categories: OPERATOR_FACT_CATEGORIES,
+      provenanceLabels: provenanceLabelsForSurface(rows),
+    });
+  });
+
+  // POST /api/memory — Add a fact (D-09). Stores confirmed=1, source='you-told-me'.
+  app.post('/api/memory', async (c) => {
+    const body = await c.req.json().catch(() => ({})) as { summary?: string; category?: string };
+    const summary = typeof body.summary === 'string' ? body.summary.trim() : '';
+    if (!summary) return c.json({ ok: false, error: 'summary required' }, 400);
+    const category = body.category;
+    if (!OPERATOR_FACT_CATEGORIES.includes(category as OperatorFactCategory)) {
+      return c.json({ ok: false, error: 'invalid category' }, 400);
+    }
+    const chatId = c.req.query('chatId') || ALLOWED_CHAT_ID || '';
+    const id = addOperatorFact(chatId, summary, category as OperatorFactCategory);
+    return c.json({ ok: true, id, memory: { id } }, 201);
+  });
+
+  // PATCH /api/memory/:id — Edit a fact's summary and/or category.
+  app.patch('/api/memory/:id', async (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+    const body = await c.req.json().catch(() => ({})) as { summary?: string; category?: string };
+    if (typeof body.category === 'string' &&
+        !OPERATOR_FACT_CATEGORIES.includes(body.category as OperatorFactCategory)) {
+      return c.json({ ok: false, error: 'invalid category' }, 400);
+    }
+    const fields: { summary?: string; category?: string } = {};
+    if (typeof body.summary === 'string') {
+      const trimmed = body.summary.trim();
+      if (!trimmed) return c.json({ ok: false, error: 'summary cannot be empty' }, 400);
+      fields.summary = trimmed;
+    }
+    if (typeof body.category === 'string') fields.category = body.category;
+    const changed = updateOperatorFact(id, fields);
+    if (!changed) return c.json({ ok: false, error: 'not found' }, 404);
+    return c.json({ ok: true });
+  });
+
+  // DELETE /api/memory/:id — tombstone FIRST (D-08, Pitfall 6 fail-safe), then
+  // remove the row. 404 when the memory does not exist.
+  app.delete('/api/memory/:id', (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+    const tomb = writeTombstoneForMemory(id);
+    if (!tomb) return c.json({ ok: false, error: 'not found' }, 404);
+    const changed = deleteMemory(id);
+    return c.json({ ok: changed });
+  });
+
+  // POST /api/memory/:id/confirm — promote an unconfirmed fact (D-04).
+  // Status-guarded: a double-click flips nothing the second time (no-op).
+  app.post('/api/memory/:id/confirm', (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+    const changed = confirmMemory(id);
+    return c.json({ ok: changed });
   });
 
   // System health
