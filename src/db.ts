@@ -3250,24 +3250,28 @@ export function getAuditLogFiltered(filters: AuditLogFilters = {}): AuditLogEntr
   const params: Array<string | number> = [];
 
   if (filters.agentId) {
-    where.push('agent_id = ?');
+    where.push('a.agent_id = ?');
     params.push(filters.agentId);
   }
   if (filters.eventType) {
-    where.push('event_type = ?');
+    // Filter on the EFFECTIVE type (COALESCE) so legacy rows — written before
+    // the Phase 5 enrichment, with a NULL event_type but a populated action —
+    // still match. A bare `event_type = ?` silently hides the entire
+    // pre-enrichment log, breaking the AUD-01 "complete record" promise.
+    where.push('COALESCE(a.event_type, a.action) = ?');
     params.push(filters.eventType);
   }
   if (filters.search) {
-    where.push('(detail LIKE ? OR tool LIKE ? OR target LIKE ?)');
+    where.push('(a.detail LIKE ? OR a.tool LIKE ? OR a.target LIKE ?)');
     const like = `%${filters.search}%`;
     params.push(like, like, like);
   }
   if (typeof filters.startAt === 'number') {
-    where.push('created_at >= ?');
+    where.push('a.created_at >= ?');
     params.push(filters.startAt);
   }
   if (typeof filters.endAt === 'number') {
-    where.push('created_at <= ?');
+    where.push('a.created_at <= ?');
     params.push(filters.endAt);
   }
 
@@ -3278,10 +3282,21 @@ export function getAuditLogFiltered(filters: AuditLogFilters = {}): AuditLogEntr
   // cost or multiply it. The subquery returns the single per-turn SUM for every
   // row, so 3 audit rows sharing one session each get that turn's cost, not 0
   // and not 3Ã— (Pitfall 4). Rows with no session_id / no token_usage read 0.
+  // A queued permission decision is resolved later by the operator in
+  // approval_queue; the audit row is written append-only at enqueue time and is
+  // never updated (D-31). Resolve the real who/when/result READ-SIDE by joining
+  // the queue row referenced by detail.queueId. Most audit rows carry plain-text
+  // detail, so the queueId is extracted inside a CASE guarded by json_valid():
+  // a bare `json_valid(d) AND json_extract(...)` does NOT short-circuit (SQLite
+  // may evaluate json_extract first and raise "malformed JSON"), but CASE only
+  // evaluates its THEN when the WHEN matches.
   let sql =
     `SELECT a.*, ` +
-    `(SELECT COALESCE(SUM(t.cost_usd), 0) FROM token_usage t WHERE t.session_id = a.session_id) AS cost_usd ` +
-    `FROM audit_log a`;
+    `(SELECT COALESCE(SUM(t.cost_usd), 0) FROM token_usage t WHERE t.session_id = a.session_id) AS cost_usd, ` +
+    `q.status AS aq_status, q.decided_at AS aq_decided_at, q.result AS aq_result ` +
+    `FROM audit_log a ` +
+    `LEFT JOIN approval_queue q ` +
+    `ON q.id = (CASE WHEN json_valid(a.detail) THEN json_extract(a.detail, '$.queueId') END)`;
   if (where.length) sql += ` WHERE ${where.join(' AND ')}`;
   sql += ` ORDER BY a.created_at DESC`;
   if (typeof filters.limit === 'number') {
@@ -3293,7 +3308,27 @@ export function getAuditLogFiltered(filters: AuditLogFilters = {}): AuditLogEntr
     }
   }
 
-  return db.prepare(sql).all(...params) as AuditLogEntry[];
+  const rows = db.prepare(sql).all(...params) as AuditLogEntry[];
+  for (const r of rows) {
+    // Legacy rows have a NULL event_type but a populated action; the effective
+    // type IS that action. Surface it so the type chips, type filter, and row
+    // tag are honest about the whole log instead of hiding pre-enrichment events.
+    if (r.event_type == null) r.event_type = r.action;
+    // A resolved queue decision overrides the enqueue-time placeholder: the
+    // operator (not the system) made the call, and the real decided_at/result
+    // live on the queue row. Pending queue rows leave decided_by NULL → the UI
+    // honestly shows "not captured" until the operator acts.
+    const aqStatus = r.aq_status as string | null | undefined;
+    if (aqStatus === 'approved' || aqStatus === 'denied') {
+      r.decided_by = r.decided_by ?? 'operator';
+      if (r.aq_decided_at != null) r.decided_at = r.aq_decided_at as number;
+      if (r.result == null) r.result = (r.aq_result as string | null) ?? aqStatus;
+    }
+    delete r.aq_status;
+    delete r.aq_decided_at;
+    delete r.aq_result;
+  }
+  return rows;
 }
 
 /**
@@ -3301,11 +3336,13 @@ export function getAuditLogFiltered(filters: AuditLogFilters = {}): AuditLogEntr
  * type chips in the UI (Task 2): a chip is rendered ACTIVE only for a type that
  * has backing data here; spec types with no rows are shown disabled + footnoted
  * "not yet captured" so the surface never implies coverage it does not have.
- * NULL event_type rows (pre-enrichment legacy) are excluded.
+ * Legacy rows (NULL event_type) fall back to their action via COALESCE so the
+ * entire pre-enrichment log still surfaces a chip — not hidden (AUD-01).
  */
 export function getAuditLogTypes(): string[] {
   const rows = db.prepare(
-    `SELECT DISTINCT event_type FROM audit_log WHERE event_type IS NOT NULL ORDER BY event_type ASC`,
+    `SELECT DISTINCT COALESCE(event_type, action) AS event_type FROM audit_log
+     WHERE COALESCE(event_type, action) IS NOT NULL ORDER BY event_type ASC`,
   ).all() as Array<{ event_type: string }>;
   return rows.map((r) => r.event_type);
 }

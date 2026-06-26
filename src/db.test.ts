@@ -49,8 +49,10 @@ import {
   // retention get/set are authored by plan 02).
   insertAuditLog,
   getAuditLogFiltered,
+  getAuditLogTypes,
   getAuditRetentionDays,
   setAuditRetentionDays,
+  getDb,
 } from './db.js';
 import fs from 'fs';
 import path from 'path';
@@ -737,6 +739,123 @@ describe('database', () => {
       expect(row.model).toBeNull();
       expect(row.duration_ms).toBeNull();
       expect(row.session_id).toBeNull();
+    });
+  });
+
+  // ── Phase 5 Audit Log: legacy-row coverage + queued read-side resolution ──
+  //
+  // Two honesty gaps the reader must close so AUD-01 ("complete record") holds:
+  //   1. Rows written before the enrichment have a NULL event_type but a real
+  //      action. The type filter / chips key on the EFFECTIVE type (COALESCE),
+  //      so the whole pre-enrichment log stays visible — not silently hidden.
+  //   2. A queued permission decision is approved/denied later by the operator
+  //      in approval_queue. The append-only audit row keeps its enqueue-time
+  //      placeholder; the reader resolves the real who/when/result read-side.
+
+  describe('audit_log legacy-row type coverage', () => {
+    it('getAuditLogTypes() includes a legacy row whose action is set but event_type is NULL', () => {
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-legacy',
+        action: 'permission',
+        detail: 'pre-enrichment row',
+        blocked: false,
+        // eventType intentionally omitted → stored NULL (legacy shape)
+      });
+
+      expect(getAuditLogTypes()).toContain('permission');
+    });
+
+    it('the type filter returns a legacy row and surfaces its effective type', () => {
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-legacy',
+        action: 'permission',
+        detail: 'pre-enrichment row',
+        blocked: false,
+      });
+
+      const rows = getAuditLogFiltered({ eventType: 'permission' }) as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      // event_type was NULL in storage; the reader coalesces it to the action so
+      // the UI renders a type tag instead of a blank/hidden row.
+      expect(rows[0].event_type).toBe('permission');
+    });
+  });
+
+  describe('audit_log queued decision read-side resolution', () => {
+    it('a resolved queue row overrides the enqueue-time placeholder (operator + decided_at + result)', () => {
+      const database = getDb();
+      // A decided approval_queue row: the operator approved it at a known time.
+      const info = database
+        .prepare(
+          `INSERT INTO approval_queue (agent_id, chat_id, tool_name, tool_input, tier, mode_at_decision, status, decided_at, result)
+           VALUES ('main', 'chat-q', 'mcp__gmail__send-email', '{}', 3, 'balanced', 'approved', 1700000123, 'sent ok')`,
+        )
+        .run();
+      const queueId = Number(info.lastInsertRowid);
+
+      // The append-only audit row written at enqueue time: pending, no operator
+      // recorded yet, detail carries the queueId (the encodeDecision shape).
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-q',
+        action: 'permission',
+        eventType: 'permission',
+        detail: JSON.stringify({ tool: 'mcp__gmail__send-email', tier: 3, mode: 'balanced', outcome: 'queued', queueId }),
+        blocked: true,
+        decision: 'queued',
+        // decidedBy intentionally omitted (pending) — the gate no longer lies 'system'
+      });
+
+      const rows = getAuditLogFiltered({ eventType: 'permission' }) as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      const row = rows[0];
+      expect(row.decided_by).toBe('operator');
+      expect(row.decided_at).toBe(1700000123);
+      expect(row.result).toBe('sent ok');
+      // The read-side join columns must not leak into the row shape.
+      expect(row.aq_status).toBeUndefined();
+      expect(row.aq_decided_at).toBeUndefined();
+      expect(row.aq_result).toBeUndefined();
+    });
+
+    it('a pending queue row leaves decided_by NULL (honest "not captured", not a fake system decision)', () => {
+      const database = getDb();
+      const info = database
+        .prepare(
+          `INSERT INTO approval_queue (agent_id, chat_id, tool_name, tool_input, tier, mode_at_decision, status)
+           VALUES ('main', 'chat-q', 'mcp__gmail__send-email', '{}', 3, 'balanced', 'pending')`,
+        )
+        .run();
+      const queueId = Number(info.lastInsertRowid);
+
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-q',
+        action: 'permission',
+        eventType: 'permission',
+        detail: JSON.stringify({ tool: 'mcp__gmail__send-email', tier: 3, mode: 'balanced', outcome: 'queued', queueId }),
+        blocked: true,
+        decision: 'queued',
+      });
+
+      const [row] = getAuditLogFiltered({ eventType: 'permission' }) as Array<Record<string, unknown>>;
+      expect(row.decided_by).toBeNull();
+    });
+
+    it('a non-JSON detail does not break the reader (json_valid guard)', () => {
+      insertAuditLog({
+        agentId: 'main',
+        chatId: 'chat-plain',
+        action: 'message',
+        detail: 'just plain text, not json',
+        blocked: false,
+      });
+
+      expect(() => getAuditLogFiltered({})).not.toThrow();
+      const rows = getAuditLogFiltered({}) as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
     });
   });
 
