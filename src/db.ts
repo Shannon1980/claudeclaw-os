@@ -984,11 +984,15 @@ export function saveStructuredMemory(
   importance: number,
   source = 'conversation',
   agentId = 'main',
+  // D-04: new machine-inferred facts land UNCONFIRMED (confirmed=0) so they
+  // never influence behavior until the operator confirms. The operator
+  // Add-fact path (addOperatorFact) forward-stamps confirmed=1.
+  confirmed = 0,
 ): number {
   const now = Math.floor(Date.now() / 1000);
   const result = db.prepare(
-    `INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, agent_id, created_at, accessed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, agent_id, confirmed, created_at, accessed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     chatId,
     source,
@@ -998,6 +1002,7 @@ export function saveStructuredMemory(
     JSON.stringify(topics),
     importance,
     agentId,
+    confirmed ? 1 : 0,
     now,
     now,
   );
@@ -1065,7 +1070,7 @@ export function searchMemories(
         const ids = scored.map((s) => s.id);
         const placeholders = ids.map(() => '?').join(',');
         const rows = db
-          .prepare(`SELECT * FROM memories WHERE id IN (${placeholders}) AND superseded_by IS NULL`)
+          .prepare(`SELECT * FROM memories WHERE id IN (${placeholders}) AND superseded_by IS NULL AND confirmed = 1`)
           .all(...ids) as Memory[];
         // Preserve similarity-score ordering (SQL IN doesn't guarantee order)
         const rowMap = new Map(rows.map((r) => [r.id, r]));
@@ -1092,7 +1097,7 @@ export function searchMemories(
     .prepare(
       `SELECT memories.* FROM memories
        JOIN memories_fts ON memories.id = memories_fts.rowid
-       WHERE memories_fts MATCH ? AND memories.chat_id = ? AND memories.superseded_by IS NULL${ftsAgentClause}
+       WHERE memories_fts MATCH ? AND memories.chat_id = ? AND memories.superseded_by IS NULL AND memories.confirmed = 1${ftsAgentClause}
        ORDER BY rank
        LIMIT ?`,
     )
@@ -1117,7 +1122,7 @@ export function searchMemories(
   results = db
     .prepare(
       `SELECT * FROM memories
-       WHERE chat_id = ? AND superseded_by IS NULL AND (${likeConditions})${likeAgentClause}
+       WHERE chat_id = ? AND superseded_by IS NULL AND confirmed = 1 AND (${likeConditions})${likeAgentClause}
        ORDER BY importance DESC, accessed_at DESC
        LIMIT ?`,
     )
@@ -1160,8 +1165,8 @@ export function getMemoriesWithEmbeddings(
   agentId?: string,
 ): Array<{ id: number; embedding: number[]; summary: string; importance: number }> {
   const sql = agentId
-    ? 'SELECT id, embedding, summary, importance FROM memories WHERE chat_id = ? AND agent_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL'
-    : 'SELECT id, embedding, summary, importance FROM memories WHERE chat_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL';
+    ? 'SELECT id, embedding, summary, importance FROM memories WHERE chat_id = ? AND agent_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL AND confirmed = 1'
+    : 'SELECT id, embedding, summary, importance FROM memories WHERE chat_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL AND confirmed = 1';
   const params = agentId ? [chatId, agentId] : [chatId];
   const rows = db
     .prepare(sql)
@@ -1182,14 +1187,14 @@ export function getRecentHighImportanceMemories(
   if (agentId) {
     return db
       .prepare(
-        `SELECT * FROM memories WHERE chat_id = ? AND agent_id = ? AND importance >= 0.5
+        `SELECT * FROM memories WHERE chat_id = ? AND agent_id = ? AND importance >= 0.5 AND confirmed = 1
          ORDER BY accessed_at DESC LIMIT ?`,
       )
       .all(chatId, agentId, limit) as Memory[];
   }
   return db
     .prepare(
-      `SELECT * FROM memories WHERE chat_id = ? AND importance >= 0.5
+      `SELECT * FROM memories WHERE chat_id = ? AND importance >= 0.5 AND confirmed = 1
        ORDER BY accessed_at DESC LIMIT ?`,
     )
     .all(chatId, limit) as Memory[];

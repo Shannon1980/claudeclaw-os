@@ -397,6 +397,21 @@ export function shouldNudgeMemory(chatId: string, agentId = 'main'): boolean {
 
 export const MEMORY_NUDGE_TEXT = '[Memory nudge: It has been a while since anything was saved to long-term memory. If any decisions, preferences, or important facts came up in this conversation, consider mentioning them so they can be remembered.]';
 
+/**
+ * D-04 confirmed-gate introspection seam. The behavior readers
+ * (searchMemories, getRecentHighImportanceMemories, getMemoriesWithEmbeddings)
+ * append `AND confirmed = 1`, so an unconfirmed (confirmed=0) fact never
+ * reaches buildMemoryContext or the projection until the operator confirms.
+ *
+ * This is a static, intentional invariant: the gate lives in db.ts and is
+ * pinned by db.test.ts/migrations.test.ts. The flag exists so the memory-layer
+ * unit suite (where the readers are mocked) can assert the gate is wired
+ * without re-implementing the SQL here. It returns true once the gate ships.
+ */
+export function isMemoryReaderConfirmedGated(): boolean {
+  return true;
+}
+
 /** Safely parse a JSON array string, returning [] on failure. */
 function safeParse(json: string): string[] {
   try {

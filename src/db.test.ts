@@ -135,8 +135,10 @@ describe('database', () => {
 
   describe('searchMemories', () => {
     it('finds matching summary via FTS5', () => {
-      saveStructuredMemory('chat1', 'raw text about TypeScript', 'User enjoys TypeScript programming', ['TypeScript'], ['coding'], 0.6);
-      saveStructuredMemory('chat1', 'weather stuff', 'The weather is nice today', [], ['weather'], 0.3);
+      // Behavior readers are confirmed-gated (D-04); these retrieval-mechanics
+      // tests save confirmed=1 rows so they exercise the reader, not the gate.
+      saveStructuredMemory('chat1', 'raw text about TypeScript', 'User enjoys TypeScript programming', ['TypeScript'], ['coding'], 0.6, 'conversation', 'main', 1);
+      saveStructuredMemory('chat1', 'weather stuff', 'The weather is nice today', [], ['weather'], 0.3, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'TypeScript', 5);
       expect(results.length).toBeGreaterThanOrEqual(1);
       expect(results[0].summary).toContain('TypeScript');
@@ -162,9 +164,9 @@ describe('database', () => {
     });
 
     it('respects limit parameter', () => {
-      saveStructuredMemory('chat1', 'raw', 'first topic about coding', [], ['coding'], 0.5);
-      saveStructuredMemory('chat1', 'raw', 'second topic about coding', [], ['coding'], 0.5);
-      saveStructuredMemory('chat1', 'raw', 'third topic about coding', [], ['coding'], 0.5);
+      saveStructuredMemory('chat1', 'raw', 'first topic about coding', [], ['coding'], 0.5, 'conversation', 'main', 1);
+      saveStructuredMemory('chat1', 'raw', 'second topic about coding', [], ['coding'], 0.5, 'conversation', 'main', 1);
+      saveStructuredMemory('chat1', 'raw', 'third topic about coding', [], ['coding'], 0.5, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'coding', 2);
       expect(results).toHaveLength(2);
     });
@@ -172,8 +174,8 @@ describe('database', () => {
 
   describe('getRecentHighImportanceMemories', () => {
     it('only returns memories with importance >= 0.5', () => {
-      saveStructuredMemory('chat1', 'raw', 'low importance', [], [], 0.3);
-      saveStructuredMemory('chat1', 'raw', 'high importance', [], [], 0.8);
+      saveStructuredMemory('chat1', 'raw', 'low importance', [], [], 0.3, 'conversation', 'main', 1);
+      saveStructuredMemory('chat1', 'raw', 'high importance', [], [], 0.8, 'conversation', 'main', 1);
       const mems = getRecentHighImportanceMemories('chat1', 10);
       expect(mems).toHaveLength(1);
       expect(mems[0].summary).toBe('high importance');
@@ -341,19 +343,19 @@ describe('database', () => {
 
   describe('FTS5 multi-column search', () => {
     it('finds memory by entity match', () => {
-      saveStructuredMemory('chat1', 'raw text', 'summary text', ['OpenAI', 'GPT-4'], ['AI'], 0.6);
+      saveStructuredMemory('chat1', 'raw text', 'summary text', ['OpenAI', 'GPT-4'], ['AI'], 0.6, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'OpenAI', 5);
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
 
     it('finds memory by topic match', () => {
-      saveStructuredMemory('chat1', 'raw text', 'summary text', [], ['productivity', 'workflow'], 0.6);
+      saveStructuredMemory('chat1', 'raw text', 'summary text', [], ['productivity', 'workflow'], 0.6, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'productivity', 5);
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
 
     it('finds memory by raw_text match', () => {
-      saveStructuredMemory('chat1', 'I absolutely love hiking in the mountains', 'User enjoys outdoor activities', ['hiking'], ['hobbies'], 0.5);
+      saveStructuredMemory('chat1', 'I absolutely love hiking in the mountains', 'User enjoys outdoor activities', ['hiking'], ['hobbies'], 0.5, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'hiking mountains', 5);
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
@@ -369,7 +371,7 @@ describe('database', () => {
 
   describe('getRecentHighImportanceMemories edge cases', () => {
     it('includes memories with importance exactly 0.5', () => {
-      saveStructuredMemory('chat1', 'raw', 'borderline', [], [], 0.5);
+      saveStructuredMemory('chat1', 'raw', 'borderline', [], [], 0.5, 'conversation', 'main', 1);
       const mems = getRecentHighImportanceMemories('chat1', 10);
       expect(mems).toHaveLength(1);
     });
@@ -382,7 +384,7 @@ describe('database', () => {
 
     it('respects limit parameter', () => {
       for (let i = 0; i < 10; i++) {
-        saveStructuredMemory('chat1', 'raw', `high${i}`, [], [], 0.8);
+        saveStructuredMemory('chat1', 'raw', `high${i}`, [], [], 0.8, 'conversation', 'main', 1);
       }
       const mems = getRecentHighImportanceMemories('chat1', 3);
       expect(mems).toHaveLength(3);
@@ -465,8 +467,8 @@ describe('database', () => {
   // ── Phase 4: memory agent scoping + single store ───────────────────
   describe('memory agent scoping (MEM-02)', () => {
     it('getRecentHighImportanceMemories scopes by agent_id (no cross-agent leakage)', () => {
-      saveStructuredMemory('chat1', 'raw a', 'aos shared topic note', [], ['shared'], 0.8, 'conversation', 'aos');
-      saveStructuredMemory('chat1', 'raw m', 'main shared topic note', [], ['shared'], 0.8, 'conversation', 'main');
+      saveStructuredMemory('chat1', 'raw a', 'aos shared topic note', [], ['shared'], 0.8, 'conversation', 'aos', 1);
+      saveStructuredMemory('chat1', 'raw m', 'main shared topic note', [], ['shared'], 0.8, 'conversation', 'main', 1);
 
       const aos = getRecentHighImportanceMemories('chat1', 10, 'aos');
       const main = getRecentHighImportanceMemories('chat1', 10, 'main');
@@ -478,8 +480,8 @@ describe('database', () => {
     });
 
     it('searchMemories scopes by agent_id for the same chat_id', () => {
-      saveStructuredMemory('chat1', 'raw a', 'aos likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'aos');
-      saveStructuredMemory('chat1', 'raw m', 'main likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'main');
+      saveStructuredMemory('chat1', 'raw a', 'aos likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'aos', 1);
+      saveStructuredMemory('chat1', 'raw m', 'main likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'main', 1);
 
       const aos = searchMemories('chat1', 'TypeScript', 5, undefined, 'aos');
       expect(aos.map((m) => m.summary)).toEqual(['aos likes TypeScript']);
