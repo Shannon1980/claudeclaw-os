@@ -1,10 +1,11 @@
 ---
 phase: 6
 slug: memory-surface
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-06-26
+reviewed_at: 2026-06-26
 ---
 
 # Phase 6 — UI Design Contract: Memory Surface
