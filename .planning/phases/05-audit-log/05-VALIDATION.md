@@ -1,9 +1,9 @@
 ---
 phase: 5
 slug: audit-log
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-25
 ---
 
@@ -57,15 +57,15 @@ created: 2026-06-25
 
 ## Wave 0 Requirements
 
-- [ ] `src/migrations.test.ts` — assert `v1.2.4` registered in `version.json` + idempotent apply (AUD-01 schema, P-4 dual-write)
-- [ ] `src/db.test.ts` — audit insert/read with new fields; cost LEFT JOIN; the "no DELETE on audit_log" invariant
-- [ ] `src/audit-export.test.ts` (new) OR extend `db.test.ts` — CSV RFC-4180 + formula-injection cases; JSON envelope shape
-- [ ] `src/dashboard.contract.test.ts` — `/api/audit` enriched rows + `/api/audit/export` full-set + `Content-Disposition` headers + `format` validation
-- [ ] `src/oauth-health.test.ts` (new) — stub `checkOAuthHealth`'s audit callback; assert `auth` emission shape per alert level (none/warning/expired)
-- [ ] Retention get/set unit test — default 90, input validation
-- [ ] Framework install: **none** — Vitest already present
+- [x] `src/migrations.test.ts` — assert `v1.2.4` registered in `version.json` + idempotent apply (AUD-01 schema, P-4 dual-write)
+- [x] `src/db.test.ts` — audit insert/read with new fields; cost LEFT JOIN; the "no DELETE on audit_log" invariant
+- [x] `src/audit-export.test.ts` (new) OR extend `db.test.ts` — CSV RFC-4180 + formula-injection cases; JSON envelope shape
+- [x] `src/dashboard.contract.test.ts` — `/api/audit` enriched rows + `/api/audit/export` full-set + `Content-Disposition` headers + `format` validation
+- [x] `src/oauth-health.test.ts` (new) — stub `checkOAuthHealth`'s audit callback; assert `auth` emission shape per alert level (none/warning/expired)
+- [x] Retention get/set unit test — default 90, input validation
+- [x] Framework install: **none** — Vitest already present
 
-*Framework is installed; Wave 0 is test-stub authoring only.*
+*Framework is installed; Wave 0 is test-stub authoring only. All Wave 0 test files exist and pass (see 05-VERIFICATION.md, status: passed).*
 
 ---
 
@@ -85,11 +85,11 @@ created: 2026-06-25
 
 ## Validation Sign-Off
 
-- [ ] All tasks have automated verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags (`vitest run`, never `vitest` watch)
-- [ ] Feedback latency < ~30s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have automated verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags (`vitest run`, never `vitest` watch)
+- [x] Feedback latency < ~30s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** Automated validation complete — Wave 0 test files all exist and pass, nyquist coverage met (05-VERIFICATION.md status: passed). The Manual-Only Verifications above remain tracked under the end-of-phase human-verify checkpoint (05-VERIFICATION.md goal status: human_needed).
