@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 
 import { checkPendingMigrations, compareSemver } from './migrations.js';
+import { _initTestDatabase, getDb } from './db.js';
 
 // ── compareSemver ────────────────────────────────────────────────────────────
 
@@ -226,5 +227,86 @@ describe('checkPendingMigrations', () => {
 
       expect(process.exit).not.toHaveBeenCalled();
     });
+  });
+});
+
+// ── audit log migration v1.2.4 (Phase 5, AUD-01 — Wave 0 RED) ─────────────────
+//
+// These cases pin the dual-write (P-4) contract for the audit_log enrichment.
+// They are RED on purpose: v1.2.4 is not yet registered in version.json and the
+// new columns do not yet exist in createSchema/runMigrations. Plan 02 turns
+// these GREEN by registering the version and adding the columns to BOTH the
+// in-memory test DB (addColumnIfMissing in runMigrations) AND the versioned
+// migrations/v1.2.4/enrich-audit-log.ts for the live store.
+
+describe('audit log migration v1.2.4', () => {
+  // The exact 11 nullable columns the enrichment adds (05-PATTERNS.md Pattern A).
+  // cost_usd is deliberately NOT here: cost is resolved read-side via a JOIN on
+  // token_usage (D-11 / Pitfall 5), never written onto the append-only row.
+  const EXPECTED_NEW_COLUMNS = [
+    'event_type',
+    'tool',
+    'target',
+    'project',
+    'decision',
+    'decided_by',
+    'decided_at',
+    'result',
+    'duration_ms',
+    'model',
+    'session_id',
+  ];
+
+  it('registers key "v1.2.4" mapping to ["enrich-audit-log"] in version.json', () => {
+    const versionJson = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'migrations', 'version.json'),
+        'utf-8',
+      ),
+    ) as { migrations: Record<string, string[]> };
+
+    expect(versionJson.migrations).toHaveProperty('v1.2.4');
+    expect(versionJson.migrations['v1.2.4']).toEqual(['enrich-audit-log']);
+  });
+
+  it('v1.2.4 is the highest registered version (a clean increment over v1.2.3)', () => {
+    const versionJson = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'migrations', 'version.json'),
+        'utf-8',
+      ),
+    ) as { migrations: Record<string, string[]> };
+
+    const highest = Object.keys(versionJson.migrations).sort(compareSemver).pop();
+    expect(highest).toBe('v1.2.4');
+  });
+
+  it('applies idempotently — building the schema twice leaves all 11 new columns present exactly once', () => {
+    // _initTestDatabase runs createSchema + runMigrations; calling it twice
+    // exercises the addColumnIfMissing idempotency guard.
+    _initTestDatabase();
+    _initTestDatabase();
+
+    const cols = (
+      getDb().prepare(`PRAGMA table_info(audit_log)`).all() as Array<{ name: string }>
+    ).map((c) => c.name);
+
+    for (const col of EXPECTED_NEW_COLUMNS) {
+      expect(cols, `audit_log should have column "${col}"`).toContain(col);
+      expect(
+        cols.filter((c) => c === col).length,
+        `column "${col}" should appear exactly once (idempotent ADD COLUMN)`,
+      ).toBe(1);
+    }
+  });
+
+  it('does NOT add a cost_usd column to audit_log (cost is resolved read-side via JOIN, D-11)', () => {
+    _initTestDatabase();
+
+    const cols = (
+      getDb().prepare(`PRAGMA table_info(audit_log)`).all() as Array<{ name: string }>
+    ).map((c) => c.name);
+
+    expect(cols).not.toContain('cost_usd');
   });
 });

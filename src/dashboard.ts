@@ -59,9 +59,12 @@ import {
   setMissionTaskBlocked,
   unblockMissionTask,
   getUpcomingScheduledTasks,
-  getAuditLog,
   getAuditLogCount,
+  getAuditLogFiltered,
+  getAuditLogTypes,
+  getAuditRetentionDays,
   getRecentBlockedActions,
+  type AuditLogEntry,
   listActiveMeetSessions,
   listRecentMeetSessions,
   getMeetSession,
@@ -149,6 +152,73 @@ import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
 import { logger } from './logger.js';
 import { getTelegramConnected, getBotInfo, chatEvents, getIsProcessing, abortActiveQuery, ChatEvent } from './state.js';
 import { killProcess, isProcessAlive, findProcessesByPattern } from './platform.js';
+
+// ── Audit export serializers (Phase 5, AUD-02) ─────────────────────────────
+//
+// The audit log exports the COMPLETE filtered set as a downloadable CSV or JSON
+// file (D-21). audit_log.detail is free-text and WILL contain commas, quotes,
+// and newlines, and a cell whose first character is `= + - @` executes as a
+// formula when the file is opened in Excel (CSV injection, Pitfall 3 / ASVS V8).
+// Both serializers live here (not in a CSV library — none is installed) and are
+// unit-tested in src/audit-export.test.ts.
+
+/** Neutralize formula injection: prefix a cell starting with `= + - @` (after
+ * any leading whitespace, which Excel ignores) with a single quote. */
+function neutralizeFormula(value: string): string {
+  // Excel evaluates a cell as a formula when its first non-space char is one of
+  // these — prefix with ' so it is treated as literal text.
+  if (/^[\s]*[=+\-@]/.test(value)) return `'${value}`;
+  return value;
+}
+
+/** RFC-4180-quote a single field: double embedded quotes and wrap the field in
+ * quotes when it contains a comma, quote, CR, or LF. */
+function csvField(value: unknown): string {
+  // null / undefined export as an empty cell (honest absence in a flat file).
+  const raw = value === null || value === undefined ? '' : String(value);
+  const neutralized = neutralizeFormula(raw);
+  if (/[",\r\n]/.test(neutralized)) {
+    return `"${neutralized.replace(/"/g, '""')}"`;
+  }
+  return neutralized;
+}
+
+/**
+ * Serialize rows to RFC-4180 CSV with a header row. Column order is taken from
+ * the union of keys across all rows (first-seen order), so a sparse row still
+ * lands its values under the right header. The detail/target/etc. fields are
+ * free-text and pass through {@link csvField} (quoting) + formula neutralization
+ * — NEVER `.join(',')` raw values.
+ */
+export function toCsv(rows: Array<Record<string, unknown>>): string {
+  if (rows.length === 0) return '';
+  const columns: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        columns.push(key);
+      }
+    }
+  }
+  const lines: string[] = [];
+  lines.push(columns.map(csvField).join(','));
+  for (const row of rows) {
+    lines.push(columns.map((col) => csvField(row[col])).join(','));
+  }
+  // RFC-4180 uses CRLF line breaks.
+  return lines.join('\r\n');
+}
+
+/** JSON export envelope: { exported_at, count, rows }. */
+export function toJsonEnvelope(rows: Array<Record<string, unknown>>): {
+  exported_at: string;
+  count: number;
+  rows: Array<Record<string, unknown>>;
+} {
+  return { exported_at: new Date().toISOString(), count: rows.length, rows };
+}
 
 async function classifyTaskAgent(prompt: string): Promise<string | null> {
   const agentIds = listAgentIds();
@@ -2522,7 +2592,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     try {
       setAgentProfile(agentId, { name, description });
       refreshWarRoomRoster();
-      insertAuditLog(agentId, '', 'edit_agent_profile', JSON.stringify({ name, description }), false);
+      insertAuditLog({ agentId, chatId: '', action: 'edit_agent_profile', detail: JSON.stringify({ name, description }), blocked: false });
       const config = loadAgentConfig(agentId);
       return c.json({
         ok: true,
@@ -2562,7 +2632,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
 
     try {
       setAgentSlackChannel(agentId, channel);
-      insertAuditLog(agentId, '', 'edit_agent_slack_channel', JSON.stringify({ channel }), false);
+      insertAuditLog({ agentId, chatId: '', action: 'edit_agent_slack_channel', detail: JSON.stringify({ channel }), blocked: false });
       return c.json({ ok: true, agent: agentId, slackChannel: channel, restartRequired: true });
     } catch (err: any) {
       logger.error({ err, agentId }, 'Failed to update agent slack_channel');
@@ -2728,7 +2798,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           logger.warn({ err: err instanceof Error ? err.message : err }, 'failed to refresh main agentSystemPrompt');
         }
       }
-      insertAuditLog(agentId, '', 'edit_claudemd', `${body.content.length} bytes`, false);
+      insertAuditLog({ agentId, chatId: '', action: 'edit_claudemd', detail: `${body.content.length} bytes`, blocked: false });
       return c.json({ ok: true, takes_effect: 'next-turn' });
     } catch (err) {
       logger.error({ err, agentId }, 'Failed to write CLAUDE.md');
@@ -2795,7 +2865,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       atomicEnvWrite(target, content);
       // Keep restrictive perms — file holds the bot token.
       try { fs.chmodSync(target, 0o600); } catch {}
-      insertAuditLog(agentId, '', 'edit_agent_yaml', `${content.length} bytes`, false);
+      insertAuditLog({ agentId, chatId: '', action: 'edit_agent_yaml', detail: `${content.length} bytes`, blocked: false });
       return c.json({ ok: true, takes_effect: 'restart' });
     } catch (err) {
       logger.error({ err, agentId }, 'Failed to write agent.yaml');
@@ -2871,7 +2941,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
           logger.warn({ err: err instanceof Error ? err.message : err }, 'failed to refresh main agentSystemPrompt');
         }
       }
-      insertAuditLog(agentId, '', 'restore_' + row.file_kind, `version ${versionId} (${row.byte_size} bytes)`, false);
+      insertAuditLog({ agentId, chatId: '', action: 'restore_' + row.file_kind, detail: `version ${versionId} (${row.byte_size} bytes)`, blocked: false });
       return c.json({
         ok: true,
         takes_effect: row.file_kind === 'claudemd' ? 'next-turn' : 'restart',
@@ -3014,7 +3084,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       });
       inserted++;
     }
-    insertAuditLog('main', '', 'agent_suggestion_refresh', `inserted=${inserted} skipped=${skipped}`, false);
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'agent_suggestion_refresh', detail: `inserted=${inserted} skipped=${skipped}`, blocked: false });
     return c.json({ ok: true, inserted, skipped, suggestions: listActiveAgentSuggestions() });
   });
 
@@ -3023,7 +3093,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     if (!Number.isFinite(id)) return c.json({ error: 'invalid id' }, 400);
     const ok = dismissAgentSuggestion(id);
     if (!ok) return c.json({ error: 'not found or already dismissed' }, 404);
-    insertAuditLog('main', '', 'agent_suggestion_dismiss', `id=${id}`, false);
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'agent_suggestion_dismiss', detail: `id=${id}`, blocked: false });
     return c.json({ ok: true });
   });
 
@@ -3032,7 +3102,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     if (!Number.isFinite(id)) return c.json({ error: 'invalid id' }, 400);
     const ok = markAgentSuggestionActed(id);
     if (!ok) return c.json({ error: 'not found or already acted' }, 404);
-    insertAuditLog('main', '', 'agent_suggestion_acted', `id=${id}`, false);
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'agent_suggestion_acted', detail: `id=${id}`, blocked: false });
     return c.json({ ok: true });
   });
 
@@ -3269,7 +3339,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
 
     try {
       const result = await writeUploadedAvatar(agentId, bytes);
-      insertAuditLog(agentId, '', 'upload_avatar', `${bytes.length} bytes`, false);
+      insertAuditLog({ agentId, chatId: '', action: 'upload_avatar', detail: `${bytes.length} bytes`, blocked: false });
       return c.json({
         ok: true,
         bytes: result.bytes,
@@ -3292,7 +3362,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     if (!agentExists(agentId)) return c.json({ error: 'agent not found' }, 404);
     try {
       await deleteUploadedAvatar(agentId);
-      insertAuditLog(agentId, '', 'delete_avatar', '', false);
+      insertAuditLog({ agentId, chatId: '', action: 'delete_avatar', detail: '', blocked: false });
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: 'failed to delete avatar' }, 500);
@@ -3380,7 +3450,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       if (value.length > 32) value = value.slice(0, 32);
     }
     setDashboardSetting(body.key, value);
-    insertAuditLog('main', '', 'dashboard_setting_change', `${body.key}=${value.slice(0, 80)}`, false);
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'dashboard_setting_change', detail: `${body.key}=${value.slice(0, 80)}`, blocked: false });
     return c.json({ ok: true, key: body.key, value });
   });
 
@@ -3545,13 +3615,93 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return c.json({ ok: true });
   });
 
-  app.get('/api/audit', (c) => {
-    const limit = parseInt(c.req.query('limit') || '50', 10);
-    const offset = parseInt(c.req.query('offset') || '0', 10);
+  // Parse the shared audit filter params off a request. Used by BOTH the read
+  // endpoint and the export so they apply identical filtering (the export scope
+  // must match what is on screen). Every value binds via `?` placeholders in
+  // getAuditLogFiltered — nothing here is concatenated into SQL (T-05-05).
+  // Dates arrive as either epoch seconds or an ISO/date string; both are parsed
+  // to integer epoch seconds and silently dropped when unparseable (clamp, not
+  // fail) so a malformed date can never poison the query.
+  function parseAuditFilters(c: import('hono').Context): {
+    agentId?: string;
+    eventType?: string;
+    search?: string;
+    startAt?: number;
+    endAt?: number;
+  } {
     const agentId = c.req.query('agent') || undefined;
-    const entries = getAuditLog(limit, offset, agentId);
-    const total = getAuditLogCount(agentId);
-    return c.json({ entries, total });
+    const type = c.req.query('type') || undefined;
+    const search = c.req.query('search') || undefined;
+    const parseEpoch = (raw: string | undefined): number | undefined => {
+      if (!raw) return undefined;
+      // Bare integer => already epoch seconds.
+      if (/^\d+$/.test(raw)) {
+        const n = parseInt(raw, 10);
+        return Number.isInteger(n) ? n : undefined;
+      }
+      const ms = Date.parse(raw);
+      return Number.isNaN(ms) ? undefined : Math.floor(ms / 1000);
+    };
+    return {
+      agentId,
+      eventType: type,
+      search,
+      startAt: parseEpoch(c.req.query('from')),
+      endAt: parseEpoch(c.req.query('to')),
+    };
+  }
+
+  app.get('/api/audit', (c) => {
+    const rawLimit = parseInt(c.req.query('limit') || '50', 10);
+    const rawOffset = parseInt(c.req.query('offset') || '0', 10);
+    const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 50;
+    const offset = Number.isInteger(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+    const filters = parseAuditFilters(c);
+    // Enriched read: filtered rows carry the read-side cost (cost_usd subquery)
+    // and honest NULLs for uncaptured fields. The retention window + the set of
+    // event types with backing data ride in the same envelope so the UI can
+    // render the retention banner and HONEST type chips without a second call.
+    const entries = getAuditLogFiltered({ ...filters, limit, offset });
+    const total = getAuditLogCount(filters.agentId);
+    return c.json({
+      entries,
+      total,
+      retention_days: getAuditRetentionDays(),
+      types: getAuditLogTypes(),
+    });
+  });
+
+  // Complete-set export (D-21). Mounted under /api/ so it inherits the existing
+  // query-token gate (T-05-07); GET is mutations-exempt by design. Streams the
+  // FULL filtered set — NO limit/offset — so a copy-pasted page cap can never
+  // truncate the download (Pitfall 6). format âˆˆ {csv,json}; anything else falls
+  // back to csv. Returned as a download via Content-Disposition: attachment,
+  // mirroring the project file-download precedent. No [SEND_FILE] marker — this
+  // is an HTTP response, not a chat-bot attachment.
+  app.get('/api/audit/export', (c) => {
+    const rawFormat = (c.req.query('format') || 'csv').toLowerCase();
+    const format = rawFormat === 'json' ? 'json' : 'csv';
+    const filters = parseAuditFilters(c);
+    const rows = getAuditLogFiltered(filters) as Array<AuditLogEntry>;
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+
+    if (format === 'json') {
+      const body = JSON.stringify(toJsonEnvelope(rows as Array<Record<string, unknown>>));
+      return new Response(body, {
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Disposition': `attachment; filename="audit-${ts}.json"`,
+        },
+      });
+    }
+
+    const body = toCsv(rows as Array<Record<string, unknown>>);
+    return new Response(body, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="audit-${ts}.csv"`,
+      },
+    });
   });
 
   app.get('/api/audit/blocked', (c) => {

@@ -402,6 +402,11 @@ export async function processUserMessage(
 
   setProcessing(chatIdStr, true);
 
+  // D-01 / Pattern 4: the turn-start boundary. Stamped once here so the gate
+  // context carries a real per-turn durationMs for every permission row this
+  // turn records. Monotonic Date.now() delta; no module global.
+  const turnStartMs = Date.now();
+
   // Chat -> Mission Control bridge. If this turn is an explicit task request,
   // mirror it onto the kanban as a live (running) card. Runs concurrently with
   // the agent so classification never delays the reply, and is settled in every
@@ -497,7 +502,23 @@ export async function processUserMessage(
       // and runs the prepared action only on yes. Tier 4 inline approval is
       // per-instance only — approving never writes an "always" (D-05). On no
       // reply the ask times out to deny (fail-safe, P-2).
-      { attended: true, agentId, chatId: chatIdStr, requestInline: makeRequestInline(cb) },
+      //
+      // D-01 turn-boundary capture (Slice C): thread the per-turn model/session/
+      // start into the gate context so every permission row this turn records
+      // resolves model (token_usage has no model column), session_id (the
+      // read-side cost JOIN key), and durationMs. Per-turn carriers on the ctx —
+      // NO module globals (multi-agent concurrency, Phase 3 D-09 rule). The gate
+      // stamps _startMs itself on first canUseTool; sessionId here is the resume
+      // target for the turn (the row is written before newSessionId is known).
+      {
+        attended: true,
+        agentId,
+        chatId: chatIdStr,
+        requestInline: makeRequestInline(cb),
+        model: effectiveModel,
+        sessionId,
+        _startMs: turnStartMs,
+      },
     );
 
     clearTimeout(timeoutId);
@@ -663,6 +684,25 @@ export async function processUserMessage(
     setActiveAbort(chatIdStr, null);
     setProcessing(chatIdStr, false);
     finishChatTask(chatTaskPromise, 'failed', null, err instanceof Error ? err.message : String(err));
+
+    // D-12: emit an 'error' audit event through the single audit() choke point,
+    // alongside the existing logger.error. detail carries the category (reusing
+    // the AgentError classification, no re-classify) and a CAPPED, stack-free
+    // message — only the first line, sliced to 500 chars, so file paths / stack
+    // frames / secrets in deeper frames never reach the log (Pattern D / T-05-10).
+    const errCategory = err instanceof AgentError ? err.category : 'unknown';
+    const errMessage = String(err instanceof Error ? err.message : err)
+      .split('\n')[0]
+      .slice(0, 500);
+    audit({
+      agentId,
+      chatId: chatIdStr,
+      action: 'error',
+      eventType: 'error',
+      detail: JSON.stringify({ category: errCategory, message: errMessage }),
+      result: 'error',
+      blocked: false,
+    });
 
     if (err instanceof AgentError) {
       logger.error(
