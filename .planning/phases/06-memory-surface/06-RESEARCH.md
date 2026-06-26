@@ -162,7 +162,7 @@ No new packages. Everything below is already a project dependency and verified p
   2. A versioned migration file `migrations/v1.2.5/<name>.ts` exporting `description` + `async run()`, opening its own better-sqlite3 handle via `path.join(process.cwd(), 'store', 'claudeclaw.db')`, doing the SAME PRAGMA-guarded ADD COLUMNs with **byte-identical column names/types** (pattern: `migrations/v1.2.4/enrich-audit-log.ts`).
   3. Register the new version in `migrations/version.json`.
 - Runner is `npm run migrate` (`tsx scripts/migrate.ts`), interactive; the non-interactive core is `runMigrations({ assumeYes })` in `src/migrate-runner.ts`. The live store is NOT auto-migrated on deploy — the operator runs `npm run migrate` before restart (per 03/05 precedent in STATE.md).
-- **Columns this phase adds to `memories`:** `category TEXT` (nullable), `confirmed INTEGER NOT NULL DEFAULT 0`. Plus the new `memory_tombstones` table (also dual-written: a `CREATE TABLE IF NOT EXISTS` in `createSchema` + the migration).
+- **Columns this phase adds to `memories`:** `category TEXT` (nullable), `confirmed INTEGER NOT NULL DEFAULT 0`. Plus the new `memory_tombstones` table (also dual-written: a `CREATE TABLE IF NOT EXISTS` in `createSchema` + the migration). The migration's existing-row UPDATE backfills `confirmed=1` for all rows present at migration time (Open Q1 RESOLVED) so the D-04 gate does not strip the operator's existing memory.
 
 **On-ingest classification (recommended call shape):**
 - **Reuse the existing extractor**, do not add a new LLM path. `src/memory-ingest.ts` already calls `extractViaClaude(prompt)` → `claude-haiku-4-5-20251001` via OAuth (no API key, no quota wall). **Extend `EXTRACTION_PROMPT` (`:111`) to also return a `category` field** constrained to an enum: `"your-business" | "your-clients" | "how-you-work" | null`. One call, not two. Validate/clamp like the existing `importance` handling; `null`/unknown → leave `category` NULL (D-07: stays in data, hidden from the surface).
@@ -328,18 +328,21 @@ app.delete('/api/memory/:id', (c) => {
 | A3 | Existing `'checkpoint'`-source rows should map to "You told me" (operator-authored by nature). | Provenance (D-03) | If checkpoints are considered machine summaries, they'd mis-tag. Low volume. [ASSUMED] |
 | A4 | Folding `category` into the existing extraction prompt (one call) does not degrade extraction quality vs a separate classify call. | Category (D-06) | Could slightly affect importance/skip decisions. Verify with a test sample in planning. [ASSUMED] |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Existing-row `confirmed` backfill.** New ingests default `confirmed=0`. What about the rows already in the DB?
    - What we know: there are existing `'conversation'` (machine-inferred) and `'checkpoint'` (operator) rows.
    - What's unclear: whether to retroactively mark existing inferred facts unconfirmed (forces the operator to review a backlog) or grandfather them as confirmed.
    - Recommendation: grandfather existing rows as `confirmed=1` (default the migration's existing-row value to 1, new inserts to 0) so the gate doesn't silently strip the operator's whole memory the moment the migration runs. Surface only NEW inferred facts as "needs review." Confirm with operator in planning.
+   - **RESOLVED:** grandfather existing rows as `confirmed=1` in the v1.2.5 migration UPDATE (the `ALTER TABLE ... ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 0` adds the column at 0; the migration then runs an `UPDATE memories SET confirmed = 1` over the rows present at migration time, so every pre-existing fact is grandfathered while new ingests still default to 0).
 
 2. **`/memory` route collision.** `App.tsx:69` currently redirects `/memory` → `/memories`. This phase wants `/memory` for the new operator surface.
    - Recommendation: remove that redirect and give `/memory` to the operator page; keep `/memories` as the (now Labs) developer route. Verify no other links hardcode `/memory`.
+   - **RESOLVED:** remove the `/memory` → `/memories` redirect at `App.tsx:69`; `/memory` belongs to the new operator page and `/memories` stays as the (demoted) developer route. Verify no other links hardcode `/memory`.
 
 3. **Where Labs lives.** D-02 says "hidden Labs area" but there is no Labs section in `routes.ts` today (Audit was demoted into Settings>Security, not a Labs area).
    - Recommendation: either add a `labs` section or follow the Audit precedent (route stays in `App.tsx`, pulled from visible nav, reachable via command palette/deep link). Decide in planning; the simpler Audit-style demotion is lower-risk.
+   - **RESOLVED:** Audit-style demotion — pull the developer Memories `RouteDef` from the visible nav, keep its `<Route>` in `App.tsx` (reachable via deep link / command palette). No new `labs` section added.
 
 ## Environment Availability
 
