@@ -39,11 +39,11 @@ created: 2026-06-26
 
 ## Spacing Scale
 
-The project's de-facto scale (Tailwind utilities; all multiples of 4). Match the analog surfaces exactly.
+The project's de-facto scale (Tailwind utilities; all multiples of 4 except the documented pill exception below). Match the analog surfaces exactly.
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| xs | 4px | Icon-to-text gaps, pill inner padding (`gap-1`, `py-0.5`) |
+| xs | 4px | Icon-to-text gaps, pill horizontal padding (`gap-1`, `px-1.5`→6, `py-1` for buttons) |
 | sm | 8px | Compact element spacing, tab gaps (`gap-2`, `mb-2`) |
 | md | 16px | Default card-to-card gap, content padding (`gap-4`, `py-4`) |
 | lg | 24px | Page horizontal padding, category-group bottom margin (`px-6`, `mb-8`→32) |
@@ -53,7 +53,7 @@ The project's de-facto scale (Tailwind utilities; all multiples of 4). Match the
 
 **Card anatomy (mandatory, mirrors `ActivityRowCard`):** fact row = `bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-3`, rows stacked with `gap-4`, category groups separated by `mb-8` with a `mb-2` section label.
 
-Exceptions: none. Use only multiples of 4; the existing utilities (`p-3`=12, `py-3`=12, `px-6`=24) are the established grid and are permitted as-is.
+**Exception (sole, justified):** the `Pill` component uses `py-0.5` = **2px** vertical padding. This is intentional for dense pill height (10px label inside a compact tag) and is the established, shipped `Pill` convention reused verbatim across Activity/Audit. It is the only sub-4 value permitted on this surface; everything else is a multiple of 4 (`p-3`=12, `py-3`=12, `px-6`=24, `gap-4`=16). Do not introduce any other sub-4 spacing.
 
 ---
 
@@ -67,6 +67,8 @@ The base font-size is 13px (`html` in `main.css`); this surface is dense by desi
 | Fact text (body) | 12.5px | 400 (regular) | 1.4 (`leading-snug`) |
 | Meta / provenance label | 11px | 400 (regular) | 1.5 |
 | Section label (category headers) | 10px uppercase, `tracking-wider` | 500 (medium) | 1.5 |
+
+**On the 12.5px body size (intentional, not a near-miss):** 12.5px = `text-[12.5px]`, the exact value `ActivityRowCard` uses for its plain-language phrase (the row this surface mirrors). It reads as "just under" the 13px base on purpose — fact text is the densest content on the surface and must pack into two-line rows, while the 14px title still reads a clear step above it. The 14 / 12.5 / 11 / 10 ladder is the shipped Activity/Audit scale; matching it verbatim keeps the two operator surfaces visually consistent. Do not substitute 12px or 13px for fact text.
 
 **Weights:** exactly two — regular (400) for all content, semibold (600) for the page title and primary-button labels. The 500 (medium) on the 10px section label and on pills is the established `.section-label` / `Pill` convention and is treated as part of the label role, not a third content weight.
 
@@ -104,6 +106,12 @@ Accent is NOT used for: provenance tags, the "needs review" marker, row borders,
 | "Needs review" marker | `medium` (amber, `--color-priority-medium`) | Unconfirmed inferred fact awaiting operator confirmation (D-04). |
 
 > Note: provenance "You told me" using the `accent` Pill tone is a deliberate, bounded exception to the 10% rule — `accent-soft` is a 12%-opacity tint, not the solid accent, and it is the single trust-defining signal of this surface. It does not count against the solid-accent reserved list above.
+
+---
+
+## Visual Hierarchy
+
+**Primary visual anchor:** the provenance `Pill` on each fact row. This surface exists to make provenance legible (success criterion 2, CONTEXT §specifics "provenance is the hero"), so the pill is the first thing the eye should catch on every row — right-aligned on the fact's top line, toned per source, never a faint caption. The `Add a fact` accent CTA in the header is the secondary anchor (the one filled-accent element on the page); the category section labels organize the scroll but recede (10px faint uppercase). Everything else — fact text, meta line, row actions — is quiet by design so the provenance signal and the single CTA carry the page.
 
 ---
 
