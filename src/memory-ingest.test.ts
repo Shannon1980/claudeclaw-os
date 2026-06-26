@@ -29,9 +29,15 @@ vi.mock('./env.js', () => ({
 vi.mock('./db.js', () => ({
   saveStructuredMemoryAtomic: vi.fn(() => 1),
   getMemoriesWithEmbeddings: vi.fn(() => []),
-  // Phase 6 tombstone suppression helpers (D-08) — do not exist in db.ts yet.
+  // Phase 6 tombstone suppression helpers (D-08).
   isTombstoned: vi.fn(() => false),
   writeTombstone: vi.fn(),
+  // D-06 category validator: mirror db.ts's enum so the ingest classifier maps
+  // the model's category onto the 3-value enum (unknown/absent -> null, D-07).
+  normalizeOperatorCategory: vi.fn((value: unknown) => {
+    const VALID = ['your-business', 'your-clients', 'how-you-work'];
+    return typeof value === 'string' && VALID.includes(value) ? value : null;
+  }),
 }));
 
 vi.mock('./embeddings.js', () => ({
@@ -134,6 +140,7 @@ describe('ingestConversationTurn', () => {
       expect.any(Array),
       'conversation',
       'main',
+      null, // no category in this extraction -> NULL (D-07)
     );
   });
 
@@ -227,6 +234,7 @@ describe('ingestConversationTurn', () => {
       expect.any(Array),
       'conversation',
       'main',
+      null,
     );
   });
 
@@ -303,6 +311,7 @@ describe('ingestConversationTurn', () => {
       expect.any(Array),
       'conversation',
       'main',
+      null,
     );
   });
 
@@ -381,5 +390,86 @@ describe('ingestConversationTurn', () => {
     const result = await ingestConversationTurn('chat1', 'remind me about invoices weekly please', 'ok');
     expect(result).toBe(true);
     expect(mockSave).toHaveBeenCalled();
+  });
+
+  // ── Category classification on ingest (D-06 / D-07) ───────────────────
+  //
+  // The extraction prompt now returns a `category` constrained to the 3-value
+  // operator enum or null. The value is validated like importance and persisted
+  // on the new row. A valid category is passed through; an unknown/invalid one
+  // (or an absent one) is clamped to NULL so the surface never shows a junk bucket.
+
+  it('persists a valid category from the extraction (D-06)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User invoices clients on net-30 terms',
+      entities: ['invoicing'],
+      topics: ['billing'],
+      importance: 0.8,
+      category: 'how-you-work',
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+
+    const result = await ingestConversationTurn('chat1', 'I always bill clients on net-30 terms', 'noted');
+    expect(result).toBe(true);
+    expect(mockSave).toHaveBeenCalledWith(
+      'chat1',
+      expect.any(String),
+      'User invoices clients on net-30 terms',
+      ['invoicing'],
+      ['billing'],
+      0.8,
+      expect.any(Array),
+      'conversation',
+      'main',
+      'how-you-work',
+    );
+  });
+
+  it('clamps an unknown category to NULL (D-07)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User likes concise summaries',
+      entities: [],
+      topics: [],
+      importance: 0.6,
+      category: 'totally-made-up-bucket',
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+
+    const result = await ingestConversationTurn('chat1', 'keep your summaries short and to the point', 'ok');
+    expect(result).toBe(true);
+    expect(mockSave).toHaveBeenCalledWith(
+      'chat1',
+      expect.any(String),
+      'User likes concise summaries',
+      [],
+      [],
+      0.6,
+      expect.any(Array),
+      'conversation',
+      'main',
+      null, // unknown enum value -> NULL
+    );
+  });
+
+  it('treats an absent category as NULL (D-07)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User runs a consulting business',
+      entities: [],
+      topics: [],
+      importance: 0.7,
+      // no category field at all
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+
+    const result = await ingestConversationTurn('chat1', 'my consulting business is the main focus', 'got it');
+    expect(result).toBe(true);
+    const lastCall = mockSave.mock.calls[mockSave.mock.calls.length - 1];
+    expect(lastCall[9]).toBeNull();
   });
 });

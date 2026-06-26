@@ -975,6 +975,24 @@ export interface Consolidation {
   embedding_model?: string;
 }
 
+/**
+ * Validate a candidate operator category against the 3-value enum (D-06).
+ * Returns the category when it is one of {your-business, your-clients,
+ * how-you-work}; anything else (including null/undefined/empty) -> null (D-07).
+ * Shared by the ingest classifier, the backfill script, and the save path so
+ * the enum lives in exactly one place. Defined here (not beside the const at
+ * the bottom) so the save functions above the operator-seam section can call
+ * it — `const OPERATOR_FACT_CATEGORIES` is not hoisted.
+ */
+export function normalizeOperatorCategory(value: unknown): string | null {
+  // References OPERATOR_FACT_CATEGORIES (declared lower in this file) at call
+  // time — single source of truth for the enum, no duplicated literal list.
+  return typeof value === 'string'
+    && (OPERATOR_FACT_CATEGORIES as readonly string[]).includes(value)
+    ? value
+    : null;
+}
+
 export function saveStructuredMemory(
   chatId: string,
   rawText: string,
@@ -988,11 +1006,14 @@ export function saveStructuredMemory(
   // never influence behavior until the operator confirms. The operator
   // Add-fact path (addOperatorFact) forward-stamps confirmed=1.
   confirmed = 0,
+  // D-06: optional operator category classified on ingest. Validated against
+  // the 3-value enum at the call site; unknown/invalid -> null (D-07).
+  category: string | null = null,
 ): number {
   const now = Math.floor(Date.now() / 1000);
   const result = db.prepare(
-    `INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, agent_id, confirmed, created_at, accessed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, agent_id, confirmed, category, created_at, accessed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     chatId,
     source,
@@ -1003,6 +1024,7 @@ export function saveStructuredMemory(
     importance,
     agentId,
     confirmed ? 1 : 0,
+    normalizeOperatorCategory(category),
     now,
     now,
   );
@@ -1149,9 +1171,14 @@ export function saveStructuredMemoryAtomic(
   embedding: number[],
   source = 'conversation',
   agentId = 'main',
+  // D-06: validated operator category from the ingest classifier; null when
+  // the model returned an unknown/absent value (D-07).
+  category: string | null = null,
 ): number {
   const txn = db.transaction(() => {
-    const memoryId = saveStructuredMemory(chatId, rawText, summary, entities, topics, importance, source, agentId);
+    const memoryId = saveStructuredMemory(
+      chatId, rawText, summary, entities, topics, importance, source, agentId, 0, category,
+    );
     if (embedding.length > 0) {
       saveMemoryEmbedding(memoryId, embedding);
     }
