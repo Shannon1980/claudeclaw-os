@@ -192,7 +192,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 06-02-PLAN.md — Data spine: v1.2.5 dual-write migration (category/confirmed/memory_tombstones) + deriveProvenance + confirmed behavior gate + operator-surface reader + tombstone/Add-fact helpers
+- [x] 06-02-PLAN.md — Data spine: v1.2.5 dual-write migration (category/confirmed/memory_tombstones) + deriveProvenance + confirmed behavior gate + operator-surface reader + tombstone/Add-fact helpers
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -243,7 +243,7 @@ Plans:
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
 | 4. Activity Feed | 4/4 | Complete    | 2026-06-25 |
 | 5. Audit Log | 4/4 | Complete    | 2026-06-26 |
-| 6. Memory Surface | 1/4 | In Progress|  |
+| 6. Memory Surface | 2/4 | In Progress|  |
 | 7. Power Surfaces | 0/? | Not started | - |
 | 8. Billing & Licensing | 0/? | Not started | - |
 

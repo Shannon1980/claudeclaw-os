@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
 status: executing
-last_updated: "2026-06-26T16:28:05.045Z"
+last_updated: "2026-06-26T16:38:56.694Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 24
-  completed_plans: 21
+  completed_plans: 22
   percent: 63
 ---
 
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 06 (memory-surface) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-06-26
 
@@ -67,6 +67,7 @@ Last activity: 2026-06-26
 | Phase 05 P03 | ~14min | 2 tasks | 5 files |
 | Phase 05 P04 | ~25min | 1 of 2 tasks (human-verify pending) | 7 files |
 | Phase 06 PP01 | 12min | 3 tasks tasks | 8 files files |
+| Phase 06 P06-02 | ~10min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,7 @@ Recent decisions affecting current work:
 - [Phase ?]: 05-02: insertAuditLog widened to a single options object; all positional call sites migrated (no half-migrated signature)
 - [Phase ?]: 05-02: audit retention storage in db.ts (default 90, append-only); audited setAuditRetention wrapper in permissions-config.ts mirrors setMode
 - [Phase 05]: 05-04: auth/routine/error events emit at their sources through the single audit() choke point; checkOAuthHealth exported + dependency-injected so the auth row has a REAL automated seam (not manual-only); auth event fires per determination, decoupled from the anti-spam sender; no auth event when neither credentials file nor env auth exists (Open Q3, no fake refresh events); error detail = first-line + 500-cap (no stack frames, T-05-10); turn model/session/_startMs threaded via GateContext per-turn (no module globals, T-05-11). Task 2 end-of-phase human-verify checkpoint AWAITING operator sign-off.
+- [Phase ?]: [Phase 06]: 06-02: v1.2.5 dual-write adds memories.category (D-06) + confirmed (D-04) + memory_tombstones (D-08); grandfather confirmed=1 in migration only, new inferred facts default 0; confirmed=1 gate on all three behavior readers; getMemoriesForOperatorSurface is a separate ungated reader; isTombstoned = sha256 hash floor + 0.88 cosine, consulted by ingest+consolidate
 
 ### Pending Todos
 
@@ -125,7 +127,7 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-26T16:27:30.717Z
+Last session: 2026-06-26T16:38:38.890Z
 Stopped at: Phase 6 UI-SPEC approved
 Resume file: None
 
