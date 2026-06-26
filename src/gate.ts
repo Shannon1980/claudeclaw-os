@@ -236,7 +236,15 @@ function recordDecision(
     tool: d.tool,
     target: safeTarget(d.tool, input),
     decision: d.outcome,
-    decidedBy: d.outcome.includes('inline') ? 'operator' : 'system',
+    // 'inline' → the operator answered live. A 'queued' decision is PENDING:
+    // the operator decides later in approval_queue, so leave decidedBy NULL here
+    // (resolved read-side by getAuditLogFiltered) rather than claiming the system
+    // decided it. Only a true auto-allow / auto path is 'system'.
+    decidedBy: d.outcome.includes('inline')
+      ? 'operator'
+      : d.outcome === 'queued'
+        ? undefined
+        : 'system',
     decidedAt: Date.now(),
     durationMs: ctx._startMs !== undefined ? Date.now() - ctx._startMs : undefined,
     sessionId: ctx.sessionId,

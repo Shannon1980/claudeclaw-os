@@ -231,6 +231,10 @@ describe('audit recorded', () => {
     const detail = JSON.parse(perm[0].detail);
     expect(detail).toMatchObject({ tool: 'mcp__gmail__send-email', tier: 3, mode: 'balanced' });
     expect(detail.outcome).toMatch(/queue|deny/);
+    // A queued decision is PENDING — the operator decides later in the queue.
+    // The gate must NOT claim the system decided it; decidedBy stays unset and
+    // is resolved read-side (getAuditLogFiltered) once the queue row is acted on.
+    expect(perm[0].decidedBy).toBeUndefined();
   });
 
   it('never writes secret/env material into the audit detail (D-10 / L-4)', async () => {

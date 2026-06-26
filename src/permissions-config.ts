@@ -9,8 +9,11 @@
  *                               'always' | 'ask'
  *
  * Default mode is 'balanced' on first run (D-11). Every mutation is recorded
- * as a `permission` audit config event. Audit detail carries ONLY the config
- * change (event + value) — never env/secrets (L-4 / ASVS V8).
+ * as an audit event with eventType 'config' (action stays 'permission' — the
+ * AuditAction union has no 'config' member; the type chip is driven by
+ * event_type) so config changes surface under the honest "config" chip rather
+ * than masquerading as permission decisions. Audit detail carries ONLY the
+ * config change (event + value) — never env/secrets (L-4 / ASVS V8).
  */
 
 import {
@@ -49,6 +52,7 @@ export function setMode(mode: Mode, agentId = 'main'): void {
     agentId,
     chatId: '',
     action: 'permission',
+    eventType: 'config',
     detail: JSON.stringify({ event: 'mode_change', mode }),
     blocked: false,
   });
@@ -81,6 +85,7 @@ export function setOverride(capability: string, value: OverrideValue, agentId = 
     agentId,
     chatId: '',
     action: 'permission',
+    eventType: 'config',
     detail: JSON.stringify({ event: 'override_change', capability, value }),
     blocked: false,
   });
@@ -110,6 +115,7 @@ export function setAuditRetention(days: number, agentId = 'main'): void {
     agentId,
     chatId: '',
     action: 'permission',
+    eventType: 'config',
     detail: JSON.stringify({ event: 'retention_change', days }),
     blocked: false,
   });
