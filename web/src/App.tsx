@@ -8,6 +8,7 @@ import { Placeholder } from '@/pages/Placeholder';
 import { Home } from '@/pages/Home';
 import { Projects } from '@/pages/Projects';
 import { Memories } from '@/pages/Memories';
+import { Memory } from '@/pages/Memory';
 import { HiveMind } from '@/pages/HiveMind';
 import { Team } from '@/pages/Team';
 import { Routines } from '@/pages/Routines';
@@ -54,6 +55,7 @@ export function App() {
           <Route path="/agents"><Team /></Route>
           <Route path="/agents/:id/files"><AgentFiles /></Route>
           <Route path="/chat"><Chat /></Route>
+          <Route path="/memory"><Memory /></Route>
           <Route path="/memories"><Memories /></Route>
           <Route path="/hive"><HiveMind /></Route>
           <Route path="/usage"><Usage /></Route>
@@ -66,7 +68,8 @@ export function App() {
           {/* Common alt slugs that used to point at placeholder pages */}
           <Route path="/hive-mind"><Redirect to="/hive" /></Route>
           <Route path="/hivemind"><Redirect to="/hive" /></Route>
-          <Route path="/memory"><Redirect to="/memories" /></Route>
+          {/* /memory is now the operator Memory surface (above), not a redirect.
+              The developer Brain Graph view lives at /memories (D-02). */}
           <Route path="/scheduled"><Redirect to="/routines" /></Route>
 
           <Route path="/"><Redirect to={DEFAULT_ROUTE} /></Route>
