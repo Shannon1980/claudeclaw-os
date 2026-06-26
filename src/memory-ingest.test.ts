@@ -29,6 +29,9 @@ vi.mock('./env.js', () => ({
 vi.mock('./db.js', () => ({
   saveStructuredMemoryAtomic: vi.fn(() => 1),
   getMemoriesWithEmbeddings: vi.fn(() => []),
+  // Phase 6 tombstone suppression helpers (D-08) — do not exist in db.ts yet.
+  isTombstoned: vi.fn(() => false),
+  writeTombstone: vi.fn(),
 }));
 
 vi.mock('./embeddings.js', () => ({
@@ -42,11 +45,12 @@ vi.mock('./logger.js', () => ({
 
 import { ingestConversationTurn } from './memory-ingest.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
-import { saveStructuredMemoryAtomic } from './db.js';
+import { saveStructuredMemoryAtomic, isTombstoned } from './db.js';
 
 const mockGenerateContent = vi.mocked(generateContent);
 const mockParseJson = vi.mocked(parseJsonResponse);
 const mockSave = vi.mocked(saveStructuredMemoryAtomic);
+const mockIsTombstoned = vi.mocked(isTombstoned);
 
 describe('ingestConversationTurn', () => {
   beforeEach(() => {
@@ -325,5 +329,57 @@ describe('ingestConversationTurn', () => {
     // The prompt should contain the truncated message, not the full 5000 chars
     expect(promptArg).not.toContain('x'.repeat(3000));
     expect(promptArg).toContain('x'.repeat(2000));
+  });
+
+  // ── Tombstone suppression (Wave 0 RED — D-08, crit 3) ─────────────────
+  //
+  // A deleted fact writes a tombstone (sha256 of the normalized summary, plus
+  // optional embedding). When the SAME turn is re-fed through ingestion, the
+  // tombstone check must fire BEFORE save and skip it: no new memory row is
+  // created. RED today: ingestConversationTurn does not consult isTombstoned,
+  // so a re-fed deleted fact would be saved again. Plan 02 slots the check in
+  // at the existing dedupe point.
+
+  it('does not create a new memory row when the extracted fact is tombstoned (D-08)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User prefers dark mode in all applications',
+      entities: ['dark mode'],
+      topics: ['preferences'],
+      importance: 0.8,
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+    // This summary was deleted earlier -> its hash is tombstoned.
+    mockIsTombstoned.mockReturnValue(true);
+
+    const result = await ingestConversationTurn(
+      'chat1',
+      'I always want dark mode enabled in everything',
+      'Got it.',
+    );
+
+    // The tombstone check must have run...
+    expect(mockIsTombstoned).toHaveBeenCalled();
+    // ...and suppressed the save: no new row.
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(result).toBe(false);
+  });
+
+  it('still saves when the fact is NOT tombstoned (suppression is targeted, not blanket)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User wants weekly invoice reminders',
+      entities: [],
+      topics: ['invoices'],
+      importance: 0.7,
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+    mockIsTombstoned.mockReturnValue(false);
+
+    const result = await ingestConversationTurn('chat1', 'remind me about invoices weekly please', 'ok');
+    expect(result).toBe(true);
+    expect(mockSave).toHaveBeenCalled();
   });
 });
