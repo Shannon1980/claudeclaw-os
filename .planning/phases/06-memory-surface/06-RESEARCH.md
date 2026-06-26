@@ -328,18 +328,18 @@ app.delete('/api/memory/:id', (c) => {
 | A3 | Existing `'checkpoint'`-source rows should map to "You told me" (operator-authored by nature). | Provenance (D-03) | If checkpoints are considered machine summaries, they'd mis-tag. Low volume. [ASSUMED] |
 | A4 | Folding `category` into the existing extraction prompt (one call) does not degrade extraction quality vs a separate classify call. | Category (D-06) | Could slightly affect importance/skip decisions. Verify with a test sample in planning. [ASSUMED] |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Existing-row `confirmed` backfill.** New ingests default `confirmed=0`. What about the rows already in the DB?
    - What we know: there are existing `'conversation'` (machine-inferred) and `'checkpoint'` (operator) rows.
    - What's unclear: whether to retroactively mark existing inferred facts unconfirmed (forces the operator to review a backlog) or grandfather them as confirmed.
-   - Recommendation: grandfather existing rows as `confirmed=1` (default the migration's existing-row value to 1, new inserts to 0) so the gate doesn't silently strip the operator's whole memory the moment the migration runs. Surface only NEW inferred facts as "needs review." Confirm with operator in planning.
+   - **RESOLVED:** Grandfather existing rows as `confirmed=1` (migration defaults existing-row value to 1, new inserts to 0) so the gate does not silently strip the operator's whole memory the moment the migration runs; surface only NEW inferred facts as "needs review." Encoded in **Plan 01 (06-01) Task 1** (the dual-write migration UPDATEs existing rows to `confirmed=1`).
 
 2. **`/memory` route collision.** `App.tsx:69` currently redirects `/memory` → `/memories`. This phase wants `/memory` for the new operator surface.
-   - Recommendation: remove that redirect and give `/memory` to the operator page; keep `/memories` as the (now Labs) developer route. Verify no other links hardcode `/memory`.
+   - **RESOLVED:** Remove the redirect and give `/memory` to the new operator page; keep `/memories` as the (now Labs) developer route. Encoded in **Plan 02 (06-02) Task 2** (App.tsx redirect at :69 removed/repointed; new `/memory` Route added).
 
 3. **Where Labs lives.** D-02 says "hidden Labs area" but there is no Labs section in `routes.ts` today (Audit was demoted into Settings>Security, not a Labs area).
-   - Recommendation: either add a `labs` section or follow the Audit precedent (route stays in `App.tsx`, pulled from visible nav, reachable via command palette/deep link). Decide in planning; the simpler Audit-style demotion is lower-risk.
+   - **RESOLVED:** Follow the Audit D-13 precedent (the simpler, lower-risk option): the `/memories` `<Route>` stays in `App.tsx` for deep-link/command-palette reach but its `RouteDef` is pulled from the visible `routes.ts` nav list; no new `labs` section is added. Encoded in **Plan 02 (06-02) Task 2**.
 
 ## Environment Availability
 
