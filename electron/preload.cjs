@@ -29,8 +29,10 @@ contextBridge.exposeInMainWorld('claudeclaw', {
     installCli: () => ipcRenderer.invoke('onb:installCli'),
     // { loggedIn }
     checkLogin: () => ipcRenderer.invoke('onb:checkLogin'),
-    // drives `claude setup-token` (opens its own browser, captures a 1-year
-    // CLAUDE_CODE_OAUTH_TOKEN) → { ok, error }
+    // Accepts an existing login (macOS Keychain or a credential in .env); if
+    // none, drives `claude setup-token` under a PTY (opens its own browser,
+    // captures a 1-year CLAUDE_CODE_OAUTH_TOKEN), then re-probes →
+    // { ok, error, alreadySignedIn? }
     claudeLogin: () => ipcRenderer.invoke('onb:claudeLogin'),
     // mode: 'oauth' clears any stored key; 'apikey' stores it; both via the
     // tested never-coexist precedence helper → { ok, error }

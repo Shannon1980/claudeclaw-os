@@ -180,11 +180,13 @@ function nativeInstallCommand() {
   };
 }
 
-// Is auth complete? Success is a captured CLAUDE_CODE_OAUTH_TOKEN present in the
-// data-dir .env (the spawn+capture path resolved by A1), OR an ANTHROPIC_API_KEY
-// for the API-key path — NOT a readdir of ~/.claude (the old heuristic is wrong
-// on macOS, where creds live in the encrypted Keychain). Reads only the
-// app-managed .env so detection agrees with what the wizard actually wrote.
+// Cheap, synchronous "is a credential written to the managed .env?" hint. This
+// is NOT the authoritative gate: the real check is the live auth probe in
+// main.cjs (onb:verifyAuth → probeExistingAuth), which also recognizes a macOS
+// Keychain login (from a prior `claude login`) where no token lives in .env.
+// Reads only the app-managed .env so it agrees with what the wizard wrote; it
+// returns false for a Keychain-only login, so callers must treat false as
+// "unknown — probe to confirm", not "definitely signed out".
 function checkLogin(envPath) {
   const e = parseEnvFile(envPath || resolveEnvPath());
   return Boolean(e.CLAUDE_CODE_OAUTH_TOKEN || e.ANTHROPIC_API_KEY);
