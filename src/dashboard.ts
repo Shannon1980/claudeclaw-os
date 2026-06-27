@@ -58,6 +58,7 @@ import {
   setAgentPaused,
   setMissionTaskBlocked,
   unblockMissionTask,
+  requeueMissionTask,
   getUpcomingScheduledTasks,
   getAuditLogCount,
   getAuditLogFiltered,
@@ -1999,6 +2000,17 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const id = c.req.param('id');
     const ok = unblockMissionTask(id);
     if (!ok) return c.json({ error: 'Task not blocked' }, 409);
+    return c.json({ ok, task: getMissionTask(id) });
+  });
+
+  // Re-run a settled task (completed/failed/blocked/cancelled) — clears the
+  // prior outcome and returns it to the queue. Powers the Home "Re-run" action,
+  // e.g. retrying a task that only "shipped" because a tool was gated, after the
+  // operator grants access.
+  app.post('/api/mission/tasks/:id/requeue', (c) => {
+    const id = c.req.param('id');
+    const ok = requeueMissionTask(id);
+    if (!ok) return c.json({ error: 'Task not found or not re-runnable' }, 409);
     return c.json({ ok, task: getMissionTask(id) });
   });
 

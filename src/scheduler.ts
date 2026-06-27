@@ -13,6 +13,7 @@ import {
   resetStuckTasks,
   claimNextMissionTask,
   completeMissionTask,
+  setMissionTaskBlocked,
   resetStuckMissionTasks,
   getMissionTask,
   isAgentPaused,
@@ -22,6 +23,7 @@ import {
   type ScheduledTask,
 } from './db.js';
 import { runRoutineOnce } from './routine-runner.js';
+import { countPendingByRun } from './approval-queue.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
@@ -501,13 +503,21 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
         }
       } else {
         const rawText = result.text?.trim() || 'Task completed with no output.';
-        // A run can finish without throwing yet still be a dead end — the agent
-        // hit a missing path, a permission wall, or a decision only the operator
-        // can make. It says so with a [BLOCKED:…] marker. Route those to
-        // "Needs you" (status needs_you) instead of letting them parade under
-        // "Shipped" as if delivered. See extractBlockedMarker / getHomeSummary.
+        // A run can finish without throwing yet still not have shipped anything.
+        // Two distinct dead ends, both "needs the operator":
+        //   1. A Tier 3/4 gate enqueued an approval and denied the tool inline,
+        //      so the run ends with a please-approve message. Detect via the
+        //      pending approvals this run left (run_id === mission.id) and park
+        //      it as waiting — once approved, the operator re-runs it.
+        //   2. The agent hit a missing path / decision only the operator can
+        //      make and said so with a [BLOCKED:…] marker → route to needs_you.
+        // Either way it must not parade under "Shipped" as if delivered.
         const { blocked, reason, text } = extractBlockedMarker(rawText);
-        if (blocked) {
+        const pendingGates = countPendingByRun(mission.id);
+        if (pendingGates > 0) {
+          setMissionTaskBlocked(mission.id, 'you (tool approval)');
+          logger.info({ missionId: mission.id, pendingGates }, 'Mission task parked — waiting on operator approval');
+        } else if (blocked) {
           completeMissionTask(mission.id, text, 'needs_you', reason || 'Needs your input to continue');
           logger.info({ missionId: mission.id, delegateAgentId, reason }, 'Mission task blocked back to operator');
         } else {

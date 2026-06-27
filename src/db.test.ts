@@ -36,6 +36,9 @@ import {
   completeMissionTask,
   getHomeSummary,
   deleteMissionTask,
+  setMissionTaskBlocked,
+  requeueMissionTask,
+  getMissionTask,
   getTeamRoster,
   getPausedAgents,
   isAgentPaused,
@@ -660,6 +663,58 @@ describe('database', () => {
       completeMissionTask('nb-3', 'blocked', 'needs_you', 'why');
       expect(deleteMissionTask('nb-3')).toBe(true);
       expect(getHomeSummary().needsYou.some((t) => t.id === 'nb-3')).toBe(false);
+    });
+  });
+
+  // ── Home daily-loop classification + re-run ─────────────────────────
+  describe('mission task lifecycle (Home loop)', () => {
+    it('getHomeSummary buckets by status: only completed lands in shipped', () => {
+      createMissionTask('m-done', 'Send the brief', 'p', 'comms');
+      createMissionTask('m-fail', 'Pull the inbox', 'p', 'comms');
+      createMissionTask('m-block', 'Chase invoice', 'p', 'comms');
+      claimNextMissionTask('comms'); // m-done -> running (oldest first)
+      completeMissionTask('m-done', 'shipped it', 'completed');
+      claimNextMissionTask('comms'); // m-fail -> running
+      completeMissionTask('m-fail', null, 'failed', 'boom');
+      setMissionTaskBlocked('m-block', 'you (tool approval)');
+
+      const s = getHomeSummary();
+      expect(s.shipped.map((t) => t.id)).toEqual(['m-done']);
+      expect(s.needsYou.map((t) => t.id)).toContain('m-fail'); // failures need a look
+      expect(s.waiting.map((t) => t.id)).toEqual(['m-block']); // not shipped
+    });
+
+    it('requeueMissionTask returns a completed task to the queue, clearing the prior outcome', () => {
+      createMissionTask('m-redo', 'Pull the inbox', 'p', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-redo', 'asked for Gmail permission', 'completed');
+
+      expect(requeueMissionTask('m-redo')).toBe(true);
+      const t = getMissionTask('m-redo');
+      expect(t?.status).toBe('queued');
+      expect(t?.result).toBeNull();
+      expect(t?.completed_at).toBeNull();
+      expect(t?.assigned_agent).toBe('comms'); // re-runs on the same teammate
+      // It now reads as active work again, not shipped.
+      const s = getHomeSummary();
+      expect(s.shipped.map((t2) => t2.id)).not.toContain('m-redo');
+      expect(s.onPlate.map((t2) => t2.id)).toContain('m-redo');
+    });
+
+    it('requeueMissionTask revives a blocked or failed task, and is a no-op for in-flight runs', () => {
+      createMissionTask('m-blocked', 'Chase invoice', 'p', 'comms');
+      setMissionTaskBlocked('m-blocked', 'you (tool approval)');
+      expect(requeueMissionTask('m-blocked')).toBe(true);
+      const revived = getMissionTask('m-blocked');
+      expect(revived?.status).toBe('queued');
+      expect(revived?.blocked_on).toBeNull();
+
+      createMissionTask('m-running', 'Draft reply', 'p', 'comms');
+      claimNextMissionTask('comms'); // m-blocked (queued) is older; claim picks it first
+      // Whichever is running, requeue must refuse a running task.
+      const running = getHomeSummary().onPlate.find((t) => t.status === 'running');
+      expect(running).toBeTruthy();
+      expect(requeueMissionTask(running!.id)).toBe(false);
     });
   });
 

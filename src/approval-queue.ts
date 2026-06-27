@@ -141,6 +141,22 @@ function hydrate(row: RawApprovalRow): ApprovalRow {
   return { ...row, tool_input: parseToolInput(row.tool_input) };
 }
 
+/**
+ * How many approvals a given run enqueued that are still pending. An unattended
+ * run (scheduler / mission / routine step) that trips a Tier 3/4 gate leaves
+ * `pending` rows tagged with its run_id and the tool is denied inline, so the
+ * run finishes "cleanly" without having done the gated work. The scheduler uses
+ * this to tell "actually shipped" from "stopped at a gate, waiting on the
+ * operator." Counts only `pending` — once approved or denied, the run is no
+ * longer waiting on anyone.
+ */
+export function countPendingByRun(runId: string): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM approval_queue WHERE run_id = ? AND status = 'pending'`)
+    .get(runId) as { n: number };
+  return row.n;
+}
+
 /** All pending rows, most recent first. */
 export function listPending(): ApprovalRow[] {
   const rows = getDb()

@@ -7,7 +7,7 @@
 import { useState } from 'preact/hooks';
 import {
   Inbox, Hourglass, CheckCircle2, X, Wand2, Sparkles, Trash2, ArrowRight,
-  Clock, Undo2, PauseCircle,
+  Clock, Undo2, PauseCircle, RotateCcw,
 } from 'lucide-preact';
 import { Pill, StatusDot } from '@/components/Pill';
 import { AgentAvatar } from '@/components/AgentAvatar';
@@ -153,6 +153,17 @@ function NeedsItem({ task, agents, agentById, onChange }: {
     finally { setBusy(null); }
   }
 
+  async function rerun() {
+    setBusy('rerun');
+    try {
+      await apiPost(`/api/mission/tasks/${task.id}/requeue`);
+      onChange();
+      pushToast({ tone: 'success', title: 'Re-running', description: 'Back in the queue.' });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Could not re-run', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setBusy(null); }
+  }
+
   return (
     <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5">
       <div class="flex items-center gap-1.5 mb-1">
@@ -209,6 +220,17 @@ function NeedsItem({ task, agents, agentById, onChange }: {
             </select>
           </>
         )}
+        {isFailed && (
+          <button
+            type="button"
+            onClick={rerun}
+            disabled={busy !== null}
+            class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-40"
+            title="Re-run this task"
+          >
+            <RotateCcw size={11} /> {busy === 'rerun' ? '…' : 'Re-run'}
+          </button>
+        )}
         {settled && <div class="flex-1" />}
         <button
           type="button"
@@ -248,7 +270,7 @@ export function LoopZones({ onPlate, waiting, shipped, agentById, onChange }: {
       </Zone>
       <Zone title="Shipped this week" hint="Done in the last 7 days." icon={CheckCircle2} count={shipped.length} empty="Nothing shipped yet this week.">
         {shipped.map((t) => (
-          <ShippedItem key={t.id} task={t} agent={t.assigned_agent ? agentById.get(t.assigned_agent) : undefined} />
+          <ShippedItem key={t.id} task={t} agent={t.assigned_agent ? agentById.get(t.assigned_agent) : undefined} onChange={onChange} />
         ))}
       </Zone>
     </div>
@@ -398,8 +420,22 @@ function WaitingItem({ task, agent, onChange }: { task: MissionTask; agent?: Age
   );
 }
 
-function ShippedItem({ task, agent }: { task: MissionTask; agent?: Agent }) {
+function ShippedItem({ task, agent, onChange }: { task: MissionTask; agent?: Agent; onChange: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function rerun(e: MouseEvent) {
+    e.stopPropagation(); // don't toggle the card's expand on a Re-run click
+    setBusy(true);
+    try {
+      await apiPost(`/api/mission/tasks/${task.id}/requeue`);
+      onChange();
+      pushToast({ tone: 'success', title: 'Re-running', description: 'Back in the queue.' });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Could not re-run', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setBusy(false); }
+  }
+
   return (
     <div
       onClick={() => setExpanded((v) => !v)}
@@ -413,7 +449,18 @@ function ShippedItem({ task, agent }: { task: MissionTask; agent?: Agent }) {
         </span>
       </div>
       <div class={'text-[12.5px] text-[var(--color-text)] leading-snug mb-1.5 ' + (expanded ? '' : 'line-clamp-2')}>{task.title}</div>
-      <TeammatePill agent={agent} fallback={task.assigned_agent} />
+      <div class="flex items-center gap-1.5">
+        <TeammatePill agent={agent} fallback={task.assigned_agent} />
+        <button
+          type="button"
+          onClick={rerun}
+          disabled={busy}
+          class="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-40"
+          title="Re-run this task"
+        >
+          <RotateCcw size={11} /> {busy ? '…' : 'Re-run'}
+        </button>
+      </div>
       {expanded && task.result && (
         <div class="mt-2 text-[11px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed border-t border-[var(--color-border)] pt-2">
           {task.result}
