@@ -324,6 +324,50 @@ describe('routines API contract', () => {
     });
     expect(res.status).toBe(409);
   });
+
+  it('POST /api/routines persists project_id and GET reflects it (06-routines: scope to Projects)', async () => {
+    const { project } = await createProject({ name: 'Acme', type: 'client' });
+    const create = await app.request('/api/routines' + Q, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Morning brief',
+        schedule: '0 8 * * 1-5',
+        project_id: project.id,
+        steps: [{ action: 'send me a brief', agent_id: 'main', on_error: 'continue' }],
+      }),
+    });
+    expect(create.status).toBe(201);
+    const { routine } = await jsonOf(create);
+    expect(routine.project_id).toBe(project.id);
+
+    // Round-trips through the list endpoint too.
+    const list = await jsonOf(await get('/api/routines'));
+    expect(list.routines.find((r: any) => r.id === routine.id)?.project_id).toBe(project.id);
+
+    // Detach via PUT (project_id: null) and re-read.
+    const put = await app.request(`/api/routines/${routine.id}` + Q, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project_id: null }),
+    });
+    expect(put.status).toBe(200);
+    expect((await jsonOf(put)).routine.project_id).toBeNull();
+  });
+
+  it('POST /api/routines rejects an unknown project_id with 400', async () => {
+    const res = await app.request('/api/routines' + Q, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Bad scope',
+        schedule: '0 8 * * 1-5',
+        project_id: 'does-not-exist',
+        steps: [{ action: 'do a thing', agent_id: 'main', on_error: 'continue' }],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('GET /api/mission/tasks', () => {

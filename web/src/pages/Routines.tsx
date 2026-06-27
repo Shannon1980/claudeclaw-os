@@ -6,6 +6,7 @@ import { ConfirmModal } from '@/components/ConfirmModal';
 import { RoutineRow } from '@/components/RoutineRow';
 import { RoutineBuilderPanel } from '@/components/RoutineBuilderPanel';
 import type { TeammateOption } from '@/components/StepRow';
+import type { ProjectLite } from '@/components/ProjectTaskAttach';
 import { useFetch } from '@/lib/useFetch';
 import { apiPost, apiPut, apiDelete } from '@/lib/api';
 import { term } from '@/lib/vocabulary';
@@ -32,7 +33,9 @@ interface Agent {
 export function Routines() {
   const { data, loading, error, refresh } = useFetch<{ routines: Routine[] }>('/api/routines', 30_000);
   const agentsFetch = useFetch<{ agents: Agent[] }>('/api/agents', 30_000);
-  const routines = data?.routines ?? [];
+  const projectsFetch = useFetch<{ projects: ProjectLite[] }>('/api/projects', 30_000);
+  const projects: ProjectLite[] = projectsFetch.data?.projects ?? [];
+  const allRoutines = data?.routines ?? [];
 
   // Teammate options for step tags / pickers. "Main" is always available; the
   // rest come from the roster so we can show names + paused state on steps.
@@ -45,6 +48,14 @@ export function Routines() {
   const [builderOpen, setBuilderOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Routine | null>(null);
+  // Project filter: '' = all, 'none' = unscoped only, else a project id.
+  const [projectFilter, setProjectFilter] = useState<string>('');
+
+  const routines = allRoutines.filter((r) => {
+    if (projectFilter === '') return true;
+    if (projectFilter === 'none') return !r.project_id;
+    return r.project_id === projectFilter;
+  });
 
   const onCount = routines.filter((r) => r.status !== 'paused').length;
   const offCount = routines.length - onCount;
@@ -107,6 +118,19 @@ export function Routines() {
     }
   }
 
+  async function saveProject(routine: Routine, projectId: string | null) {
+    setBusyId(routine.id);
+    try {
+      await apiPut(`/api/routines/${routine.id}`, { project_id: projectId });
+      pushToast({ tone: 'success', title: projectId ? 'Added to project' : 'Removed from project' });
+      refresh();
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Could not update project', description: err?.message || String(err), durationMs: 6000 });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function performDelete() {
     if (!pendingDelete) return;
     const id = pendingDelete.id;
@@ -133,6 +157,20 @@ export function Routines() {
             <span class="text-[11.5px] text-[var(--color-text-muted)] tabular-nums">
               {onCount} on, {offCount} off
             </span>
+            {(projectFilter !== '' || projects.some((p) => p.status === 'active')) && (
+              <select
+                value={projectFilter}
+                onChange={(e) => setProjectFilter((e.target as HTMLSelectElement).value)}
+                title="Filter by project"
+                class="bg-[var(--color-card)] border border-[var(--color-border)] rounded text-[11.5px] text-[var(--color-text-muted)] px-2 py-1 outline-none focus:border-[var(--color-accent)]"
+              >
+                <option value="">All projects</option>
+                <option value="none">No project</option>
+                {projects.filter((p) => p.status === 'active').map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            )}
             <button
               type="button"
               onClick={() => setBuilderOpen((v) => !v)}
@@ -159,6 +197,7 @@ export function Routines() {
           {builderOpen && (
             <RoutineBuilderPanel
               teammates={teammates}
+              projects={projects}
               onClose={() => setBuilderOpen(false)}
               onSaved={() => { setBuilderOpen(false); refresh(); }}
             />
@@ -168,6 +207,7 @@ export function Routines() {
               key={r.id}
               routine={r}
               teammates={teammates}
+              projects={projects}
               expanded={expandedId === r.id}
               busy={busyId === r.id}
               onToggleExpand={() => setExpandedId((cur) => (cur === r.id ? null : r.id))}
@@ -177,6 +217,7 @@ export function Routines() {
               onDeleteRequest={() => setPendingDelete(r)}
               onSaveSchedule={(cron) => saveSchedule(r, cron)}
               onSaveSteps={(steps) => saveSteps(r, steps)}
+              onSaveProject={(projectId) => saveProject(r, projectId)}
             />
           ))}
         </div>

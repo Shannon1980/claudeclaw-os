@@ -4,8 +4,10 @@ import { Pill } from '@/components/Pill';
 import { ScheduleBuilder } from '@/components/ScheduleBuilder';
 import { StepList } from '@/components/StepList';
 import { AutonomySelector } from '@/components/AutonomySelector';
+import { ProjectSelect } from '@/components/ProjectSelect';
 import { ConfirmModal } from '@/components/ConfirmModal';
 import type { TeammateOption } from '@/components/StepRow';
+import type { ProjectLite } from '@/components/ProjectTaskAttach';
 import { apiPost } from '@/lib/api';
 import { describeCron } from '@/lib/cron';
 import { pushToast } from '@/lib/toasts';
@@ -29,11 +31,12 @@ import type { RoutineAutonomy, RoutineDraft, DraftStep } from '@/lib/routine';
 
 interface Props {
   teammates: TeammateOption[];
+  projects: ProjectLite[];
   onClose: () => void;
   onSaved: () => void;
 }
 
-export function RoutineBuilderPanel({ teammates, onClose, onSaved }: Props) {
+export function RoutineBuilderPanel({ teammates, projects, onClose, onSaved }: Props) {
   const [description, setDescription] = useState('');
   const [drafting, setDrafting] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -43,6 +46,7 @@ export function RoutineBuilderPanel({ teammates, onClose, onSaved }: Props) {
   const [cron, setCron] = useState<string | null>(null);
   const [steps, setSteps] = useState<DraftStep[]>([]);
   const [autonomy, setAutonomy] = useState<RoutineAutonomy>('unattended');
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -80,6 +84,7 @@ export function RoutineBuilderPanel({ teammates, onClose, onSaved }: Props) {
         name: name.trim(),
         schedule: cron,
         autonomy, // machine value: 'unattended' | 'queue_approval'
+        project_id: projectId, // null = unscoped
         steps,
       });
       pushToast({ tone: 'success', title: 'Routine saved' });
@@ -175,6 +180,20 @@ export function RoutineBuilderPanel({ teammates, onClose, onSaved }: Props) {
 
           {/* D-07: autonomy choice, visible above Save */}
           <AutonomySelector value={autonomy} onChange={(next) => { setAutonomy(next); setDirty(true); }} />
+
+          {projects.some((p) => p.status === 'active') && (
+            <section>
+              <div class="section-label mb-1.5">Project</div>
+              <ProjectSelect
+                projects={projects}
+                value={projectId}
+                onChange={(next) => { setProjectId(next); setDirty(true); }}
+              />
+              <div class="mt-1.5 text-[11px] text-[var(--color-text-muted)] leading-snug">
+                Scope this routine to a project so it shows up in that project's view. Leave unset to keep it general.
+              </div>
+            </section>
+          )}
 
           <div class="flex items-center gap-2 pt-1">
             <button

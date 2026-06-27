@@ -1,4 +1,4 @@
-import { Clock, ChevronDown, ChevronRight, Repeat, Trash2 } from 'lucide-preact';
+import { Clock, ChevronDown, ChevronRight, FolderClosed, Repeat, Trash2 } from 'lucide-preact';
 import { Toggle } from '@/components/Toggle';
 import { RunOutcomeBadge } from '@/components/RunOutcomeBadge';
 import { RoutineDetail } from '@/components/RoutineDetail';
@@ -6,6 +6,7 @@ import { describeCron } from '@/lib/cron';
 import { formatRelativeTime } from '@/lib/format';
 import type { Routine, DraftStep } from '@/lib/routine';
 import type { TeammateOption } from '@/components/StepRow';
+import type { ProjectLite } from '@/components/ProjectTaskAttach';
 
 // One routine in the list (UI-SPEC §1). Models the Scheduled.tsx card, restyled
 // to the routine anatomy:
@@ -29,6 +30,7 @@ function formatCountdown(unixSeconds: number): string {
 interface Props {
   routine: Routine;
   teammates: TeammateOption[];
+  projects: ProjectLite[];
   expanded: boolean;
   busy: boolean;
   onToggleExpand: () => void;
@@ -38,16 +40,20 @@ interface Props {
   onDeleteRequest: () => void;
   onSaveSchedule: (cron: string) => void;
   onSaveSteps: (steps: DraftStep[]) => void;
+  onSaveProject: (projectId: string | null) => void;
 }
 
 export function RoutineRow({
-  routine, teammates, expanded, busy,
+  routine, teammates, projects, expanded, busy,
   onToggleExpand, onToggleOnOff, onRunNow, onTurnOff,
-  onDeleteRequest, onSaveSchedule, onSaveSteps,
+  onDeleteRequest, onSaveSchedule, onSaveSteps, onSaveProject,
 }: Props) {
   const on = routine.status !== 'paused';
   const stepCount = routine.steps.length;
   const schedule = describeCron(routine.schedule).text;
+  const projectName = routine.project_id
+    ? projects.find((p) => p.id === routine.project_id)?.name ?? null
+    : null;
 
   return (
     <div class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden">
@@ -80,6 +86,11 @@ export function RoutineRow({
             {on && (
               <span class="text-[var(--color-accent)] tabular-nums">{formatCountdown(routine.next_run)}</span>
             )}
+            {projectName && (
+              <span class="inline-flex items-center gap-1">
+                <FolderClosed size={10} /> {projectName}
+              </span>
+            )}
             <RunOutcomeBadge outcome={routine.last_outcome} />
           </div>
         </div>
@@ -107,11 +118,13 @@ export function RoutineRow({
         <RoutineDetail
           routine={routine}
           teammates={teammates}
+          projects={projects}
           busy={busy}
           onRunNow={onRunNow}
           onTurnOff={onTurnOff}
           onSaveSchedule={onSaveSchedule}
           onSaveSteps={onSaveSteps}
+          onSaveProject={onSaveProject}
         />
       )}
     </div>

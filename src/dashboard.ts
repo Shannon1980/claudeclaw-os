@@ -1723,10 +1723,21 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     last_status: t.last_status,
     status: t.status,
     autonomy: t.autonomy,
+    project_id: t.project_id,
     created_at: t.created_at,
     steps: getRoutineSteps(t.id),
     last_outcome: getLastRoutineOutcome(t.id),
   });
+
+  // Validate an incoming project_id field. Returns { project_id } on success
+  // (null when unscoped / detaching) or { error } when the id names no project.
+  // Accepts null/'' as "no project" so the operator can clear the scope.
+  const resolveProjectId = (raw: unknown): { project_id: string | null } | { error: string } => {
+    if (raw === undefined || raw === null || raw === '') return { project_id: null };
+    if (typeof raw !== 'string') return { error: 'project_id must be a string or null' };
+    if (!getProject(raw)) return { error: 'Unknown project: ' + raw };
+    return { project_id: raw };
+  };
 
   const listRoutines = () => getAllScheduledTasks().filter((t) => t.source === 'routine');
 
@@ -1794,6 +1805,7 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       name?: unknown;
       schedule?: unknown;
       autonomy?: unknown;
+      project_id?: unknown;
       steps?: unknown;
     };
     const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -1813,11 +1825,14 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       return c.json({ ok: false, error: "autonomy must be 'unattended' or 'queue_approval'" }, 400);
     }
 
+    const proj = resolveProjectId(body.project_id);
+    if ('error' in proj) return c.json({ ok: false, error: proj.error }, 400);
+
     const built = buildRoutineSteps(body.steps);
     if ('error' in built) return c.json({ ok: false, error: built.error }, 400);
 
     const id = crypto.randomUUID();
-    createScheduledTask(id, name, schedule, nextRun, 'main', 'routine', autonomy);
+    createScheduledTask(id, name, schedule, nextRun, 'main', 'routine', autonomy, proj.project_id);
     saveRoutineSteps(id, built.steps);
     const created = listRoutines().find((t) => t.id === id);
     return c.json({ ok: true, routine: created ? enrichRoutine(created) : null }, 201);
@@ -1834,10 +1849,11 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       name?: unknown;
       schedule?: unknown;
       autonomy?: unknown;
+      project_id?: unknown;
       steps?: unknown;
     };
 
-    const patch: { prompt?: string; schedule?: string; nextRun?: number } = {};
+    const patch: { prompt?: string; schedule?: string; nextRun?: number; projectId?: string | null } = {};
     if (typeof body.name === 'string') {
       const trimmed = body.name.trim();
       if (!trimmed) return c.json({ ok: false, error: 'name cannot be empty' }, 400);
@@ -1854,6 +1870,13 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     }
     if (typeof body.autonomy === 'string' && !ROUTINE_AUTONOMY.has(body.autonomy)) {
       return c.json({ ok: false, error: "autonomy must be 'unattended' or 'queue_approval'" }, 400);
+    }
+    // project_id: only touched when the key is present, so a steps-only or
+    // schedule-only edit never clears the scope. Sending null detaches.
+    if ('project_id' in body) {
+      const proj = resolveProjectId(body.project_id);
+      if ('error' in proj) return c.json({ ok: false, error: proj.error }, 400);
+      patch.projectId = proj.project_id;
     }
 
     if (Object.keys(patch).length > 0) updateScheduledTask(id, patch);
