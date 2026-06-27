@@ -132,3 +132,6 @@ agents/*/.claude/claudex/
 # memsearch index cache — per-machine memory index (pid + indexed files).
 # Regenerated on demand; never belongs in the shared repo.
 .memsearch/
+
+# Electron icon build intermediate (generated from build/icon.svg)
+build/icon.iconset/
