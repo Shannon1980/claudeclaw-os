@@ -38,6 +38,9 @@ import {
   deleteMissionTask,
   setMissionTaskBlocked,
   requeueMissionTask,
+  addTaskMessage,
+  getTaskMessages,
+  buildTaskRunPrompt,
   getMissionTask,
   getTeamRoster,
   getPausedAgents,
@@ -715,6 +718,80 @@ describe('database', () => {
       const running = getHomeSummary().onPlate.find((t) => t.status === 'running');
       expect(running).toBeTruthy();
       expect(requeueMissionTask(running!.id)).toBe(false);
+    });
+
+    it('records an operator reply as a thread turn and resumes the task (prompt unmutated)', () => {
+      createMissionTask('m-ask', 'Run the SignMeUp test suite', 'cd into the SignMeUp repo and run the tests', 'sentinel');
+      claimNextMissionTask('sentinel');
+      completeMissionTask('m-ask', 'I could not find the repo path.', 'needs_you', 'SignMeUp repo path was truncated');
+      // The agent's kick-back turn would be recorded by the scheduler — mirror it.
+      addTaskMessage('m-ask', 'agent', 'I could not find the repo path.', 'SignMeUp repo path was truncated');
+
+      expect(requeueMissionTask('m-ask', '  /Users/shannon/dev/signmeup  ')).toBe(true);
+      const t = getMissionTask('m-ask');
+      expect(t?.status).toBe('queued');
+      expect(t?.error).toBeNull();
+      expect(t?.assigned_agent).toBe('sentinel'); // resumes on the same teammate
+      expect(t?.prompt).toBe('cd into the SignMeUp repo and run the tests'); // base prompt never mutated
+
+      // The reply is a trimmed 'operator' turn in the thread.
+      const thread = getTaskMessages('m-ask');
+      expect(thread.map((m) => m.role)).toEqual(['agent', 'operator']);
+      expect(thread[1].body).toBe('/Users/shannon/dev/signmeup');
+
+      // The runner's effective prompt replays the original ask + the exchange.
+      const runPrompt = buildTaskRunPrompt(t!);
+      expect(runPrompt).toContain('cd into the SignMeUp repo and run the tests');
+      expect(runPrompt).toContain('SignMeUp repo path was truncated');
+      expect(runPrompt).toContain('/Users/shannon/dev/signmeup');
+    });
+
+    it('ignores an operator reply unless the task is needs_you (no thread turn)', () => {
+      createMissionTask('m-done', 'Pull the inbox', 'original prompt', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-done', 'done', 'completed');
+      // A reply on a completed task is a plain re-run — no turn recorded.
+      expect(requeueMissionTask('m-done', 'some answer')).toBe(true);
+      expect(getMissionTask('m-done')?.prompt).toBe('original prompt');
+      expect(getTaskMessages('m-done')).toEqual([]);
+    });
+
+    it('a blank operator reply is a plain re-run (no thread turn)', () => {
+      createMissionTask('m-blank', 'Task', 'just the prompt', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-blank', 'stuck', 'needs_you', 'need input');
+      expect(requeueMissionTask('m-blank', '   ')).toBe(true);
+      const t = getMissionTask('m-blank');
+      expect(t?.status).toBe('queued');
+      expect(getTaskMessages('m-blank')).toEqual([]);
+    });
+
+    it('buildTaskRunPrompt returns the base prompt verbatim when there is no thread', () => {
+      createMissionTask('m-plain', 'Task', 'do the thing', 'comms');
+      expect(buildTaskRunPrompt(getMissionTask('m-plain')!)).toBe('do the thing');
+    });
+
+    it('a multi-round thread replays every turn in order', () => {
+      createMissionTask('m-multi', 'Deploy', 'deploy the app', 'ops');
+      addTaskMessage('m-multi', 'agent', 'which env?', 'missing target env');
+      addTaskMessage('m-multi', 'operator', 'staging');
+      addTaskMessage('m-multi', 'agent', 'which region?', 'missing region');
+      addTaskMessage('m-multi', 'operator', 'us-east-1');
+      const p = buildTaskRunPrompt(getMissionTask('m-multi')!);
+      expect(p.indexOf('which env?')).toBeLessThan(p.indexOf('staging'));
+      expect(p.indexOf('staging')).toBeLessThan(p.indexOf('which region?'));
+      expect(p.indexOf('which region?')).toBeLessThan(p.indexOf('us-east-1'));
+    });
+
+    it('deleting a task cascades its thread', () => {
+      createMissionTask('m-del', 'Task', 'p', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-del', 'stuck', 'needs_you', 'why');
+      addTaskMessage('m-del', 'agent', 'stuck', 'why');
+      addTaskMessage('m-del', 'operator', 'here you go');
+      expect(getTaskMessages('m-del')).toHaveLength(2);
+      expect(deleteMissionTask('m-del')).toBe(true);
+      expect(getTaskMessages('m-del')).toEqual([]);
     });
   });
 
