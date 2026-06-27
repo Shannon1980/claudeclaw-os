@@ -180,6 +180,8 @@ Instead, emit a `[BLOCKED: <short reason>]` marker on its own line. The runner d
 - Write your full explanation (what you tried, what you need) as normal text around it — that gets preserved.
 - Only use this when you genuinely cannot proceed. A task you finished is just a normal reply.
 
+**What happens next:** [YOUR NAME] answers right on the Needs you card. The task then re-runs on you with the original ask plus the full back-and-forth (your question, their answer) prepended under a `--- conversation so far ---` header. So ask for exactly what you need, expect the answer inline next run, and if you're still stuck after reading it, emit `[BLOCKED: …]` again with a sharper question — it threads.
+
 **Example response:**
 ```
 I searched ~/projects, ~/dev, ~/code and Documents and couldn't find the SignMeUp repo. The path in the task came in truncated.

@@ -276,6 +276,23 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_mission_status
       ON mission_tasks(assigned_agent, status, priority DESC, created_at ASC);
 
+    -- Per-task conversation thread. When an agent kicks a task back to the
+    -- operator (needs_you) it records an 'agent' turn; the operator's answer is
+    -- an 'operator' turn. The thread is the source of truth for the back-and-
+    -- forth: the runner assembles the effective prompt from it, and the Home
+    -- card renders it. Dual-written (createSchema + migration v1.2.5).
+    CREATE TABLE IF NOT EXISTS task_messages (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id     TEXT NOT NULL,
+      role        TEXT NOT NULL,            -- 'agent' | 'operator'
+      body        TEXT NOT NULL,
+      reason      TEXT,                     -- agent turns: the short blocker reason
+      created_at  INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_messages
+      ON task_messages(task_id, created_at);
+
     CREATE TABLE IF NOT EXISTS projects (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -2750,8 +2767,24 @@ export function unblockMissionTask(id: string): boolean {
  * "Re-run" action — e.g. a task that finished only because a tool was gated,
  * once the operator has granted access. Active tasks (queued/running) are a
  * no-op so an in-flight run is never disturbed.
+ *
+ * `operatorReply` closes the loop on a 'needs_you' task: the agent paused and
+ * asked a question (a missing path, a decision), and this is the operator's
+ * answer. The reply is recorded as an 'operator' turn in the task_messages
+ * thread (the source of truth for the back-and-forth); the runner rebuilds the
+ * effective prompt from that thread on the next run via `buildTaskRunPrompt`.
+ * Replies are only honored for 'needs_you' tasks (the only state where the agent
+ * is actually waiting on the operator); a reply passed for any other state is
+ * ignored and the task re-runs as-is.
  */
-export function requeueMissionTask(id: string): boolean {
+export function requeueMissionTask(id: string, operatorReply?: string): boolean {
+  const reply = operatorReply?.trim();
+  if (reply) {
+    const task = getMissionTask(id);
+    if (task && task.status === 'needs_you') {
+      addTaskMessage(id, 'operator', reply);
+    }
+  }
   const result = db.prepare(
     `UPDATE mission_tasks
        SET status = 'queued', result = NULL, error = NULL,
@@ -2760,6 +2793,62 @@ export function requeueMissionTask(id: string): boolean {
      WHERE id = ? AND status IN ('completed', 'failed', 'blocked', 'cancelled', 'needs_you')`,
   ).run(id);
   return result.changes > 0;
+}
+
+// ── Task threads (per-task operator <-> agent conversation) ──────────
+
+export interface TaskMessage {
+  id: number;
+  task_id: string;
+  role: 'agent' | 'operator';
+  body: string;
+  reason: string | null;
+  created_at: number;
+}
+
+/**
+ * Append a turn to a task's thread. 'agent' turns are recorded when a run kicks
+ * the task back (needs_you) — `body` is the full reply, `reason` the short
+ * blocker line. 'operator' turns are the answers typed on the Home card.
+ */
+export function addTaskMessage(
+  taskId: string,
+  role: 'agent' | 'operator',
+  body: string,
+  reason?: string | null,
+): void {
+  db.prepare(
+    `INSERT INTO task_messages (task_id, role, body, reason, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(taskId, role, body, reason ?? null, Math.floor(Date.now() / 1000));
+}
+
+export function getTaskMessages(taskId: string): TaskMessage[] {
+  return db
+    .prepare('SELECT * FROM task_messages WHERE task_id = ? ORDER BY created_at ASC, id ASC')
+    .all(taskId) as TaskMessage[];
+}
+
+/**
+ * The prompt the runner actually executes. The base `prompt` column is the
+ * original ask and is never mutated. When a thread exists (the task has been
+ * kicked back and answered at least once), replay the conversation so the agent
+ * sees its own earlier question and the operator's answer before continuing.
+ */
+export function buildTaskRunPrompt(task: MissionTask): string {
+  const thread = getTaskMessages(task.id);
+  if (thread.length === 0) return task.prompt;
+  const lines = thread.map((m) =>
+    m.role === 'operator'
+      ? 'Operator: ' + m.body
+      : 'You previously paused and said: ' + (m.reason ? m.reason + ' — ' : '') + m.body,
+  );
+  return (
+    task.prompt +
+    '\n\n--- conversation so far ---\n' +
+    lines.join('\n\n') +
+    '\n\nContinue and finish the task using the operator\'s answer above.'
+  );
 }
 
 /**
@@ -2903,20 +2992,36 @@ export function setAgentPaused(agentId: string, paused: boolean): void {
 }
 
 export function deleteMissionTask(id: string): boolean {
-  const result = db.prepare(
-    `DELETE FROM mission_tasks WHERE id = ? AND status IN ('completed', 'cancelled', 'failed', 'needs_you')`,
-  ).run(id);
-  return result.changes > 0;
+  const txn = db.transaction(() => {
+    const result = db.prepare(
+      `DELETE FROM mission_tasks WHERE id = ? AND status IN ('completed', 'cancelled', 'failed', 'needs_you')`,
+    ).run(id);
+    // Cascade the thread only when the task itself went (status guard above).
+    if (result.changes > 0) {
+      db.prepare('DELETE FROM task_messages WHERE task_id = ?').run(id);
+    }
+    return result.changes > 0;
+  });
+  return txn();
 }
 
 export function cleanupOldMissionTasks(olderThanDays = 7): number {
   const cutoff = Math.floor(Date.now() / 1000) - olderThanDays * 86400;
   // Project-linked tasks are kept: they're the project's input/output
   // history and only go away when the project itself is deleted.
-  const result = db.prepare(
-    `DELETE FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed', 'needs_you') AND completed_at < ? AND project_id IS NULL`,
-  ).run(cutoff);
-  return result.changes;
+  const txn = db.transaction(() => {
+    // Capture ids first so the thread rows go with their tasks.
+    const ids = db.prepare(
+      `SELECT id FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed', 'needs_you') AND completed_at < ? AND project_id IS NULL`,
+    ).all(cutoff) as Array<{ id: string }>;
+    const result = db.prepare(
+      `DELETE FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed', 'needs_you') AND completed_at < ? AND project_id IS NULL`,
+    ).run(cutoff);
+    const del = db.prepare('DELETE FROM task_messages WHERE task_id = ?');
+    for (const { id } of ids) del.run(id);
+    return result.changes;
+  });
+  return txn();
 }
 
 export function reassignMissionTask(id: string, newAgent: string): boolean {

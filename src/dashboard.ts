@@ -59,6 +59,7 @@ import {
   setMissionTaskBlocked,
   unblockMissionTask,
   requeueMissionTask,
+  getTaskMessages,
   getUpcomingScheduledTasks,
   getAuditLogCount,
   getAuditLogFiltered,
@@ -2029,12 +2030,23 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   // Re-run a settled task (completed/failed/blocked/cancelled) — clears the
   // prior outcome and returns it to the queue. Powers the Home "Re-run" action,
   // e.g. retrying a task that only "shipped" because a tool was gated, after the
-  // operator grants access.
-  app.post('/api/mission/tasks/:id/requeue', (c) => {
+  // operator grants access. An optional `reply` answers a 'needs_you' task the
+  // agent kicked back (a missing path, a decision); it is folded into the prompt
+  // so the resumed run sees the operator's answer.
+  app.post('/api/mission/tasks/:id/requeue', async (c) => {
     const id = c.req.param('id');
-    const ok = requeueMissionTask(id);
+    const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+    const reply = typeof body?.reply === 'string' ? body.reply : undefined;
+    const ok = requeueMissionTask(id, reply);
     if (!ok) return c.json({ error: 'Task not found or not re-runnable' }, 409);
     return c.json({ ok, task: getMissionTask(id) });
+  });
+
+  // The per-task conversation thread (agent kick-backs + operator answers).
+  // Powers the "Show details" full-context view on a blocked-on-you card.
+  app.get('/api/mission/tasks/:id/messages', (c) => {
+    const id = c.req.param('id');
+    return c.json({ messages: getTaskMessages(id) });
   });
 
   // Auto-assign all unassigned tasks. MUST register before /:id/auto-assign
