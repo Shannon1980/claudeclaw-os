@@ -33,6 +33,9 @@ import {
   _getScheduledTaskColumns,
   createMissionTask,
   claimNextMissionTask,
+  completeMissionTask,
+  getHomeSummary,
+  deleteMissionTask,
   getTeamRoster,
   getPausedAgents,
   isAgentPaused,
@@ -623,6 +626,40 @@ describe('database', () => {
       setAgentPaused('ops', true);
       const roster = getTeamRoster();
       expect(roster.ops?.paused).toBe(true);
+    });
+  });
+
+  describe('needs_you classification (blocked-back tasks surface under Needs you)', () => {
+    it('files a needs_you task under needsYou, never shipped', () => {
+      createMissionTask('nb-1', 'Run coverage audit', 'p', 'sentinel');
+      claimNextMissionTask('sentinel'); // → running
+      completeMissionTask('nb-1', 'I searched everywhere, the repo path was truncated.', 'needs_you', 'repo path truncated');
+
+      const { needsYou, shipped } = getHomeSummary();
+      expect(needsYou.some((t) => t.id === 'nb-1')).toBe(true);
+      expect(shipped.some((t) => t.id === 'nb-1')).toBe(false);
+
+      const item = needsYou.find((t) => t.id === 'nb-1');
+      expect(item?.error).toBe('repo path truncated');
+      expect(item?.result).toContain('truncated');
+    });
+
+    it('keeps a genuinely completed task under shipped', () => {
+      createMissionTask('nb-2', 'Write brief', 'p', 'research');
+      claimNextMissionTask('research');
+      completeMissionTask('nb-2', 'Here is the brief.', 'completed');
+
+      const { needsYou, shipped } = getHomeSummary();
+      expect(shipped.some((t) => t.id === 'nb-2')).toBe(true);
+      expect(needsYou.some((t) => t.id === 'nb-2')).toBe(false);
+    });
+
+    it('lets the operator dismiss a needs_you task', () => {
+      createMissionTask('nb-3', 'Stuck task', 'p', 'ops');
+      claimNextMissionTask('ops');
+      completeMissionTask('nb-3', 'blocked', 'needs_you', 'why');
+      expect(deleteMissionTask('nb-3')).toBe(true);
+      expect(getHomeSummary().needsYou.some((t) => t.id === 'nb-3')).toBe(false);
     });
   });
 

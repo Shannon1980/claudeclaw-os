@@ -114,7 +114,14 @@ function NeedsItem({ task, agents, agentById, onChange }: {
   task: MissionTask; agents: Agent[]; agentById: Map<string, Agent>; onChange: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const isFailed = task.status === 'failed';
+  // 'needs_you': a teammate ran the task but kicked it back — it needs the
+  // operator to unblock it (a missing path, a permission, a decision), not a
+  // re-route. Distinct rendering: the reason up top, the full reply on expand.
+  const isBlocked = task.status === 'needs_you';
+  const settled = isFailed || isBlocked;
+  const kicker = task.assigned_agent ? agentById.get(task.assigned_agent) : undefined;
 
   async function autoAssign() {
     setBusy('auto');
@@ -149,15 +156,39 @@ function NeedsItem({ task, agents, agentById, onChange }: {
   return (
     <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5">
       <div class="flex items-center gap-1.5 mb-1">
-        {isFailed ? <Pill tone="failed">needs a look</Pill> : <Pill tone="neutral">unrouted</Pill>}
-        <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">{formatRelativeTime(task.created_at)}</span>
+        {isBlocked ? <Pill tone="medium">blocked on you</Pill>
+          : isFailed ? <Pill tone="failed">needs a look</Pill>
+          : <Pill tone="neutral">unrouted</Pill>}
+        {isBlocked && <TeammatePill agent={kicker} fallback={task.assigned_agent} />}
+        <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">{formatRelativeTime(task.completed_at || task.created_at)}</span>
       </div>
       <div class="text-[12.5px] text-[var(--color-text)] leading-snug mb-2 line-clamp-2">{task.title}</div>
       {isFailed && task.error && (
         <div class="text-[10.5px] text-[var(--color-status-failed)] font-mono line-clamp-2 mb-2">{task.error}</div>
       )}
+      {isBlocked && (
+        <>
+          {task.error && (
+            <div class="text-[11px] text-[var(--color-priority-medium)] leading-snug mb-1.5">{task.error}</div>
+          )}
+          {task.result && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              class="text-[10.5px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-2"
+            >
+              {expanded ? 'Hide details' : 'Show details'}
+            </button>
+          )}
+          {expanded && task.result && (
+            <div class="text-[11px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed border-t border-[var(--color-border)] pt-2 mb-2">
+              {task.result}
+            </div>
+          )}
+        </>
+      )}
       <div class="flex items-center gap-1">
-        {!isFailed && (
+        {!settled && (
           <>
             <button
               type="button"
@@ -178,7 +209,7 @@ function NeedsItem({ task, agents, agentById, onChange }: {
             </select>
           </>
         )}
-        {isFailed && <div class="flex-1" />}
+        {settled && <div class="flex-1" />}
         <button
           type="button"
           onClick={remove}

@@ -27,6 +27,7 @@ import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import type { GateContext } from './gate.js';
 import { formatForTelegram, splitMessage } from './bot.js';
+import { extractBlockedMarker } from './format.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { isAgentRunning } from './agent-create.js';
 import { AOS_CRON_SOURCE, parseJobFile } from './aos-cron.js';
@@ -499,9 +500,20 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
           }
         }
       } else {
-        const text = result.text?.trim() || 'Task completed with no output.';
-        completeMissionTask(mission.id, text, 'completed');
-        logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');
+        const rawText = result.text?.trim() || 'Task completed with no output.';
+        // A run can finish without throwing yet still be a dead end — the agent
+        // hit a missing path, a permission wall, or a decision only the operator
+        // can make. It says so with a [BLOCKED:…] marker. Route those to
+        // "Needs you" (status needs_you) instead of letting them parade under
+        // "Shipped" as if delivered. See extractBlockedMarker / getHomeSummary.
+        const { blocked, reason, text } = extractBlockedMarker(rawText);
+        if (blocked) {
+          completeMissionTask(mission.id, text, 'needs_you', reason || 'Needs your input to continue');
+          logger.info({ missionId: mission.id, delegateAgentId, reason }, 'Mission task blocked back to operator');
+        } else {
+          completeMissionTask(mission.id, text, 'completed');
+          logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');
+        }
 
         // Send result to the user
         const outText = delegateAgentId

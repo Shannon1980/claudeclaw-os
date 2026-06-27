@@ -2572,7 +2572,10 @@ export interface MissionTask {
   title: string;
   prompt: string;
   assigned_agent: string | null;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked';
+  // 'needs_you': the agent finished its run but kicked the task back to the
+  // operator (a [BLOCKED:…] marker in its output) — distinct from 'blocked'
+  // (parked waiting on a third party). Surfaces under "Needs you", not "Shipped".
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'needs_you';
   result: string | null;
   error: string | null;
   created_by: string;
@@ -2682,7 +2685,7 @@ export function claimNextMissionTask(agentId: string): MissionTask | null {
 export function completeMissionTask(
   id: string,
   result: string | null,
-  status: 'completed' | 'failed',
+  status: 'completed' | 'failed' | 'needs_you',
   error?: string,
 ): void {
   const now = Math.floor(Date.now() / 1000);
@@ -2728,6 +2731,7 @@ export function unblockMissionTask(id: string): boolean {
  * The Home daily-loop payload, grouped server-side so the frontend makes one
  * call and holds no grouping logic. Mirrors specs/operator-product/03-home.md:
  *   needsYou = unassigned-queued (route it) + recent failed (handle it)
+ *              + recent needs_you (agent kicked it back — answer it)
  *   onPlate  = running + assigned-queued (active work, who's on it)
  *   waiting  = blocked (waiting on others)
  *   shipped  = completed within the last `recentDays`
@@ -2754,7 +2758,8 @@ export function getHomeSummary(recentDays = 7, projectId?: string): HomeSummary 
   const needsYou = all
     .filter((t) =>
       (t.status === 'queued' && !t.assigned_agent) ||
-      (t.status === 'failed' && (t.completed_at == null || t.completed_at >= cutoff)))
+      ((t.status === 'failed' || t.status === 'needs_you') &&
+        (t.completed_at == null || t.completed_at >= cutoff)))
     .sort(byPriority);
   const onPlate = all
     .filter((t) => t.status === 'running' || (t.status === 'queued' && !!t.assigned_agent))
@@ -2864,7 +2869,7 @@ export function setAgentPaused(agentId: string, paused: boolean): void {
 
 export function deleteMissionTask(id: string): boolean {
   const result = db.prepare(
-    `DELETE FROM mission_tasks WHERE id = ? AND status IN ('completed', 'cancelled', 'failed')`,
+    `DELETE FROM mission_tasks WHERE id = ? AND status IN ('completed', 'cancelled', 'failed', 'needs_you')`,
   ).run(id);
   return result.changes > 0;
 }
@@ -2874,7 +2879,7 @@ export function cleanupOldMissionTasks(olderThanDays = 7): number {
   // Project-linked tasks are kept: they're the project's input/output
   // history and only go away when the project itself is deleted.
   const result = db.prepare(
-    `DELETE FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed') AND completed_at < ? AND project_id IS NULL`,
+    `DELETE FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed', 'needs_you') AND completed_at < ? AND project_id IS NULL`,
   ).run(cutoff);
   return result.changes;
 }
@@ -2895,10 +2900,10 @@ export function assignMissionTask(id: string, agent: string): boolean {
 
 export function getMissionTaskHistory(limit = 30, offset = 0): { tasks: MissionTask[]; total: number } {
   const total = (db.prepare(
-    `SELECT COUNT(*) as c FROM mission_tasks WHERE status IN ('completed', 'failed', 'cancelled')`,
+    `SELECT COUNT(*) as c FROM mission_tasks WHERE status IN ('completed', 'failed', 'cancelled', 'needs_you')`,
   ).get() as { c: number }).c;
   const tasks = db.prepare(
-    `SELECT * FROM mission_tasks WHERE status IN ('completed', 'failed', 'cancelled')
+    `SELECT * FROM mission_tasks WHERE status IN ('completed', 'failed', 'cancelled', 'needs_you')
      ORDER BY completed_at DESC LIMIT ? OFFSET ?`,
   ).all(limit, offset) as MissionTask[];
   return { tasks, total };
