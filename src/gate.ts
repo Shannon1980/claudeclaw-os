@@ -205,7 +205,7 @@ const TARGET_MAX_LEN = 256;
  * command (already classified read-only/destructive upstream); secret-shaped
  * field names are dropped even when whitelisted.
  */
-function safeTarget(toolName: string, input: Record<string, unknown>): string | undefined {
+export function safeTarget(toolName: string, input: Record<string, unknown>): string | undefined {
   let raw: unknown;
   if (toolName === 'Bash') {
     raw = input.command;

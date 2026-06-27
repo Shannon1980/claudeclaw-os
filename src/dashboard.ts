@@ -128,6 +128,7 @@ import { listPending, approve, deny, claimUndo, finalizeUndo, getApprovalById, t
 import { buildActivityFeed, isUndoableFamily } from './activity.js';
 import { summarizeDay, SUMMARIZE_DEGRADE } from './activity-summary.js';
 import { replayApproval } from './replay-executor.js';
+import { safeTarget } from './gate.js';
 import { undoAction } from './undo-executor.js';
 import { UPLOADS_DIR } from './media.js';
 import { collectProjectFiles, collectTaskFiles, allowedProjectDownloadPaths } from './mission-files.js';
@@ -3568,6 +3569,11 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       tier: row.tier,
       mode_at_decision: row.mode_at_decision,
       summary: row.summary,
+      // The ONE scrubbed, length-capped target worth showing so the operator
+      // can decide with context (e.g. the Bash command, the file a Write touches).
+      // Reuses the same secret-safe extraction the audit log trusts — never the
+      // raw input object, never a secret-shaped field (gate.ts safeTarget).
+      target: safeTarget(row.tool_name, row.tool_input) ?? null,
       status: row.status,
       run_id: row.run_id,
       routine_id: row.routine_id,
