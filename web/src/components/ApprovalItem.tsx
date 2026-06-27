@@ -24,6 +24,9 @@ export interface Approval {
   tier: number;
   mode_at_decision: string;
   summary: string;
+  // Scrubbed, length-capped preview of the action (e.g. the Bash command, the
+  // file a Write touches). Server-side secret-safe; null when nothing safe to show.
+  target: string | null;
   status: string;
   run_id: string | null;
   routine_id: string | null;
@@ -93,6 +96,12 @@ export function ApprovalItem({ approval, agent, onChange }: {
       <div class="text-[12.5px] text-[var(--color-text)] leading-snug mb-1 line-clamp-2">
         {approval.summary || 'A prepared action needs your ok.'}
       </div>
+
+      {approval.target && (
+        <div class="text-[10.5px] text-[var(--color-text-muted)] font-mono leading-snug bg-[var(--color-surface)] border border-[var(--color-border)] rounded px-1.5 py-1 mb-2 whitespace-pre-wrap break-all line-clamp-4">
+          {approval.target}
+        </div>
+      )}
 
       <div class="flex items-center gap-1.5 mb-2 text-[11px] text-[var(--color-text-muted)]">
         <AgentAvatar agentId={approval.agent_id} name={teammate} size={16} />
