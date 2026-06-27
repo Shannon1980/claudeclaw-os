@@ -2725,6 +2725,25 @@ export function unblockMissionTask(id: string): boolean {
 }
 
 /**
+ * Re-run a settled task. Returns a completed / failed / blocked / cancelled task
+ * to the queue, clearing the prior outcome so the runner claims it fresh. The
+ * assigned agent is kept so it re-runs on the same teammate. Powers the Home
+ * "Re-run" action — e.g. a task that finished only because a tool was gated,
+ * once the operator has granted access. Active tasks (queued/running) are a
+ * no-op so an in-flight run is never disturbed.
+ */
+export function requeueMissionTask(id: string): boolean {
+  const result = db.prepare(
+    `UPDATE mission_tasks
+       SET status = 'queued', result = NULL, error = NULL,
+           completed_at = NULL, started_at = NULL,
+           blocked_on = NULL, blocked_since = NULL
+     WHERE id = ? AND status IN ('completed', 'failed', 'blocked', 'cancelled')`,
+  ).run(id);
+  return result.changes > 0;
+}
+
+/**
  * The Home daily-loop payload, grouped server-side so the frontend makes one
  * call and holds no grouping logic. Mirrors specs/operator-product/03-home.md:
  *   needsYou = unassigned-queued (route it) + recent failed (handle it)

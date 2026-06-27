@@ -13,6 +13,7 @@ import {
   resetStuckTasks,
   claimNextMissionTask,
   completeMissionTask,
+  setMissionTaskBlocked,
   resetStuckMissionTasks,
   getMissionTask,
   isAgentPaused,
@@ -22,6 +23,7 @@ import {
   type ScheduledTask,
 } from './db.js';
 import { runRoutineOnce } from './routine-runner.js';
+import { countPendingByRun } from './approval-queue.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
@@ -500,8 +502,22 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
         }
       } else {
         const text = result.text?.trim() || 'Task completed with no output.';
-        completeMissionTask(mission.id, text, 'completed');
-        logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');
+
+        // A background mission runs unattended (attended:false), so a Tier 3/4
+        // gate enqueues an approval and denies the tool inline rather than
+        // hanging the subprocess. The run then finishes "cleanly" with a
+        // please-approve message — but nothing actually shipped; it's waiting on
+        // the operator. Detect that via the pending approvals this run left
+        // (run_id === mission.id) and park the task as waiting instead of
+        // filing it under Shipped. Once the operator approves, they re-run it.
+        const pendingGates = countPendingByRun(mission.id);
+        if (pendingGates > 0) {
+          setMissionTaskBlocked(mission.id, 'you (tool approval)');
+          logger.info({ missionId: mission.id, pendingGates }, 'Mission task parked — waiting on operator approval');
+        } else {
+          completeMissionTask(mission.id, text, 'completed');
+          logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');
+        }
 
         // Send result to the user
         const outText = delegateAgentId
