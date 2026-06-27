@@ -14,6 +14,8 @@ import {
   claimNextMissionTask,
   completeMissionTask,
   setMissionTaskBlocked,
+  addTaskMessage,
+  buildTaskRunPrompt,
   resetStuckMissionTasks,
   getMissionTask,
   isAgentPaused,
@@ -466,12 +468,15 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
       agentId: delegateAgentId ?? schedulerAgentId,
       chatId,
     };
+    // The base prompt plus any prior blocked-back conversation (operator
+    // answers fold in here so a resumed needs_you task sees them).
+    const runPrompt = buildTaskRunPrompt(mission);
     try {
       let result: { text: string | null; aborted?: boolean };
       if (delegateAgentId) {
         const delegated = await delegateToAgent(
           delegateAgentId,
-          mission.prompt,
+          runPrompt,
           chatId,
           'main',
           undefined,
@@ -481,7 +486,7 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
         );
         result = { text: delegated.text, aborted: abortController.signal.aborted };
       } else {
-        result = await runAgent(mission.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist, undefined, missionGateCtx);
+        result = await runAgent(runPrompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist, undefined, missionGateCtx);
       }
       clearTimeout(timeout);
       clearInterval(cancelPoll);
@@ -518,7 +523,11 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
           setMissionTaskBlocked(mission.id, 'you (tool approval)');
           logger.info({ missionId: mission.id, pendingGates }, 'Mission task parked — waiting on operator approval');
         } else if (blocked) {
-          completeMissionTask(mission.id, text, 'needs_you', reason || 'Needs your input to continue');
+          const blockReason = reason || 'Needs your input to continue';
+          completeMissionTask(mission.id, text, 'needs_you', blockReason);
+          // Record the agent's turn so the Home card shows the full back-and-
+          // forth, not just the latest snapshot (task_messages is the thread).
+          addTaskMessage(mission.id, 'agent', text, blockReason);
           logger.info({ missionId: mission.id, delegateAgentId, reason }, 'Mission task blocked back to operator');
         } else {
           completeMissionTask(mission.id, text, 'completed');
