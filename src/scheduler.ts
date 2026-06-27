@@ -29,6 +29,7 @@ import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import type { GateContext } from './gate.js';
 import { formatForTelegram, splitMessage } from './bot.js';
+import { extractBlockedMarker } from './format.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { isAgentRunning } from './agent-create.js';
 import { AOS_CRON_SOURCE, parseJobFile } from './aos-cron.js';
@@ -501,19 +502,24 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
           }
         }
       } else {
-        const text = result.text?.trim() || 'Task completed with no output.';
-
-        // A background mission runs unattended (attended:false), so a Tier 3/4
-        // gate enqueues an approval and denies the tool inline rather than
-        // hanging the subprocess. The run then finishes "cleanly" with a
-        // please-approve message — but nothing actually shipped; it's waiting on
-        // the operator. Detect that via the pending approvals this run left
-        // (run_id === mission.id) and park the task as waiting instead of
-        // filing it under Shipped. Once the operator approves, they re-run it.
+        const rawText = result.text?.trim() || 'Task completed with no output.';
+        // A run can finish without throwing yet still not have shipped anything.
+        // Two distinct dead ends, both "needs the operator":
+        //   1. A Tier 3/4 gate enqueued an approval and denied the tool inline,
+        //      so the run ends with a please-approve message. Detect via the
+        //      pending approvals this run left (run_id === mission.id) and park
+        //      it as waiting — once approved, the operator re-runs it.
+        //   2. The agent hit a missing path / decision only the operator can
+        //      make and said so with a [BLOCKED:…] marker → route to needs_you.
+        // Either way it must not parade under "Shipped" as if delivered.
+        const { blocked, reason, text } = extractBlockedMarker(rawText);
         const pendingGates = countPendingByRun(mission.id);
         if (pendingGates > 0) {
           setMissionTaskBlocked(mission.id, 'you (tool approval)');
           logger.info({ missionId: mission.id, pendingGates }, 'Mission task parked — waiting on operator approval');
+        } else if (blocked) {
+          completeMissionTask(mission.id, text, 'needs_you', reason || 'Needs your input to continue');
+          logger.info({ missionId: mission.id, delegateAgentId, reason }, 'Mission task blocked back to operator');
         } else {
           completeMissionTask(mission.id, text, 'completed');
           logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');

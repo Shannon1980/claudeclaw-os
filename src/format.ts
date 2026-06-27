@@ -90,6 +90,44 @@ export function extractFileMarkers(text: string): ExtractResult {
   return { text: trimmed, files };
 }
 
+export interface BlockedMarker {
+  /** True when the agent signalled it could not finish and needs the operator. */
+  blocked: boolean;
+  /** Short reason pulled from the marker, or '' if the marker had no body. */
+  reason: string;
+  /** The result text with the marker stripped (the agent's full explanation). */
+  text: string;
+}
+
+/**
+ * Detect a [BLOCKED: reason] marker in a finished agent's output.
+ *
+ * Mirrors the [SEND_FILE:…] convention (documented in CLAUDE.md): an agent that
+ * runs to completion but can't actually deliver — it's stuck on a missing path,
+ * a permission wall, a decision only the operator can make — emits a
+ * [BLOCKED: short reason] line. Without this, a "here's why I'm stuck" reply
+ * looks identical to a delivered result: the runner marks it 'completed' and it
+ * parades under "Shipped" while "Needs you" reads zero (a false all-clear).
+ *
+ * Tolerant of the bare [BLOCKED] form and a pipe separator, same as the file
+ * markers. Returns the cleaned text (marker stripped) plus the reason.
+ */
+export function extractBlockedMarker(text: string): BlockedMarker {
+  let blocked = false;
+  let reason = '';
+  const pattern = /\[(?:BLOCKED|NEEDS[_-]?YOU)(?:[:|]\s*([^\]]*))?\]/gi;
+  const cleaned = text
+    .replace(pattern, (_match: string, body?: string) => {
+      blocked = true;
+      const b = (body || '').trim();
+      if (b && !reason) reason = b;
+      return '';
+    })
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { blocked, reason, text: cleaned };
+}
+
 /**
  * Convert Markdown to Slack mrkdwn.
  *
