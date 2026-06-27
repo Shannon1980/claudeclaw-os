@@ -20,7 +20,7 @@ export interface MissionTask {
   title: string;
   prompt: string;
   assigned_agent: string | null;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'needs_you';
   priority: number;
   created_by: string;
   created_at: number;

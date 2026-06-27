@@ -7,15 +7,25 @@
 import { useState } from 'preact/hooks';
 import {
   Inbox, Hourglass, CheckCircle2, X, Wand2, Sparkles, Trash2, ArrowRight,
-  Clock, Undo2, PauseCircle,
+  Clock, Undo2, PauseCircle, RotateCcw,
 } from 'lucide-preact';
 import { Pill, StatusDot } from '@/components/Pill';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { ApprovalItem, type Approval } from '@/components/ApprovalItem';
 import { type MissionTask, type Agent } from '@/components/TaskModals';
-import { apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
 import { formatRelativeTime } from '@/lib/format';
 import { pushToast } from '@/lib/toasts';
+
+/** One turn in a task's blocked-on-you thread (see src/db.ts task_messages). */
+interface TaskMessage {
+  id: number;
+  task_id: string;
+  role: 'agent' | 'operator';
+  body: string;
+  reason: string | null;
+  created_at: number;
+}
 
 export interface TodaySuggestion { id: string; kind: 'routine'; text: string; when: number | null }
 export interface HomeSummary {
@@ -114,7 +124,17 @@ function NeedsItem({ task, agents, agentById, onChange }: {
   task: MissionTask; agents: Agent[]; agentById: Map<string, Agent>; onChange: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [reply, setReply] = useState('');
+  const [thread, setThread] = useState<TaskMessage[] | null>(null);
+  const [loadingThread, setLoadingThread] = useState(false);
   const isFailed = task.status === 'failed';
+  // 'needs_you': a teammate ran the task but kicked it back — it needs the
+  // operator to unblock it (a missing path, a permission, a decision), not a
+  // re-route. Distinct rendering: the reason up top, the full reply on expand.
+  const isBlocked = task.status === 'needs_you';
+  const settled = isFailed || isBlocked;
+  const kicker = task.assigned_agent ? agentById.get(task.assigned_agent) : undefined;
 
   async function autoAssign() {
     setBusy('auto');
@@ -146,18 +166,124 @@ function NeedsItem({ task, agents, agentById, onChange }: {
     finally { setBusy(null); }
   }
 
+  // `answer` folds the operator's reply into the resumed run (needs_you cards);
+  // bare re-run just retries (e.g. after the operator granted a gated tool).
+  async function rerun(answer?: string) {
+    setBusy('rerun');
+    try {
+      await apiPost(`/api/mission/tasks/${task.id}/requeue`, answer ? { reply: answer } : undefined);
+      onChange();
+      pushToast({
+        tone: 'success',
+        title: answer ? 'Sent — resuming' : 'Re-running',
+        description: answer ? `Back to ${kicker?.name || 'the agent'} with your answer.` : 'Back in the queue.',
+      });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Could not re-run', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setBusy(null); }
+  }
+
+  // Lazy-load the thread the first time the operator opens the full context.
+  async function toggleDetails() {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && thread === null && !loadingThread) {
+      setLoadingThread(true);
+      try {
+        const res = await apiGet<{ messages: TaskMessage[] }>(`/api/mission/tasks/${task.id}/messages`);
+        setThread(res.messages);
+      } catch { setThread([]); }
+      finally { setLoadingThread(false); }
+    }
+  }
+
   return (
     <div class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5">
       <div class="flex items-center gap-1.5 mb-1">
-        {isFailed ? <Pill tone="failed">needs a look</Pill> : <Pill tone="neutral">unrouted</Pill>}
-        <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">{formatRelativeTime(task.created_at)}</span>
+        {isBlocked ? <Pill tone="medium">blocked on you</Pill>
+          : isFailed ? <Pill tone="failed">needs a look</Pill>
+          : <Pill tone="neutral">unrouted</Pill>}
+        {isBlocked && <TeammatePill agent={kicker} fallback={task.assigned_agent} />}
+        <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">{formatRelativeTime(task.completed_at || task.created_at)}</span>
       </div>
       <div class="text-[12.5px] text-[var(--color-text)] leading-snug mb-2 line-clamp-2">{task.title}</div>
       {isFailed && task.error && (
         <div class="text-[10.5px] text-[var(--color-status-failed)] font-mono line-clamp-2 mb-2">{task.error}</div>
       )}
+      {isBlocked && (
+        <>
+          {task.error && (
+            <div class="text-[11px] text-[var(--color-priority-medium)] leading-snug mb-1.5">{task.error}</div>
+          )}
+          <button
+            type="button"
+            onClick={toggleDetails}
+            class="text-[10.5px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors mb-2"
+          >
+            {expanded ? 'Hide details' : 'Show details'}
+          </button>
+          {/* Full context: the original ask, then the whole back-and-forth so
+              the operator can answer with everything in view. */}
+          {expanded && (
+            <div class="border-t border-[var(--color-border)] pt-2 mb-2 space-y-2">
+              <div>
+                <div class="text-[9.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-0.5">Original task</div>
+                <div class="text-[11px] text-[var(--color-text-muted)] whitespace-pre-wrap leading-relaxed">{task.prompt}</div>
+              </div>
+              {loadingThread && <div class="text-[10.5px] text-[var(--color-text-faint)]">Loading…</div>}
+              {!loadingThread && thread && thread.length > 0 && thread.map((m) => (
+                <div key={m.id}>
+                  <div class="text-[9.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-0.5">
+                    {m.role === 'operator' ? 'You' : (kicker?.name || task.assigned_agent || 'Agent')}
+                    <span class="ml-1.5 normal-case tracking-normal text-[var(--color-text-faint)]">{formatRelativeTime(m.created_at)}</span>
+                  </div>
+                  <div class={'text-[11px] whitespace-pre-wrap leading-relaxed ' + (m.role === 'operator' ? 'text-[var(--color-accent)]' : 'text-[var(--color-text)]')}>{m.body}</div>
+                </div>
+              ))}
+              {/* Legacy fallback: tasks blocked before the thread existed only
+                  have the snapshot in task.result. */}
+              {!loadingThread && (!thread || thread.length === 0) && task.result && (
+                <div class="text-[11px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">{task.result}</div>
+              )}
+            </div>
+          )}
+          {/* Answer the question the agent asked, inline. The reply is recorded
+              as an operator turn and the same task resumes on the same teammate
+              with the thread folded into its prompt — the loop closes here. */}
+          <textarea
+            value={reply}
+            onInput={(e) => setReply((e.target as HTMLTextAreaElement).value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && reply.trim() && busy === null) rerun(reply.trim());
+            }}
+            placeholder={`Answer ${kicker?.name || 'them'}…`}
+            rows={2}
+            disabled={busy !== null}
+            class="w-full bg-[var(--color-card)] border border-[var(--color-border)] rounded text-[11px] text-[var(--color-text)] px-2 py-1.5 outline-none focus:border-[var(--color-accent)] resize-none placeholder:text-[var(--color-text-faint)] disabled:opacity-40"
+          />
+          <div class="flex items-center gap-1.5 mt-1.5 mb-2">
+            <button
+              type="button"
+              onClick={() => { const r = reply.trim(); if (r) rerun(r); }}
+              disabled={busy !== null || !reply.trim()}
+              class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white transition-colors disabled:opacity-40"
+            >
+              <ArrowRight size={11} /> {busy === 'rerun' && reply.trim() ? '…' : 'Reply & resume'}
+            </button>
+            <button
+              type="button"
+              onClick={() => rerun()}
+              disabled={busy !== null}
+              class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-40"
+              title="Re-run without a reply (e.g. after you granted access)"
+            >
+              <RotateCcw size={11} /> {busy === 'rerun' && !reply.trim() ? '…' : 'Re-run'}
+            </button>
+          </div>
+        </>
+      )}
       <div class="flex items-center gap-1">
-        {!isFailed && (
+        {!settled && (
           <>
             <button
               type="button"
@@ -178,7 +304,18 @@ function NeedsItem({ task, agents, agentById, onChange }: {
             </select>
           </>
         )}
-        {isFailed && <div class="flex-1" />}
+        {isFailed && (
+          <button
+            type="button"
+            onClick={() => rerun()}
+            disabled={busy !== null}
+            class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-40"
+            title="Re-run this task"
+          >
+            <RotateCcw size={11} /> {busy === 'rerun' ? '…' : 'Re-run'}
+          </button>
+        )}
+        {settled && <div class="flex-1" />}
         <button
           type="button"
           onClick={remove}
@@ -217,7 +354,7 @@ export function LoopZones({ onPlate, waiting, shipped, agentById, onChange }: {
       </Zone>
       <Zone title="Shipped this week" hint="Done in the last 7 days." icon={CheckCircle2} count={shipped.length} empty="Nothing shipped yet this week.">
         {shipped.map((t) => (
-          <ShippedItem key={t.id} task={t} agent={t.assigned_agent ? agentById.get(t.assigned_agent) : undefined} />
+          <ShippedItem key={t.id} task={t} agent={t.assigned_agent ? agentById.get(t.assigned_agent) : undefined} onChange={onChange} />
         ))}
       </Zone>
     </div>
@@ -367,8 +504,22 @@ function WaitingItem({ task, agent, onChange }: { task: MissionTask; agent?: Age
   );
 }
 
-function ShippedItem({ task, agent }: { task: MissionTask; agent?: Agent }) {
+function ShippedItem({ task, agent, onChange }: { task: MissionTask; agent?: Agent; onChange: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function rerun(e: MouseEvent) {
+    e.stopPropagation(); // don't toggle the card's expand on a Re-run click
+    setBusy(true);
+    try {
+      await apiPost(`/api/mission/tasks/${task.id}/requeue`);
+      onChange();
+      pushToast({ tone: 'success', title: 'Re-running', description: 'Back in the queue.' });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Could not re-run', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setBusy(false); }
+  }
+
   return (
     <div
       onClick={() => setExpanded((v) => !v)}
@@ -382,7 +533,18 @@ function ShippedItem({ task, agent }: { task: MissionTask; agent?: Agent }) {
         </span>
       </div>
       <div class={'text-[12.5px] text-[var(--color-text)] leading-snug mb-1.5 ' + (expanded ? '' : 'line-clamp-2')}>{task.title}</div>
-      <TeammatePill agent={agent} fallback={task.assigned_agent} />
+      <div class="flex items-center gap-1.5">
+        <TeammatePill agent={agent} fallback={task.assigned_agent} />
+        <button
+          type="button"
+          onClick={rerun}
+          disabled={busy}
+          class="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-40"
+          title="Re-run this task"
+        >
+          <RotateCcw size={11} /> {busy ? '…' : 'Re-run'}
+        </button>
+      </div>
       {expanded && task.result && (
         <div class="mt-2 text-[11px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed border-t border-[var(--color-border)] pt-2">
           {task.result}

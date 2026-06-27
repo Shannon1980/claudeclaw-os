@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { formatForSlack, splitMessage, extractFileMarkers } from './format.js';
+import { formatForSlack, splitMessage, extractFileMarkers, extractBlockedMarker } from './format.js';
 
 describe('formatForSlack', () => {
   it('converts bold to single asterisks', () => {
@@ -108,5 +108,42 @@ describe('extractFileMarkers', () => {
     ]);
     expect(text).not.toContain('SEND_PHOTO');
     expect(text).toBe('Done.');
+  });
+});
+
+describe('extractBlockedMarker', () => {
+  it('treats unmarked output as not blocked', () => {
+    const r = extractBlockedMarker('All done, the report is attached.');
+    expect(r.blocked).toBe(false);
+    expect(r.reason).toBe('');
+    expect(r.text).toBe('All done, the report is attached.');
+  });
+
+  it('detects a [BLOCKED: reason] marker and strips it', () => {
+    const r = extractBlockedMarker(
+      "Couldn't find the repo.\n[BLOCKED: repo path truncated, need the full path]\nSend it over and I'll run it.",
+    );
+    expect(r.blocked).toBe(true);
+    expect(r.reason).toBe('repo path truncated, need the full path');
+    expect(r.text).not.toContain('BLOCKED');
+    expect(r.text).toContain("Couldn't find the repo.");
+    expect(r.text).toContain("Send it over");
+  });
+
+  it('handles a bare [BLOCKED] marker with no reason', () => {
+    const r = extractBlockedMarker('I hit a permission wall. [BLOCKED]');
+    expect(r.blocked).toBe(true);
+    expect(r.reason).toBe('');
+    expect(r.text).toBe('I hit a permission wall.');
+  });
+
+  it('accepts a [NEEDS_YOU: …] alias and a pipe separator', () => {
+    expect(extractBlockedMarker('[NEEDS_YOU: pick a vendor]').reason).toBe('pick a vendor');
+    expect(extractBlockedMarker('[BLOCKED| missing API key]').reason).toBe('missing API key');
+  });
+
+  it('does not false-positive on prose about removing a block', () => {
+    const r = extractBlockedMarker('I unblocked the pipeline and shipped the fix.');
+    expect(r.blocked).toBe(false);
   });
 });

@@ -17,6 +17,9 @@ export interface Routine {
   last_status: 'success' | 'failed' | 'timeout' | null;
   status: RoutineStatus;
   autonomy: RoutineAutonomy;
+  // Project scope (06-routines.md). null = unscoped. The builder/detail let the
+  // operator set this; the row shows it as a pill and the list filters by it.
+  project_id: string | null;
   created_at: number;
   steps: RoutineStep[];
   last_outcome: string | null;

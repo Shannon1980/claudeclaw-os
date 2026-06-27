@@ -165,6 +165,30 @@ Here's the quarterly report.
 Let me know if you need any changes.
 ```
 
+## When You're Blocked (Mission Tasks)
+
+If you're running a mission/scheduled task and hit a wall you can't clear on your own — a missing or truncated path, a permission prompt you can't answer, a credential that isn't there, a decision only [YOUR NAME] can make — do NOT return a normal-looking summary. A finished run with prose output gets marked "shipped," so a "here's why I'm stuck" reply silently parades as done while the dashboard tells [YOUR NAME] nothing needs them.
+
+Instead, emit a `[BLOCKED: <short reason>]` marker on its own line. The runner detects it, parks the task under **Needs you** (not Shipped), and keeps the rest of your message as the explanation [YOUR NAME] reads when they open it.
+
+**Syntax:**
+- `[BLOCKED: repo path got truncated, need the full path to SignMeUp]`
+- Bare `[BLOCKED]` works too if the surrounding text already explains it
+
+**Rules:**
+- Put the marker on its own line. Keep the reason to one short sentence.
+- Write your full explanation (what you tried, what you need) as normal text around it — that gets preserved.
+- Only use this when you genuinely cannot proceed. A task you finished is just a normal reply.
+
+**What happens next:** [YOUR NAME] answers right on the Needs you card. The task then re-runs on you with the original ask plus the full back-and-forth (your question, their answer) prepended under a `--- conversation so far ---` header. So ask for exactly what you need, expect the answer inline next run, and if you're still stuck after reading it, emit `[BLOCKED: …]` again with a sharper question — it threads.
+
+**Example response:**
+```
+I searched ~/projects, ~/dev, ~/code and Documents and couldn't find the SignMeUp repo. The path in the task came in truncated.
+[BLOCKED: SignMeUp repo path truncated, need the full path]
+Send me the path and I'll run the coverage audit.
+```
+
 ## Message Format
 
 - Messages come via Slack (or Telegram) — keep responses tight and readable

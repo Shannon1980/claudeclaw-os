@@ -277,8 +277,9 @@ describe('audit log migration v1.2.4', () => {
       ),
     ) as { migrations: Record<string, string[]> };
 
-    // v1.2.4 is no longer the highest version (Phase 6 added v1.2.5), but it
-    // must remain a clean increment sitting directly after v1.2.3 in order.
+    // v1.2.4 is no longer the highest version (v1.2.5 routine-scope + Phase 6's
+    // v1.2.6 sit above it), but it must remain a clean increment sitting
+    // directly after v1.2.3 in order.
     const ordered = Object.keys(versionJson.migrations).sort(compareSemver);
     const idx = ordered.indexOf('v1.2.4');
     expect(idx).toBeGreaterThan(0);
@@ -315,22 +316,22 @@ describe('audit log migration v1.2.4', () => {
   });
 });
 
-// ── memory surface migration v1.2.5 (Phase 6, MEM-01/MEM-02 — Wave 0 RED) ──────
+// ── memory surface migration v1.2.6 (Phase 6, MEM-01/MEM-02 — Wave 0 RED) ──────
 //
-// These cases pin the v1.2.5 dual-write (P-4) contract for the memory surface:
+// These cases pin the v1.2.6 dual-write (P-4) contract for the memory surface:
 //   - D-06: a `category` column (TEXT, nullable) on memories.
 //   - D-04: a `confirmed` column (INTEGER NOT NULL DEFAULT 0) on memories.
 //   - D-08: a `memory_tombstones` table for provable no-re-derivation.
 //
-// They are RED on purpose: v1.2.5 is not yet registered in version.json and the
-// new columns/table do not yet exist in createSchema/runMigrations. Plan 02 turns
-// these GREEN by registering the version and adding the columns/table to BOTH the
+// Originally authored as v1.2.5, renumbered to v1.2.6 after main's
+// add-routine-project-scope claimed v1.2.5 first (merge reconciliation).
+// Plan 02 registers the version and adds the columns/table to BOTH the
 // in-memory test DB (PRAGMA-guarded ADDs in runMigrations) AND the versioned
-// migrations/v1.2.5/<name>.ts for the live store (byte-identical names/types,
+// migrations/v1.2.6/<name>.ts for the live store (byte-identical names/types,
 // Pitfall 1).
 
-describe('memory surface migration v1.2.5', () => {
-  it('registers a "v1.2.5" key in version.json mapping to a one-element migration list', () => {
+describe('memory surface migration v1.2.6', () => {
+  it('registers a "v1.2.6" key in version.json mapping to a one-element migration list', () => {
     const versionJson = JSON.parse(
       fs.readFileSync(
         path.join(process.cwd(), 'migrations', 'version.json'),
@@ -338,12 +339,12 @@ describe('memory surface migration v1.2.5', () => {
       ),
     ) as { migrations: Record<string, string[]> };
 
-    expect(versionJson.migrations).toHaveProperty('v1.2.5');
-    expect(Array.isArray(versionJson.migrations['v1.2.5'])).toBe(true);
-    expect(versionJson.migrations['v1.2.5']).toHaveLength(1);
+    expect(versionJson.migrations).toHaveProperty('v1.2.6');
+    expect(Array.isArray(versionJson.migrations['v1.2.6'])).toBe(true);
+    expect(versionJson.migrations['v1.2.6']).toHaveLength(1);
   });
 
-  it('v1.2.5 is the highest registered version (a clean increment over v1.2.4)', () => {
+  it('v1.2.6 is the highest registered version (a clean increment over v1.2.5)', () => {
     const versionJson = JSON.parse(
       fs.readFileSync(
         path.join(process.cwd(), 'migrations', 'version.json'),
@@ -352,7 +353,7 @@ describe('memory surface migration v1.2.5', () => {
     ) as { migrations: Record<string, string[]> };
 
     const highest = Object.keys(versionJson.migrations).sort(compareSemver).pop();
-    expect(highest).toBe('v1.2.5');
+    expect(highest).toBe('v1.2.6');
   });
 
   it('adds category (TEXT, nullable) + confirmed (INTEGER NOT NULL DEFAULT 0) to memories, idempotently', () => {

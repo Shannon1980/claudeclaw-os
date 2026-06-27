@@ -5,11 +5,13 @@ import { ScheduleBuilder } from '@/components/ScheduleBuilder';
 import { StepList } from '@/components/StepList';
 import { RunHistoryItem } from '@/components/RunHistoryItem';
 import { autonomyLabel } from '@/components/AutonomySelector';
+import { ProjectSelect } from '@/components/ProjectSelect';
 import { useFetch } from '@/lib/useFetch';
 import { describeCron } from '@/lib/cron';
 import type { Routine, RoutineRun, DraftStep } from '@/lib/routine';
 import { stepToDraft } from '@/lib/routine';
 import type { TeammateOption } from '@/components/StepRow';
+import type { ProjectLite } from '@/components/ProjectTaskAttach';
 
 // The expanded routine detail (UI-SPEC §2): four labelled blocks.
 //   When:    plain-language schedule (describeCron) + a "Change" action that
@@ -25,16 +27,18 @@ import type { TeammateOption } from '@/components/StepRow';
 interface Props {
   routine: Routine;
   teammates: TeammateOption[];
+  projects: ProjectLite[];
   busy: boolean;
   onRunNow: () => void;
   onTurnOff: () => void;
   onSaveSchedule: (cron: string) => void;
   onSaveSteps: (steps: DraftStep[]) => void;
+  onSaveProject: (projectId: string | null) => void;
 }
 
 export function RoutineDetail({
-  routine, teammates, busy,
-  onRunNow, onTurnOff, onSaveSchedule, onSaveSteps,
+  routine, teammates, projects, busy,
+  onRunNow, onTurnOff, onSaveSchedule, onSaveSteps, onSaveProject,
 }: Props) {
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [draftCron, setDraftCron] = useState(routine.schedule);
@@ -98,6 +102,19 @@ export function RoutineDetail({
         <div class="section-label mb-1.5">Steps</div>
         <StepList steps={stepDrafts} teammates={teammates} onChange={onSaveSteps} />
       </section>
+
+      {/* Project scope */}
+      {projects.some((p) => p.status === 'active') || routine.project_id ? (
+        <section>
+          <div class="section-label mb-1.5">Project</div>
+          <ProjectSelect
+            projects={projects}
+            value={routine.project_id}
+            disabled={busy}
+            onChange={onSaveProject}
+          />
+        </section>
+      ) : null}
 
       {/* Recent runs */}
       <section>

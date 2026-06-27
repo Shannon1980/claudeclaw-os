@@ -14,6 +14,7 @@ import { _initTestDatabase } from './db.js';
 import {
   enqueueApproval,
   listPending,
+  countPendingByRun,
   approve,
   deny,
   expireOlderThan,
@@ -88,6 +89,19 @@ describe('approval-queue', () => {
     expireOlderThan(cutoff);
     const found = listPending().find((p) => p.id === id);
     expect(found).toBeFalsy();
+  });
+
+  it('countPendingByRun counts only pending rows for that run (scheduler ship-vs-gate signal)', () => {
+    enqueueSample({ runId: 'mission-A' });
+    const a2 = enqueueSample({ runId: 'mission-A' });
+    enqueueSample({ runId: 'mission-B' });
+    expect(countPendingByRun('mission-A')).toBe(2);
+    expect(countPendingByRun('mission-B')).toBe(1);
+    expect(countPendingByRun('mission-none')).toBe(0);
+
+    // Deciding a row drops it out of the count — the run no longer waits on it.
+    deny(a2);
+    expect(countPendingByRun('mission-A')).toBe(1);
   });
 
   it('does not write env/secret material into the queue row', () => {

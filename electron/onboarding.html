@@ -266,20 +266,54 @@
           }
 
           $('login-btn').onclick = async () => {
-            $('login-btn').textContent = 'Opening sign-in…';
-            $('login-btn').disabled = true;
-            const res = await api.claudeLogin();
-            if (res.ok) {
-              state.auth = 'oauth';
-              $('login-btn').textContent = 'Sign in with Claude';
-              $('login-btn').disabled = false;
-              await confirmAndVerify('Signed in with your Claude subscription');
-            } else {
-              $('login-btn').textContent = 'Try again';
-              $('login-btn').disabled = false;
-              alert(res.error || 'Sign-in did not complete.');
+            const btn = $('login-btn');
+            btn.textContent = 'Opening sign-in…';
+            btn.disabled = true;
+            try {
+              const res = await api.claudeLogin();
+              if (res && res.ok) {
+                state.auth = 'oauth';
+                await confirmAndVerify('Signed in with your Claude subscription');
+              } else {
+                alert((res && res.error) || 'Sign-in did not complete.');
+              }
+            } catch (err) {
+              // The handler always resolves, but never let a thrown IPC error
+              // leave the button stuck on "Opening sign-in…".
+              alert('Sign-in failed: ' + ((err && err.message) || err));
+            } finally {
+              // Always reset out of the loading state (goal 3). If sign-in
+              // succeeded, confirmAndVerify already enabled Continue; the button
+              // stays available so the user can re-sign-in if they want.
+              btn.textContent = 'Sign in with Claude';
+              btn.disabled = false;
             }
           };
+
+          // Auto-detect an existing working login on entry (a prior `claude`
+          // login in the macOS Keychain, or a credential already in .env) so a
+          // signed-in user does not have to click sign-in again. Same round-trip
+          // the service uses; no token in .env is required.
+          if (!li) {
+            (async () => {
+              const btn = $('login-btn');
+              btn.textContent = 'Checking sign-in…';
+              btn.disabled = true;
+              let ok = false;
+              try {
+                const v = await api.verifyAuth();
+                ok = !!(v && v.ok);
+              } catch { /* fall through to manual sign-in */ }
+              if (ok) {
+                state.auth = state.auth || 'oauth';
+                $('login-ok').textContent = 'Signed in';
+                $('login-ok').classList.remove('hidden');
+                nextBtn.disabled = false;
+              }
+              btn.textContent = 'Sign in with Claude';
+              btn.disabled = false;
+            })();
+          }
           $('apikey-toggle').onclick = () =>
             $('apikey-box').classList.toggle('hidden');
           $('apikey-save').onclick = async () => {

@@ -276,6 +276,23 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_mission_status
       ON mission_tasks(assigned_agent, status, priority DESC, created_at ASC);
 
+    -- Per-task conversation thread. When an agent kicks a task back to the
+    -- operator (needs_you) it records an 'agent' turn; the operator's answer is
+    -- an 'operator' turn. The thread is the source of truth for the back-and-
+    -- forth: the runner assembles the effective prompt from it, and the Home
+    -- card renders it. Dual-written (createSchema + migration v1.2.5).
+    CREATE TABLE IF NOT EXISTS task_messages (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id     TEXT NOT NULL,
+      role        TEXT NOT NULL,            -- 'agent' | 'operator'
+      body        TEXT NOT NULL,
+      reason      TEXT,                     -- agent turns: the short blocker reason
+      created_at  INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_messages
+      ON task_messages(task_id, created_at);
+
     CREATE TABLE IF NOT EXISTS projects (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -614,6 +631,14 @@ function runMigrations(database: Database.Database): void {
   // CLAUDE.md / MEMORY.md.
   addColumnIfMissing(database, 'scheduled_tasks', 'autonomy', `TEXT NOT NULL DEFAULT 'unattended'`);
 
+  // Routine project scoping (06-routines.md: "Routines scope to Projects").
+  // Nullable project_id — NULL = unscoped, matching every pre-migration routine.
+  // Dual-written via the versioned migration migrations/v1.2.5/add-routine-project-scope.ts
+  // for the production DB; mirrored here so the in-memory test DB reaches column
+  // parity. No FK: deleteProject nulls this application-side (mirrors mission_tasks).
+  addColumnIfMissing(database, 'scheduled_tasks', 'project_id', `TEXT`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project ON scheduled_tasks(project_id)`);
+
   // Audit log enrichment (Phase 5, AUD-01 / D-01). Eleven nullable per-event
   // columns capturing the technical detail of each audited action. Dual-written
   // via the versioned migration migrations/v1.2.4/enrich-audit-log.ts for the
@@ -793,8 +818,8 @@ function runMigrations(database: Database.Database): void {
     logger.info('Migration: added pinned column to memories table');
   }
 
-  // Phase 6 Memory Surface (MEM-01/MEM-02, v1.2.5 dual-write). These three
-  // artifacts MUST stay byte-identical to migrations/v1.2.5/add-memory-surface-columns.ts
+  // Phase 6 Memory Surface (MEM-01/MEM-02, v1.2.6 dual-write). These three
+  // artifacts MUST stay byte-identical to migrations/v1.2.6/add-memory-surface-columns.ts
   // (Pitfall 1 / T-06-01 — drift crash-loops the live service on the next restart).
   // NEW inserts default confirmed=0 (machine-inferred facts land unconfirmed,
   // D-04); the grandfather UPDATE that flips EXISTING rows to confirmed=1 lives
@@ -1648,6 +1673,9 @@ export interface ScheduledTask {
   // Routines (Phase 2, D-07). Stored autonomy mode ('unattended' | 'queue_approval');
   // threaded into step-execution context, NOT enforced here (Phase 3 / D-08).
   autonomy: string;
+  // Routine project scoping (06-routines.md). NULL = unscoped. Only routines
+  // (source='routine') surface this in the operator UI; other sources leave it NULL.
+  project_id: string | null;
 }
 
 export function createScheduledTask(
@@ -1661,12 +1689,15 @@ export function createScheduledTask(
   // hand-created-task values so every existing caller is unchanged.
   source = 'user',
   autonomy = 'unattended',
+  // Routine project scoping (06-routines.md). NULL = unscoped; defaults preserve
+  // every existing caller. Only the routines surface passes a real id today.
+  projectId: string | null = null,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id, source, autonomy)
-     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
-  ).run(id, prompt, schedule, nextRun, now, agentId, source, autonomy);
+    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id, source, autonomy, project_id)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+  ).run(id, prompt, schedule, nextRun, now, agentId, source, autonomy, projectId);
 }
 
 export function getDueTasks(agentId = 'main'): ScheduledTask[] {
@@ -1778,7 +1809,7 @@ export function deleteScheduledTask(id: string): void {
  */
 export function updateScheduledTask(
   id: string,
-  patch: { prompt?: string; schedule?: string; nextRun?: number; agentId?: string },
+  patch: { prompt?: string; schedule?: string; nextRun?: number; agentId?: string; projectId?: string | null },
 ): void {
   const sets: string[] = [];
   const vals: any[] = [];
@@ -1786,6 +1817,8 @@ export function updateScheduledTask(
   if (patch.schedule !== undefined) { sets.push('schedule = ?'); vals.push(patch.schedule); }
   if (patch.nextRun !== undefined) { sets.push('next_run = ?'); vals.push(patch.nextRun); }
   if (patch.agentId !== undefined) { sets.push('agent_id = ?'); vals.push(patch.agentId); }
+  // projectId: null detaches (sets NULL), a string attaches; undefined leaves it.
+  if (patch.projectId !== undefined) { sets.push('project_id = ?'); vals.push(patch.projectId); }
   if (sets.length === 0) return;
   vals.push(id);
   db.prepare(`UPDATE scheduled_tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
@@ -2832,7 +2865,10 @@ export interface MissionTask {
   title: string;
   prompt: string;
   assigned_agent: string | null;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked';
+  // 'needs_you': the agent finished its run but kicked the task back to the
+  // operator (a [BLOCKED:…] marker in its output) — distinct from 'blocked'
+  // (parked waiting on a third party). Surfaces under "Needs you", not "Shipped".
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'blocked' | 'needs_you';
   result: string | null;
   error: string | null;
   created_by: string;
@@ -2942,7 +2978,7 @@ export function claimNextMissionTask(agentId: string): MissionTask | null {
 export function completeMissionTask(
   id: string,
   result: string | null,
-  status: 'completed' | 'failed',
+  status: 'completed' | 'failed' | 'needs_you',
   error?: string,
 ): void {
   const now = Math.floor(Date.now() / 1000);
@@ -2985,9 +3021,101 @@ export function unblockMissionTask(id: string): boolean {
 }
 
 /**
+ * Re-run a settled task. Returns a completed / failed / blocked / cancelled task
+ * to the queue, clearing the prior outcome so the runner claims it fresh. The
+ * assigned agent is kept so it re-runs on the same teammate. Powers the Home
+ * "Re-run" action — e.g. a task that finished only because a tool was gated,
+ * once the operator has granted access. Active tasks (queued/running) are a
+ * no-op so an in-flight run is never disturbed.
+ *
+ * `operatorReply` closes the loop on a 'needs_you' task: the agent paused and
+ * asked a question (a missing path, a decision), and this is the operator's
+ * answer. The reply is recorded as an 'operator' turn in the task_messages
+ * thread (the source of truth for the back-and-forth); the runner rebuilds the
+ * effective prompt from that thread on the next run via `buildTaskRunPrompt`.
+ * Replies are only honored for 'needs_you' tasks (the only state where the agent
+ * is actually waiting on the operator); a reply passed for any other state is
+ * ignored and the task re-runs as-is.
+ */
+export function requeueMissionTask(id: string, operatorReply?: string): boolean {
+  const reply = operatorReply?.trim();
+  if (reply) {
+    const task = getMissionTask(id);
+    if (task && task.status === 'needs_you') {
+      addTaskMessage(id, 'operator', reply);
+    }
+  }
+  const result = db.prepare(
+    `UPDATE mission_tasks
+       SET status = 'queued', result = NULL, error = NULL,
+           completed_at = NULL, started_at = NULL,
+           blocked_on = NULL, blocked_since = NULL
+     WHERE id = ? AND status IN ('completed', 'failed', 'blocked', 'cancelled', 'needs_you')`,
+  ).run(id);
+  return result.changes > 0;
+}
+
+// ── Task threads (per-task operator <-> agent conversation) ──────────
+
+export interface TaskMessage {
+  id: number;
+  task_id: string;
+  role: 'agent' | 'operator';
+  body: string;
+  reason: string | null;
+  created_at: number;
+}
+
+/**
+ * Append a turn to a task's thread. 'agent' turns are recorded when a run kicks
+ * the task back (needs_you) — `body` is the full reply, `reason` the short
+ * blocker line. 'operator' turns are the answers typed on the Home card.
+ */
+export function addTaskMessage(
+  taskId: string,
+  role: 'agent' | 'operator',
+  body: string,
+  reason?: string | null,
+): void {
+  db.prepare(
+    `INSERT INTO task_messages (task_id, role, body, reason, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(taskId, role, body, reason ?? null, Math.floor(Date.now() / 1000));
+}
+
+export function getTaskMessages(taskId: string): TaskMessage[] {
+  return db
+    .prepare('SELECT * FROM task_messages WHERE task_id = ? ORDER BY created_at ASC, id ASC')
+    .all(taskId) as TaskMessage[];
+}
+
+/**
+ * The prompt the runner actually executes. The base `prompt` column is the
+ * original ask and is never mutated. When a thread exists (the task has been
+ * kicked back and answered at least once), replay the conversation so the agent
+ * sees its own earlier question and the operator's answer before continuing.
+ */
+export function buildTaskRunPrompt(task: MissionTask): string {
+  const thread = getTaskMessages(task.id);
+  if (thread.length === 0) return task.prompt;
+  const lines = thread.map((m) =>
+    m.role === 'operator'
+      ? 'Operator: ' + m.body
+      : 'You previously paused and said: ' + (m.reason ? m.reason + ' — ' : '') + m.body,
+  );
+  return (
+    task.prompt +
+    '\n\n--- conversation so far ---\n' +
+    lines.join('\n\n') +
+    '\n\nContinue and finish the task using the operator\'s answer above.'
+  );
+}
+
+/**
  * The Home daily-loop payload, grouped server-side so the frontend makes one
  * call and holds no grouping logic. Mirrors specs/operator-product/03-home.md:
  *   needsYou = unassigned-queued (route it) + recent failed (handle it)
+ *              + recent needs_you (agent kicked it back — answer it)
  *   onPlate  = running + assigned-queued (active work, who's on it)
  *   waiting  = blocked (waiting on others)
  *   shipped  = completed within the last `recentDays`
@@ -3014,7 +3142,8 @@ export function getHomeSummary(recentDays = 7, projectId?: string): HomeSummary 
   const needsYou = all
     .filter((t) =>
       (t.status === 'queued' && !t.assigned_agent) ||
-      (t.status === 'failed' && (t.completed_at == null || t.completed_at >= cutoff)))
+      ((t.status === 'failed' || t.status === 'needs_you') &&
+        (t.completed_at == null || t.completed_at >= cutoff)))
     .sort(byPriority);
   const onPlate = all
     .filter((t) => t.status === 'running' || (t.status === 'queued' && !!t.assigned_agent))
@@ -3123,20 +3252,36 @@ export function setAgentPaused(agentId: string, paused: boolean): void {
 }
 
 export function deleteMissionTask(id: string): boolean {
-  const result = db.prepare(
-    `DELETE FROM mission_tasks WHERE id = ? AND status IN ('completed', 'cancelled', 'failed')`,
-  ).run(id);
-  return result.changes > 0;
+  const txn = db.transaction(() => {
+    const result = db.prepare(
+      `DELETE FROM mission_tasks WHERE id = ? AND status IN ('completed', 'cancelled', 'failed', 'needs_you')`,
+    ).run(id);
+    // Cascade the thread only when the task itself went (status guard above).
+    if (result.changes > 0) {
+      db.prepare('DELETE FROM task_messages WHERE task_id = ?').run(id);
+    }
+    return result.changes > 0;
+  });
+  return txn();
 }
 
 export function cleanupOldMissionTasks(olderThanDays = 7): number {
   const cutoff = Math.floor(Date.now() / 1000) - olderThanDays * 86400;
   // Project-linked tasks are kept: they're the project's input/output
   // history and only go away when the project itself is deleted.
-  const result = db.prepare(
-    `DELETE FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed') AND completed_at < ? AND project_id IS NULL`,
-  ).run(cutoff);
-  return result.changes;
+  const txn = db.transaction(() => {
+    // Capture ids first so the thread rows go with their tasks.
+    const ids = db.prepare(
+      `SELECT id FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed', 'needs_you') AND completed_at < ? AND project_id IS NULL`,
+    ).all(cutoff) as Array<{ id: string }>;
+    const result = db.prepare(
+      `DELETE FROM mission_tasks WHERE status IN ('completed', 'cancelled', 'failed', 'needs_you') AND completed_at < ? AND project_id IS NULL`,
+    ).run(cutoff);
+    const del = db.prepare('DELETE FROM task_messages WHERE task_id = ?');
+    for (const { id } of ids) del.run(id);
+    return result.changes;
+  });
+  return txn();
 }
 
 export function reassignMissionTask(id: string, newAgent: string): boolean {
@@ -3155,10 +3300,10 @@ export function assignMissionTask(id: string, agent: string): boolean {
 
 export function getMissionTaskHistory(limit = 30, offset = 0): { tasks: MissionTask[]; total: number } {
   const total = (db.prepare(
-    `SELECT COUNT(*) as c FROM mission_tasks WHERE status IN ('completed', 'failed', 'cancelled')`,
+    `SELECT COUNT(*) as c FROM mission_tasks WHERE status IN ('completed', 'failed', 'cancelled', 'needs_you')`,
   ).get() as { c: number }).c;
   const tasks = db.prepare(
-    `SELECT * FROM mission_tasks WHERE status IN ('completed', 'failed', 'cancelled')
+    `SELECT * FROM mission_tasks WHERE status IN ('completed', 'failed', 'cancelled', 'needs_you')
      ORDER BY completed_at DESC LIMIT ? OFFSET ?`,
   ).all(limit, offset) as MissionTask[];
   return { tasks, total };
@@ -3278,10 +3423,13 @@ export function updateProject(
   return result.changes > 0;
 }
 
-/** Delete a project and detach (not delete) its tasks. */
+/** Delete a project and detach (not delete) its tasks and routines. */
 export function deleteProject(id: string): boolean {
   const txn = db.transaction(() => {
     db.prepare(`UPDATE mission_tasks SET project_id = NULL WHERE project_id = ?`).run(id);
+    // Routines outlive their project (06-routines.md): detaching keeps them
+    // running unscoped rather than silently deleting standing automation.
+    db.prepare(`UPDATE scheduled_tasks SET project_id = NULL WHERE project_id = ?`).run(id);
     return db.prepare(`DELETE FROM projects WHERE id = ?`).run(id).changes > 0;
   });
   return txn();

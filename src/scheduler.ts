@@ -13,6 +13,9 @@ import {
   resetStuckTasks,
   claimNextMissionTask,
   completeMissionTask,
+  setMissionTaskBlocked,
+  addTaskMessage,
+  buildTaskRunPrompt,
   resetStuckMissionTasks,
   getMissionTask,
   isAgentPaused,
@@ -22,11 +25,13 @@ import {
   type ScheduledTask,
 } from './db.js';
 import { runRoutineOnce } from './routine-runner.js';
+import { countPendingByRun } from './approval-queue.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import type { GateContext } from './gate.js';
 import { formatForTelegram, splitMessage } from './bot.js';
+import { extractBlockedMarker } from './format.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { isAgentRunning } from './agent-create.js';
 import { AOS_CRON_SOURCE, parseJobFile } from './aos-cron.js';
@@ -463,12 +468,15 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
       agentId: delegateAgentId ?? schedulerAgentId,
       chatId,
     };
+    // The base prompt plus any prior blocked-back conversation (operator
+    // answers fold in here so a resumed needs_you task sees them).
+    const runPrompt = buildTaskRunPrompt(mission);
     try {
       let result: { text: string | null; aborted?: boolean };
       if (delegateAgentId) {
         const delegated = await delegateToAgent(
           delegateAgentId,
-          mission.prompt,
+          runPrompt,
           chatId,
           'main',
           undefined,
@@ -478,7 +486,7 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
         );
         result = { text: delegated.text, aborted: abortController.signal.aborted };
       } else {
-        result = await runAgent(mission.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist, undefined, missionGateCtx);
+        result = await runAgent(runPrompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist, undefined, missionGateCtx);
       }
       clearTimeout(timeout);
       clearInterval(cancelPoll);
@@ -499,9 +507,32 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
           }
         }
       } else {
-        const text = result.text?.trim() || 'Task completed with no output.';
-        completeMissionTask(mission.id, text, 'completed');
-        logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');
+        const rawText = result.text?.trim() || 'Task completed with no output.';
+        // A run can finish without throwing yet still not have shipped anything.
+        // Two distinct dead ends, both "needs the operator":
+        //   1. A Tier 3/4 gate enqueued an approval and denied the tool inline,
+        //      so the run ends with a please-approve message. Detect via the
+        //      pending approvals this run left (run_id === mission.id) and park
+        //      it as waiting — once approved, the operator re-runs it.
+        //   2. The agent hit a missing path / decision only the operator can
+        //      make and said so with a [BLOCKED:…] marker → route to needs_you.
+        // Either way it must not parade under "Shipped" as if delivered.
+        const { blocked, reason, text } = extractBlockedMarker(rawText);
+        const pendingGates = countPendingByRun(mission.id);
+        if (pendingGates > 0) {
+          setMissionTaskBlocked(mission.id, 'you (tool approval)');
+          logger.info({ missionId: mission.id, pendingGates }, 'Mission task parked — waiting on operator approval');
+        } else if (blocked) {
+          const blockReason = reason || 'Needs your input to continue';
+          completeMissionTask(mission.id, text, 'needs_you', blockReason);
+          // Record the agent's turn so the Home card shows the full back-and-
+          // forth, not just the latest snapshot (task_messages is the thread).
+          addTaskMessage(mission.id, 'agent', text, blockReason);
+          logger.info({ missionId: mission.id, delegateAgentId, reason }, 'Mission task blocked back to operator');
+        } else {
+          completeMissionTask(mission.id, text, 'completed');
+          logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');
+        }
 
         // Send result to the user
         const outText = delegateAgentId

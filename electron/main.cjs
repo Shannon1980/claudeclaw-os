@@ -469,6 +469,193 @@ function extractOauthToken(stdout) {
   return m ? m[0] : '';
 }
 
+// Strip ANSI escape sequences and stray control chars so a token rendered by the
+// CLI's Ink TUI (under a PTY — see runSetupTokenPty) can be matched even when
+// wrapped in styling codes. Newlines/tabs are preserved so streamed log lines
+// stay readable; carriage returns and other control bytes are dropped.
+function stripAnsi(s) {
+  return String(s)
+    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B[@-Z\\-_]/g, '')
+    .replace(/[\r\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
+// Like extractOauthToken, but only returns a token that is ALREADY followed by a
+// boundary character in `text`. Used for early-resolve on the live PTY stream: a
+// chunk that splits the token mid-string must not yield a truncated value (we
+// wait for the next chunk to land the trailing boundary).
+function extractOauthTokenBounded(text) {
+  const m = text.match(/sk-ant-oat[0-9A-Za-z_-]+/);
+  if (!m) return '';
+  if (m.index + m[0].length >= text.length) return ''; // token may be mid-stream
+  return m[0];
+}
+
+// ── Auth probe (keychain-aware) ────────────────────────────────────────
+// The live service authenticates a spawned `claude` through HOME-resolved creds
+// (macOS Keychain) when no token is in .env — getScrubbedSdkEnv keeps HOME. So
+// "are you signed in?" is answered the same way the service answers it: spawn a
+// trivial non-interactive prompt and see if the model replies. Exit 0 with a
+// reply = authenticated; a non-zero exit or a "Not logged in" notice = not.
+//   This is what lets onboarding accept an existing Keychain login WITHOUT
+//   demanding a CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY string in the .env.
+function runAuthProbe(sdkEnv, timeoutMs = 60000) {
+  const bin = cfg.claudeBinaryPath();
+  return new Promise((resolve) => {
+    let proc;
+    try {
+      proc = spawn(bin, ['-p', 'reply with the single word: ok'], {
+        cwd: APP_ROOT,
+        env: sdkEnv,
+      });
+    } catch (err) {
+      resolve({ ok: false, error: String(err) });
+      return;
+    }
+    let out = '';
+    let errOut = '';
+    let settled = false;
+    const done = (r) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => {
+      try {
+        proc.kill();
+      } catch {
+        /* gone */
+      }
+      done({ ok: false, error: 'Verification timed out. Check your connection and try again.' });
+    }, timeoutMs);
+    proc.stdout.on('data', (b) => {
+      out += b.toString();
+    });
+    proc.stderr.on('data', (b) => {
+      errOut += b.toString();
+    });
+    proc.on('error', (err) => done({ ok: false, error: String(err) }));
+    proc.on('exit', (code) => {
+      // CLI 2.1.x prints "Not logged in · Please run /login" to stdout and exits
+      // non-zero when unauthenticated; guard on both so a stray reply can't read
+      // as success.
+      if (code === 0 && out.trim() && !/not logged in/i.test(out)) {
+        done({ ok: true });
+      } else {
+        done({
+          ok: false,
+          error: (errOut.trim() || out.trim() || 'Sign-in could not be verified.').slice(0, 400),
+        });
+      }
+    });
+  });
+}
+
+// Resolve whether a usable login already exists, exactly the way the service
+// would use it. Reads auth secrets from the managed .env (file-only, CR-02): if
+// one is present, forward ONLY the single active source (never-coexist, WR-01);
+// if NONE is present, probe with the Keychain fallback (getScrubbedSdkEnv() with
+// no forced auth — mirrors src/agent.ts running against an empty .env). Returns
+// { ok, error?, source }.
+async function probeExistingAuth() {
+  let getScrubbedSdkEnv;
+  try {
+    ({ getScrubbedSdkEnv } = await loadSecurity());
+  } catch (err) {
+    return { ok: false, error: `Could not load auth verifier: ${String(err)}`, source: 'none' };
+  }
+  const secrets = cfg.readEnvFromFile(ENV_PATH, [
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+  ]);
+  const source = await cfg.activeAuthSource(secrets); // 'apikey' | 'oauth' | 'none'
+  const sdkEnv =
+    source === 'apikey'
+      ? getScrubbedSdkEnv({ ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY })
+      : source === 'oauth'
+        ? getScrubbedSdkEnv({ CLAUDE_CODE_OAUTH_TOKEN: secrets.CLAUDE_CODE_OAUTH_TOKEN })
+        : getScrubbedSdkEnv(); // Keychain fallback — no token required in .env
+  const res = await runAuthProbe(sdkEnv);
+  return { ...res, source };
+}
+
+// ── setup-token under a PTY ────────────────────────────────────────────
+// `claude setup-token` (CLI 2.1.x) renders its token through an Ink/React TUI
+// (ConsoleOAuthFlow) that only paints to a TTY. A plain piped spawn therefore
+// completes the browser OAuth but never emits a parseable token to stdout — the
+// original "button stuck / nothing captured" bug. Allocate a real PTY with the
+// system `script` so the UI renders and the token is capturable. No native pty
+// dependency (the native build toolchain is unreliable here).
+function setupTokenPtyCommand() {
+  const bin = cfg.claudeBinaryPath();
+  if (process.platform === 'darwin') {
+    // BSD script: `script -q <file> <cmd> [args...]`.
+    return { cmd: '/usr/bin/script', args: ['-q', '/dev/null', bin, 'setup-token'] };
+  }
+  // util-linux script: `script -qec "<cmd string>" <file>` (runs via /bin/sh, so
+  // single-quote the binary path to survive spaces).
+  const quoted = `'${bin.replace(/'/g, `'\\''`)}' setup-token`;
+  return { cmd: 'script', args: ['-qec', quoted, '/dev/null'] };
+}
+
+// Drive `claude setup-token` under a PTY and capture the printed token. Resolves
+// { ok, stdout, error? }. Early-resolves as soon as a complete token has been
+// printed (so a possibly-lingering TUI does not stall the wizard), and is bounded
+// by an overall timeout (browser OAuth needs human interaction).
+//   SECURITY: stdout may contain the token; it is only returned for parsing.
+//   Every chunk is ANSI-stripped and redactTokens'd before it reaches the
+//   renderer log, so the raw token never lands in the visible #log (CR-01).
+function runSetupTokenPty({ timeoutMs = 180000 } = {}) {
+  return new Promise((resolve) => {
+    const { cmd, args } = setupTokenPtyCommand();
+    let proc;
+    try {
+      // stdin must be /dev/null ('ignore'), NOT the default pipe: BSD `script`
+      // calls tcgetattr on its stdin to clone the terminal attrs onto the slave
+      // pty, and a pipe/socket fails that with "Operation not supported on
+      // socket" (the spawn aborts). /dev/null is tolerated and `script` still
+      // allocates the pty the child needs to render its token UI. The Ink flow
+      // does not read stdin for the loopback OAuth, so EOF on stdin is harmless.
+      proc = spawn(cmd, args, {
+        cwd: APP_ROOT,
+        env: { ...process.env, TERM: process.env.TERM || 'xterm-256color' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      resolve({ ok: false, stdout: '', error: String(err) });
+      return;
+    }
+    let raw = '';
+    let settled = false;
+    const finish = (r) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        proc.kill();
+      } catch {
+        /* gone */
+      }
+      resolve(r);
+    };
+    const timer = setTimeout(
+      () => finish({ ok: false, stdout: raw, error: 'timed out waiting for sign-in' }),
+      timeoutMs,
+    );
+    const onData = (b) => {
+      const s = b.toString();
+      raw += s;
+      sendLog(redactTokens(stripAnsi(s))); // never stream the raw token
+      if (extractOauthTokenBounded(stripAnsi(raw))) finish({ ok: true, stdout: raw });
+    };
+    proc.stdout.on('data', onData);
+    if (proc.stderr) proc.stderr.on('data', onData);
+    proc.on('error', (err) => finish({ ok: false, stdout: raw, error: String(err) }));
+    proc.on('exit', (code) => finish({ ok: code === 0, stdout: raw }));
+  });
+}
+
 function registerOnboardingHandlers() {
   ipcMain.handle('onb:getState', () => {
     const cli = cfg.checkClaudeCli();
@@ -500,31 +687,46 @@ function registerOnboardingHandlers() {
 
   ipcMain.handle('onb:checkLogin', () => ({ loggedIn: cfg.checkLogin(ENV_PATH) }));
 
-  // Sign in via `claude setup-token` (A1: spawn+capture works from a non-TTY
-  // Electron subprocess). The CLI walks the user through browser OAuth and prints
-  // a 1-year CLAUDE_CODE_OAUTH_TOKEN to stdout; we capture it and persist it via
-  // the tested precedence helper. Success = token captured, NOT a filesystem
-  // heuristic (creds otherwise live in the encrypted macOS Keychain).
-  //   SECURITY: the token is never logged; only the OAuth prompts stream to the
-  //   wizard log, and the parsed token goes straight to writeEnv (0600).
+  // Sign in. Two paths, in order:
+  //   1. If a usable login already exists (a prior `claude` login lives in the
+  //      macOS Keychain, or a credential is already in .env), there is nothing to
+  //      do — the service authenticates through the very same path. This is the
+  //      common case and needs no browser and no token in .env (the onboarding
+  //      gate used to wrongly demand one).
+  //   2. Otherwise drive `claude setup-token` under a PTY to mint a portable
+  //      1-year CLAUDE_CODE_OAUTH_TOKEN. CLI 2.1.x renders the token through an
+  //      Ink TUI that only paints to a TTY, so the old piped spawn captured
+  //      nothing (the stuck-button bug); the PTY makes it capturable. We persist
+  //      any captured token, then RE-PROBE: success of the probe is the real
+  //      signal, so even if the token could not be scraped, a login that
+  //      setup-token established (Keychain) still advances the wizard.
+  //   SECURITY: the token is never logged; only ANSI-stripped, redacted OAuth
+  //   prompts stream to the wizard log, and a parsed token goes to writeEnv (0600).
   ipcMain.handle('onb:claudeLogin', async () => {
+    const existing = await probeExistingAuth();
+    if (existing.ok) return { ok: true, alreadySignedIn: true };
+
     sendLog('Opening Claude sign-in…\n');
-    const bin = cfg.claudeBinaryPath();
-    const res = await runStreaming(bin, ['setup-token']);
-    const token = extractOauthToken(res.stdout);
-    if (!token) {
-      return {
-        ok: false,
-        error: res.error || 'Sign-in did not complete — no token was captured. Try again.',
-      };
+    const res = await runSetupTokenPty();
+    const token = extractOauthToken(stripAnsi(res.stdout || ''));
+    if (token) {
+      try {
+        const delta = await cfg.resolveAuthWrite('oauth', token);
+        cfg.writeEnv(ENV_PATH, delta);
+      } catch (err) {
+        return { ok: false, error: `Captured the token but could not save it: ${String(err)}` };
+      }
     }
-    try {
-      const delta = await cfg.resolveAuthWrite('oauth', token);
-      cfg.writeEnv(ENV_PATH, delta);
-    } catch (err) {
-      return { ok: false, error: `Captured the token but could not save it: ${String(err)}` };
-    }
-    return { ok: true };
+
+    // Whether or not a token was scraped, confirm the login actually works.
+    const after = await probeExistingAuth();
+    if (after.ok) return { ok: true };
+    return {
+      ok: false,
+      error: res.error
+        ? `Sign-in did not complete: ${res.error}`
+        : after.error || 'Sign-in did not complete — no working login was detected. Try again.',
+    };
   });
 
   // Own auth precedence: OAuth and an API key must never both be active, or a
@@ -562,86 +764,19 @@ function registerOnboardingHandlers() {
     }
   });
 
-  // Prove the captured credential ACTUALLY authenticates (MED-3): read the
-  // credential from the data-dir .env, build the SDK subprocess env via
-  // getScrubbedSdkEnv (so only the chosen auth var is present, exactly like
-  // src/agent.ts), spawn the native `claude` binary on a trivial non-interactive
-  // prompt, and return ok only if it returns a model reply — not merely if a
-  // token string exists. On failure return the stderr reason.
+  // Prove a login ACTUALLY authenticates (MED-3): spawn the native `claude`
+  // binary on a trivial non-interactive prompt and return ok only if it returns
+  // a model reply — not merely if a token string exists. probeExistingAuth
+  // mirrors the service exactly: it uses the credential in the managed .env when
+  // present (single active source only, never-coexist), and otherwise falls back
+  // to the HOME-resolved macOS Keychain login — so a machine signed in via
+  // `claude login` (no token in .env) verifies as signed-in.
   //   SECURITY: the token is never logged; getScrubbedSdkEnv strips every other
   //   secret from the subprocess env so a compromised prompt can't read them.
   ipcMain.handle('onb:verifyAuth', async () => {
-    let getScrubbedSdkEnv;
-    try {
-      ({ getScrubbedSdkEnv } = await loadSecurity());
-    } catch (err) {
-      return { ok: false, error: `Could not load auth verifier: ${String(err)}` };
-    }
-    // File-only read (CR-02): verification must authenticate with the credential
-    // the operator chose (written to the .env), never a stale ANTHROPIC_API_KEY
-    // inherited from the Electron parent environment.
-    const secrets = cfg.readEnvFromFile(ENV_PATH, [
-      'CLAUDE_CODE_OAUTH_TOKEN',
-      'ANTHROPIC_API_KEY',
-    ]);
-    if (!secrets.CLAUDE_CODE_OAUTH_TOKEN && !secrets.ANTHROPIC_API_KEY) {
-      return { ok: false, error: 'No credential to verify. Sign in first.' };
-    }
-    // Enforce the never-coexist invariant at the spawn boundary (WR-01): resolve
-    // the single active source and forward ONLY that var, so a hand-edited or
-    // contaminated .env can never push both credentials into the SDK subprocess.
-    const source = await cfg.activeAuthSource(secrets); // 'apikey' | 'oauth' | 'none'
-    const sdkEnv = getScrubbedSdkEnv(
-      source === 'apikey'
-        ? { ANTHROPIC_API_KEY: secrets.ANTHROPIC_API_KEY }
-        : { CLAUDE_CODE_OAUTH_TOKEN: secrets.CLAUDE_CODE_OAUTH_TOKEN },
-    );
-    const bin = cfg.claudeBinaryPath();
     sendLog('Checking your sign-in…\n');
-    return await new Promise((resolve) => {
-      let proc;
-      try {
-        proc = spawn(bin, ['-p', 'reply with the single word: ok'], {
-          cwd: APP_ROOT,
-          env: sdkEnv,
-        });
-      } catch (err) {
-        resolve({ ok: false, error: String(err) });
-        return;
-      }
-      let out = '';
-      let errOut = '';
-      const timer = setTimeout(() => {
-        try {
-          proc.kill();
-        } catch {
-          /* gone */
-        }
-        resolve({ ok: false, error: 'Verification timed out. Check your connection and try again.' });
-      }, 60000);
-      proc.stdout.on('data', (b) => {
-        out += b.toString();
-      });
-      proc.stderr.on('data', (b) => {
-        errOut += b.toString();
-      });
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        resolve({ ok: false, error: String(err) });
-      });
-      proc.on('exit', (code) => {
-        clearTimeout(timer);
-        if (code === 0 && out.trim()) {
-          resolve({ ok: true });
-        } else {
-          resolve({
-            ok: false,
-            error:
-              (errOut.trim() || 'Sign-in could not be verified.').slice(0, 400),
-          });
-        }
-      });
-    });
+    const res = await probeExistingAuth();
+    return { ok: res.ok, error: res.error };
   });
 
   ipcMain.handle('onb:saveTransport', (_e, payload) => {

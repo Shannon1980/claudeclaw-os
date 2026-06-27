@@ -33,6 +33,15 @@ import {
   _getScheduledTaskColumns,
   createMissionTask,
   claimNextMissionTask,
+  completeMissionTask,
+  getHomeSummary,
+  deleteMissionTask,
+  setMissionTaskBlocked,
+  requeueMissionTask,
+  addTaskMessage,
+  getTaskMessages,
+  buildTaskRunPrompt,
+  getMissionTask,
   getTeamRoster,
   getPausedAgents,
   isAgentPaused,
@@ -628,6 +637,166 @@ describe('database', () => {
     });
   });
 
+  describe('needs_you classification (blocked-back tasks surface under Needs you)', () => {
+    it('files a needs_you task under needsYou, never shipped', () => {
+      createMissionTask('nb-1', 'Run coverage audit', 'p', 'sentinel');
+      claimNextMissionTask('sentinel'); // → running
+      completeMissionTask('nb-1', 'I searched everywhere, the repo path was truncated.', 'needs_you', 'repo path truncated');
+
+      const { needsYou, shipped } = getHomeSummary();
+      expect(needsYou.some((t) => t.id === 'nb-1')).toBe(true);
+      expect(shipped.some((t) => t.id === 'nb-1')).toBe(false);
+
+      const item = needsYou.find((t) => t.id === 'nb-1');
+      expect(item?.error).toBe('repo path truncated');
+      expect(item?.result).toContain('truncated');
+    });
+
+    it('keeps a genuinely completed task under shipped', () => {
+      createMissionTask('nb-2', 'Write brief', 'p', 'research');
+      claimNextMissionTask('research');
+      completeMissionTask('nb-2', 'Here is the brief.', 'completed');
+
+      const { needsYou, shipped } = getHomeSummary();
+      expect(shipped.some((t) => t.id === 'nb-2')).toBe(true);
+      expect(needsYou.some((t) => t.id === 'nb-2')).toBe(false);
+    });
+
+    it('lets the operator dismiss a needs_you task', () => {
+      createMissionTask('nb-3', 'Stuck task', 'p', 'ops');
+      claimNextMissionTask('ops');
+      completeMissionTask('nb-3', 'blocked', 'needs_you', 'why');
+      expect(deleteMissionTask('nb-3')).toBe(true);
+      expect(getHomeSummary().needsYou.some((t) => t.id === 'nb-3')).toBe(false);
+    });
+  });
+
+  // ── Home daily-loop classification + re-run ─────────────────────────
+  describe('mission task lifecycle (Home loop)', () => {
+    it('getHomeSummary buckets by status: only completed lands in shipped', () => {
+      createMissionTask('m-done', 'Send the brief', 'p', 'comms');
+      createMissionTask('m-fail', 'Pull the inbox', 'p', 'comms');
+      createMissionTask('m-block', 'Chase invoice', 'p', 'comms');
+      claimNextMissionTask('comms'); // m-done -> running (oldest first)
+      completeMissionTask('m-done', 'shipped it', 'completed');
+      claimNextMissionTask('comms'); // m-fail -> running
+      completeMissionTask('m-fail', null, 'failed', 'boom');
+      setMissionTaskBlocked('m-block', 'you (tool approval)');
+
+      const s = getHomeSummary();
+      expect(s.shipped.map((t) => t.id)).toEqual(['m-done']);
+      expect(s.needsYou.map((t) => t.id)).toContain('m-fail'); // failures need a look
+      expect(s.waiting.map((t) => t.id)).toEqual(['m-block']); // not shipped
+    });
+
+    it('requeueMissionTask returns a completed task to the queue, clearing the prior outcome', () => {
+      createMissionTask('m-redo', 'Pull the inbox', 'p', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-redo', 'asked for Gmail permission', 'completed');
+
+      expect(requeueMissionTask('m-redo')).toBe(true);
+      const t = getMissionTask('m-redo');
+      expect(t?.status).toBe('queued');
+      expect(t?.result).toBeNull();
+      expect(t?.completed_at).toBeNull();
+      expect(t?.assigned_agent).toBe('comms'); // re-runs on the same teammate
+      // It now reads as active work again, not shipped.
+      const s = getHomeSummary();
+      expect(s.shipped.map((t2) => t2.id)).not.toContain('m-redo');
+      expect(s.onPlate.map((t2) => t2.id)).toContain('m-redo');
+    });
+
+    it('requeueMissionTask revives a blocked or failed task, and is a no-op for in-flight runs', () => {
+      createMissionTask('m-blocked', 'Chase invoice', 'p', 'comms');
+      setMissionTaskBlocked('m-blocked', 'you (tool approval)');
+      expect(requeueMissionTask('m-blocked')).toBe(true);
+      const revived = getMissionTask('m-blocked');
+      expect(revived?.status).toBe('queued');
+      expect(revived?.blocked_on).toBeNull();
+
+      createMissionTask('m-running', 'Draft reply', 'p', 'comms');
+      claimNextMissionTask('comms'); // m-blocked (queued) is older; claim picks it first
+      // Whichever is running, requeue must refuse a running task.
+      const running = getHomeSummary().onPlate.find((t) => t.status === 'running');
+      expect(running).toBeTruthy();
+      expect(requeueMissionTask(running!.id)).toBe(false);
+    });
+
+    it('records an operator reply as a thread turn and resumes the task (prompt unmutated)', () => {
+      createMissionTask('m-ask', 'Run the SignMeUp test suite', 'cd into the SignMeUp repo and run the tests', 'sentinel');
+      claimNextMissionTask('sentinel');
+      completeMissionTask('m-ask', 'I could not find the repo path.', 'needs_you', 'SignMeUp repo path was truncated');
+      // The agent's kick-back turn would be recorded by the scheduler — mirror it.
+      addTaskMessage('m-ask', 'agent', 'I could not find the repo path.', 'SignMeUp repo path was truncated');
+
+      expect(requeueMissionTask('m-ask', '  /Users/shannon/dev/signmeup  ')).toBe(true);
+      const t = getMissionTask('m-ask');
+      expect(t?.status).toBe('queued');
+      expect(t?.error).toBeNull();
+      expect(t?.assigned_agent).toBe('sentinel'); // resumes on the same teammate
+      expect(t?.prompt).toBe('cd into the SignMeUp repo and run the tests'); // base prompt never mutated
+
+      // The reply is a trimmed 'operator' turn in the thread.
+      const thread = getTaskMessages('m-ask');
+      expect(thread.map((m) => m.role)).toEqual(['agent', 'operator']);
+      expect(thread[1].body).toBe('/Users/shannon/dev/signmeup');
+
+      // The runner's effective prompt replays the original ask + the exchange.
+      const runPrompt = buildTaskRunPrompt(t!);
+      expect(runPrompt).toContain('cd into the SignMeUp repo and run the tests');
+      expect(runPrompt).toContain('SignMeUp repo path was truncated');
+      expect(runPrompt).toContain('/Users/shannon/dev/signmeup');
+    });
+
+    it('ignores an operator reply unless the task is needs_you (no thread turn)', () => {
+      createMissionTask('m-done', 'Pull the inbox', 'original prompt', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-done', 'done', 'completed');
+      // A reply on a completed task is a plain re-run — no turn recorded.
+      expect(requeueMissionTask('m-done', 'some answer')).toBe(true);
+      expect(getMissionTask('m-done')?.prompt).toBe('original prompt');
+      expect(getTaskMessages('m-done')).toEqual([]);
+    });
+
+    it('a blank operator reply is a plain re-run (no thread turn)', () => {
+      createMissionTask('m-blank', 'Task', 'just the prompt', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-blank', 'stuck', 'needs_you', 'need input');
+      expect(requeueMissionTask('m-blank', '   ')).toBe(true);
+      const t = getMissionTask('m-blank');
+      expect(t?.status).toBe('queued');
+      expect(getTaskMessages('m-blank')).toEqual([]);
+    });
+
+    it('buildTaskRunPrompt returns the base prompt verbatim when there is no thread', () => {
+      createMissionTask('m-plain', 'Task', 'do the thing', 'comms');
+      expect(buildTaskRunPrompt(getMissionTask('m-plain')!)).toBe('do the thing');
+    });
+
+    it('a multi-round thread replays every turn in order', () => {
+      createMissionTask('m-multi', 'Deploy', 'deploy the app', 'ops');
+      addTaskMessage('m-multi', 'agent', 'which env?', 'missing target env');
+      addTaskMessage('m-multi', 'operator', 'staging');
+      addTaskMessage('m-multi', 'agent', 'which region?', 'missing region');
+      addTaskMessage('m-multi', 'operator', 'us-east-1');
+      const p = buildTaskRunPrompt(getMissionTask('m-multi')!);
+      expect(p.indexOf('which env?')).toBeLessThan(p.indexOf('staging'));
+      expect(p.indexOf('staging')).toBeLessThan(p.indexOf('which region?'));
+      expect(p.indexOf('which region?')).toBeLessThan(p.indexOf('us-east-1'));
+    });
+
+    it('deleting a task cascades its thread', () => {
+      createMissionTask('m-del', 'Task', 'p', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-del', 'stuck', 'needs_you', 'why');
+      addTaskMessage('m-del', 'agent', 'stuck', 'why');
+      addTaskMessage('m-del', 'operator', 'here you go');
+      expect(getTaskMessages('m-del')).toHaveLength(2);
+      expect(deleteMissionTask('m-del')).toBe(true);
+      expect(getTaskMessages('m-del')).toEqual([]);
+    });
+  });
+
   // ── Phase 2 Routines: routine_steps / routine_runs / autonomy ─────
   // RED (Wave 0): the CRUD fns + companion tables + autonomy column do not
   // exist yet — 02-02 lands them. Uses _initTestDatabase() real in-memory SQLite.
@@ -935,7 +1104,7 @@ describe('database', () => {
   // ── Phase 6 Memory Surface: schema artifacts (Wave 0 RED — MEM-01/MEM-02) ──
   //
   // createSchema (via _initTestDatabase) must produce the same three artifacts
-  // the v1.2.5 migration adds for the live store (dual-write, P-4 / Pitfall 1):
+  // the v1.2.6 migration adds for the live store (dual-write, P-4 / Pitfall 1):
   //   - D-06: memories.category (TEXT, nullable).
   //   - D-04: memories.confirmed (INTEGER NOT NULL DEFAULT 0).
   //   - D-08: a memory_tombstones table + (chat_id, text_hash) index.
