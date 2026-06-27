@@ -614,6 +614,14 @@ function runMigrations(database: Database.Database): void {
   // CLAUDE.md / MEMORY.md.
   addColumnIfMissing(database, 'scheduled_tasks', 'autonomy', `TEXT NOT NULL DEFAULT 'unattended'`);
 
+  // Routine project scoping (06-routines.md: "Routines scope to Projects").
+  // Nullable project_id — NULL = unscoped, matching every pre-migration routine.
+  // Dual-written via the versioned migration migrations/v1.2.5/add-routine-project-scope.ts
+  // for the production DB; mirrored here so the in-memory test DB reaches column
+  // parity. No FK: deleteProject nulls this application-side (mirrors mission_tasks).
+  addColumnIfMissing(database, 'scheduled_tasks', 'project_id', `TEXT`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_project ON scheduled_tasks(project_id)`);
+
   // Audit log enrichment (Phase 5, AUD-01 / D-01). Eleven nullable per-event
   // columns capturing the technical detail of each audited action. Dual-written
   // via the versioned migration migrations/v1.2.4/enrich-audit-log.ts for the
@@ -1388,6 +1396,9 @@ export interface ScheduledTask {
   // Routines (Phase 2, D-07). Stored autonomy mode ('unattended' | 'queue_approval');
   // threaded into step-execution context, NOT enforced here (Phase 3 / D-08).
   autonomy: string;
+  // Routine project scoping (06-routines.md). NULL = unscoped. Only routines
+  // (source='routine') surface this in the operator UI; other sources leave it NULL.
+  project_id: string | null;
 }
 
 export function createScheduledTask(
@@ -1401,12 +1412,15 @@ export function createScheduledTask(
   // hand-created-task values so every existing caller is unchanged.
   source = 'user',
   autonomy = 'unattended',
+  // Routine project scoping (06-routines.md). NULL = unscoped; defaults preserve
+  // every existing caller. Only the routines surface passes a real id today.
+  projectId: string | null = null,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id, source, autonomy)
-     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
-  ).run(id, prompt, schedule, nextRun, now, agentId, source, autonomy);
+    `INSERT INTO scheduled_tasks (id, prompt, schedule, next_run, status, created_at, agent_id, source, autonomy, project_id)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+  ).run(id, prompt, schedule, nextRun, now, agentId, source, autonomy, projectId);
 }
 
 export function getDueTasks(agentId = 'main'): ScheduledTask[] {
@@ -1518,7 +1532,7 @@ export function deleteScheduledTask(id: string): void {
  */
 export function updateScheduledTask(
   id: string,
-  patch: { prompt?: string; schedule?: string; nextRun?: number; agentId?: string },
+  patch: { prompt?: string; schedule?: string; nextRun?: number; agentId?: string; projectId?: string | null },
 ): void {
   const sets: string[] = [];
   const vals: any[] = [];
@@ -1526,6 +1540,8 @@ export function updateScheduledTask(
   if (patch.schedule !== undefined) { sets.push('schedule = ?'); vals.push(patch.schedule); }
   if (patch.nextRun !== undefined) { sets.push('next_run = ?'); vals.push(patch.nextRun); }
   if (patch.agentId !== undefined) { sets.push('agent_id = ?'); vals.push(patch.agentId); }
+  // projectId: null detaches (sets NULL), a string attaches; undefined leaves it.
+  if (patch.projectId !== undefined) { sets.push('project_id = ?'); vals.push(patch.projectId); }
   if (sets.length === 0) return;
   vals.push(id);
   db.prepare(`UPDATE scheduled_tasks SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
@@ -3042,10 +3058,13 @@ export function updateProject(
   return result.changes > 0;
 }
 
-/** Delete a project and detach (not delete) its tasks. */
+/** Delete a project and detach (not delete) its tasks and routines. */
 export function deleteProject(id: string): boolean {
   const txn = db.transaction(() => {
     db.prepare(`UPDATE mission_tasks SET project_id = NULL WHERE project_id = ?`).run(id);
+    // Routines outlive their project (06-routines.md): detaching keeps them
+    // running unscoped rather than silently deleting standing automation.
+    db.prepare(`UPDATE scheduled_tasks SET project_id = NULL WHERE project_id = ?`).run(id);
     return db.prepare(`DELETE FROM projects WHERE id = ?`).run(id).changes > 0;
   });
   return txn();
