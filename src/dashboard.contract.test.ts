@@ -16,7 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { _initTestDatabase } from './db.js';
+import { _initTestDatabase, createMissionTask, claimNextMissionTask, completeMissionTask } from './db.js';
 import { buildDashboardApp } from './dashboard.js';
 import { resolveAgentDir } from './agent-config.js';
 import type { Hono } from 'hono';
@@ -390,6 +390,28 @@ describe('POST /api/mission/tasks', () => {
       created_by: 'dashboard',
       created_at: expect.any(Number),
     });
+  });
+});
+
+describe('POST /api/mission/tasks/:id/requeue', () => {
+  it('re-runs a completed task: returns it queued with the prior outcome cleared', async () => {
+    createMissionTask('req-1', 'Pull the inbox', 'do it', 'comms');
+    claimNextMissionTask('comms');
+    completeMissionTask('req-1', 'asked for Gmail permission', 'completed');
+
+    const res = await app.request('/api/mission/tasks/req-1/requeue' + Q, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.ok).toBe(true);
+    expect(body.task).toMatchObject({ id: 'req-1', status: 'queued', result: null, completed_at: null });
+  });
+
+  it('409s when the task is not re-runnable (still queued) or missing', async () => {
+    createMissionTask('req-2', 'Active task', 'do it', 'comms');
+    const queued = await app.request('/api/mission/tasks/req-2/requeue' + Q, { method: 'POST' });
+    expect(queued.status).toBe(409);
+    const missing = await app.request('/api/mission/tasks/nope/requeue' + Q, { method: 'POST' });
+    expect(missing.status).toBe(409);
   });
 });
 
