@@ -502,6 +502,144 @@ describe('GET /api/memories/list', () => {
   });
 });
 
+// ── Phase 6 Memory Surface: net-new mutation routes (Wave 0 RED) ─────────────
+//
+// MEM-02 / D-04 / D-08 / D-09. Four mutation routes do not exist yet — plan 03
+// lands them. Until then these assertions are RED (404 / wrong shape). They pin:
+//   - POST   /api/memory            (Add: confirmed=1, source='you-told-me', category, D-09)
+//   - PATCH  /api/memory/:id        (Edit: summary/category, id validated via Number.isInteger)
+//   - DELETE /api/memory/:id        (Delete: writes a tombstone BEFORE removing the row, Pitfall 6 / D-08)
+//   - POST   /api/memory/:id/confirm (sets confirmed=1, no-op on double-call, D-04)
+// Category is validated against the enum {your-business, your-clients, how-you-work}.
+describe('memory mutation API contract (MEM-02 / D-04 / D-08 / D-09)', () => {
+  async function post(p: string, body?: unknown) {
+    return app.request(p + Q, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+  async function patch(p: string, body: unknown) {
+    return app.request(p + Q, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+  async function del(p: string) {
+    return app.request(p + Q, { method: 'DELETE' });
+  }
+
+  it('POST /api/memory is auth-gated', async () => {
+    const res = await getNoToken('/api/memory');
+    // No token -> 401 regardless of method support.
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/memory inserts a confirmed, operator-authored fact with a category (D-09)', async () => {
+    const { getDb } = await import('./db.js');
+    const res = await post('/api/memory', { summary: 'We bill clients net-30', category: 'your-business' });
+    expect(res.status).toBe(201);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ ok: true });
+    const id = body.memory?.id ?? body.id;
+    expect(Number.isInteger(id)).toBe(true);
+
+    const row = getDb()
+      .prepare(`SELECT source, confirmed, category, summary FROM memories WHERE id = ?`)
+      .get(id) as { source: string; confirmed: number; category: string; summary: string };
+    expect(row.source).toBe('you-told-me');
+    expect(row.confirmed).toBe(1);
+    expect(row.category).toBe('your-business');
+    expect(row.summary).toBe('We bill clients net-30');
+  });
+
+  it('POST /api/memory rejects a category outside the enum (400)', async () => {
+    const res = await post('/api/memory', { summary: 'a fact', category: 'random-bucket' });
+    expect(res.status).toBe(400);
+  });
+
+  it('PATCH /api/memory/:id rejects a non-integer id via Number.isInteger (400)', async () => {
+    const res = await patch('/api/memory/not-a-number', { summary: 'x' });
+    expect(res.status).toBe(400);
+  });
+
+  it('PATCH /api/memory/:id updates summary and category', async () => {
+    const { getDb } = await import('./db.js');
+    const created = await jsonOf(await post('/api/memory', { summary: 'old summary', category: 'how-you-work' }));
+    const id = created.memory?.id ?? created.id;
+
+    const res = await patch(`/api/memory/${id}`, { summary: 'new summary', category: 'your-clients' });
+    expect(res.status).toBe(200);
+    expect(await jsonOf(res)).toMatchObject({ ok: true });
+
+    const row = getDb()
+      .prepare(`SELECT summary, category FROM memories WHERE id = ?`)
+      .get(id) as { summary: string; category: string };
+    expect(row.summary).toBe('new summary');
+    expect(row.category).toBe('your-clients');
+  });
+
+  it('PATCH /api/memory/:id rejects a category outside the enum (400)', async () => {
+    const created = await jsonOf(await post('/api/memory', { summary: 's', category: 'your-business' }));
+    const id = created.memory?.id ?? created.id;
+    const res = await patch(`/api/memory/${id}`, { category: 'nonsense' });
+    expect(res.status).toBe(400);
+  });
+
+  it('DELETE /api/memory/:id writes a tombstone BEFORE removing the row (Pitfall 6 / D-08)', async () => {
+    const { getDb } = await import('./db.js');
+    const created = await jsonOf(await post('/api/memory', { summary: 'delete me forever', category: 'your-business' }));
+    const id = created.memory?.id ?? created.id;
+
+    const res = await del(`/api/memory/${id}`);
+    expect(res.status).toBe(200);
+    expect(await jsonOf(res)).toMatchObject({ ok: true });
+
+    // The memory row is gone...
+    const gone = getDb().prepare(`SELECT id FROM memories WHERE id = ?`).get(id);
+    expect(gone).toBeUndefined();
+    // ...AND a tombstone exists so the fact cannot re-derive (tombstone-first).
+    const tomb = getDb()
+      .prepare(`SELECT id FROM memory_tombstones WHERE summary = ?`)
+      .get('delete me forever');
+    expect(tomb, 'a tombstone row must exist after delete').toBeTruthy();
+  });
+
+  it('DELETE /api/memory/:id rejects a non-integer id (400)', async () => {
+    const res = await del('/api/memory/not-a-number');
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/memory/:id/confirm sets confirmed=1 and is a no-op on double-call (D-04)', async () => {
+    const { getDb } = await import('./db.js');
+    // Seed an unconfirmed (machine-inferred) memory directly.
+    const now = Math.floor(Date.now() / 1000);
+    const info = getDb()
+      .prepare(
+        `INSERT INTO memories (chat_id, source, raw_text, summary, confirmed, created_at, accessed_at)
+         VALUES (?, 'conversation', 'raw', 'an unconfirmed guess', 0, ?, ?)`,
+      )
+      .run('chat-confirm', now, now);
+    const id = Number(info.lastInsertRowid);
+
+    const first = await post(`/api/memory/${id}/confirm`);
+    expect(first.status).toBe(200);
+    expect(await jsonOf(first)).toMatchObject({ ok: true });
+    const afterFirst = getDb().prepare(`SELECT confirmed FROM memories WHERE id = ?`).get(id) as { confirmed: number };
+    expect(afterFirst.confirmed).toBe(1);
+
+    // Second confirm is a status-guarded no-op (already confirmed).
+    const second = await post(`/api/memory/${id}/confirm`);
+    expect(await jsonOf(second)).toMatchObject({ ok: false });
+  });
+
+  it('POST /api/memory/:id/confirm rejects a non-integer id (400)', async () => {
+    const res = await post('/api/memory/not-a-number/confirm');
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('GET /api/tokens', () => {
   it('returns stats + costTimeline + recentUsage', async () => {
     const res = await get('/api/tokens?chatId=test');

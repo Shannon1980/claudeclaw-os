@@ -1,6 +1,7 @@
 import { generateContent, parseJsonResponse } from './gemini.js';
 import {
   getUnconsolidatedMemories,
+  isTombstoned,
   saveConsolidationAtomic,
   saveConsolidationEmbedding,
 } from './db.js';
@@ -91,6 +92,17 @@ export async function runConsolidation(chatId: string): Promise<void> {
 
     if (!result || !result.summary || !result.insight) {
       logger.warn({ raw: raw.slice(0, 200) }, 'Consolidation produced invalid result');
+      return;
+    }
+
+    // Tombstone suppression (D-08), second consult: a deleted fact must not
+    // re-enter the store disguised as a synthesized consolidation. Hash-check
+    // the synthesized summary against the tombstone set BEFORE saving.
+    if (isTombstoned(chatId, result.summary)) {
+      logger.debug(
+        { summary: result.summary.slice(0, 60) },
+        'Skipping consolidation matching a tombstone (D-08 suppression)',
+      );
       return;
     }
 

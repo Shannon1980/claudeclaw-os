@@ -39,6 +39,11 @@ export function renderMemoryProjection(
 
   // MEM-06 in-process access path. Agent-scoped, keyed on the shared pool so
   // the projection reflects the same memories the bot and terminal share.
+  //
+  // D-04 confirmed gate: getRecentHighImportanceMemories appends
+  // `AND confirmed = 1`, so an unconfirmed (confirmed=0) fact is NEVER written
+  // into the projection file the agent reads back. This is the second behavior
+  // read path (alongside buildMemoryContext); both are gated at the reader.
   const memories = getRecentHighImportanceMemories(workspaceMemoryKey(agentId), 10, agentId);
 
   const d = date.toISOString().slice(0, 10);

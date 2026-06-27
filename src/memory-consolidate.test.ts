@@ -9,6 +9,8 @@ vi.mock('./db.js', () => ({
   getUnconsolidatedMemories: vi.fn(),
   saveConsolidationAtomic: vi.fn(() => 1),
   saveConsolidationEmbedding: vi.fn(),
+  // Phase 6 tombstone suppression (D-08) — does not exist in db.ts yet.
+  isTombstoned: vi.fn(() => false),
 }));
 
 vi.mock('./embeddings.js', () => ({
@@ -24,12 +26,14 @@ import { generateContent, parseJsonResponse } from './gemini.js';
 import {
   getUnconsolidatedMemories,
   saveConsolidationAtomic,
+  isTombstoned,
 } from './db.js';
 
 const mockGetUnconsolidated = vi.mocked(getUnconsolidatedMemories);
 const mockGenerateContent = vi.mocked(generateContent);
 const mockParseJson = vi.mocked(parseJsonResponse);
 const mockSaveAtomic = vi.mocked(saveConsolidationAtomic);
+const mockIsTombstoned = vi.mocked(isTombstoned);
 
 function makeMemory(id: number, summary: string) {
   return {
@@ -213,6 +217,51 @@ describe('runConsolidation', () => {
   });
 
   // ── Overlap guard ─────────────────────────────────────────────────
+
+  // ── Tombstone suppression on the consolidation path (Wave 0 RED — D-08) ──
+  //
+  // Second tombstone consult: a deleted fact must not re-enter the store as a
+  // synthesized "consolidation." Before saveConsolidationAtomic, the synthesized
+  // summary/insight is hash-checked against the tombstone set; a match is NOT
+  // saved. RED today: runConsolidation does not consult isTombstoned. Plan 02
+  // adds the check before the save.
+
+  it('does not save a synthesized fact whose summary matches a tombstone (D-08)', async () => {
+    const memories = [makeMemory(10, 'mem1'), makeMemory(20, 'mem2')];
+    mockGetUnconsolidated.mockReturnValue(memories);
+
+    const result = {
+      summary: 'User prefers dark mode in all applications',
+      insight: 'A synthesized insight the operator already deleted',
+      connections: [],
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(result));
+    mockParseJson.mockReturnValue(result);
+    // The synthesized summary was previously deleted -> tombstoned.
+    mockIsTombstoned.mockReturnValue(true);
+
+    await runConsolidation('chat1');
+
+    expect(mockIsTombstoned).toHaveBeenCalled();
+    expect(mockSaveAtomic).not.toHaveBeenCalled();
+  });
+
+  it('saves a synthesized fact that is NOT tombstoned (targeted suppression)', async () => {
+    const memories = [makeMemory(10, 'mem1'), makeMemory(20, 'mem2')];
+    mockGetUnconsolidated.mockReturnValue(memories);
+
+    const result = {
+      summary: 'User batches admin work on Fridays',
+      insight: 'A genuinely new synthesized insight',
+      connections: [],
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(result));
+    mockParseJson.mockReturnValue(result);
+    mockIsTombstoned.mockReturnValue(false);
+
+    await runConsolidation('chat1');
+    expect(mockSaveAtomic).toHaveBeenCalled();
+  });
 
   it('does not run concurrently (overlap guard)', async () => {
     const memories = [makeMemory(10, 'mem1'), makeMemory(20, 'mem2')];

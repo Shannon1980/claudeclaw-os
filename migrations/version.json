@@ -4,6 +4,7 @@
     "v1.2.2": ["add-routine-tables"],
     "v1.2.3": ["create-approval-queue"],
     "v1.2.4": ["enrich-audit-log"],
-    "v1.2.5": ["add-routine-project-scope"]
+    "v1.2.5": ["add-routine-project-scope"],
+    "v1.2.6": ["add-memory-surface-columns"]
   }
 }

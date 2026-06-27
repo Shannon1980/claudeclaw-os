@@ -89,11 +89,13 @@ describe('memory strict-agent isolation', () => {
       'chat1', 'agent A learned X', 'fact A',
       ['agentA'], ['topicX'],
       0.5, 'conversation', 'agentA',
+      1, // D-04: confirmed so the searchMemories confirmed=1 gate surfaces the fixture
     );
     saveStructuredMemory(
       'chat1', 'agent B learned Y', 'fact B',
       ['agentB'], ['topicY'],
       0.5, 'conversation', 'agentB',
+      1, // D-04: confirmed so the searchMemories confirmed=1 gate surfaces the fixture
     );
 
     const aResults = searchMemories('chat1', 'fact', 10, undefined, 'agentA');
@@ -110,11 +112,13 @@ describe('memory strict-agent isolation', () => {
       'chat1', 'a', 'a-summary',
       [], [],
       0.5, 'conversation', 'agentA',
+      1, // D-04: confirmed so the searchMemories confirmed=1 gate surfaces the fixture
     );
     saveStructuredMemory(
       'chat1', 'b', 'b-summary',
       [], [],
       0.5, 'conversation', 'agentB',
+      1, // D-04: confirmed so the searchMemories confirmed=1 gate surfaces the fixture
     );
     const both = searchMemories('chat1', 'summary', 10);
     expect(both.length).toBeGreaterThanOrEqual(2);

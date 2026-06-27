@@ -1,7 +1,7 @@
 ---
 phase: 6
 slug: memory-surface
-status: ready
+status: approved
 nyquist_compliant: true
 wave_0_complete: false
 created: 2026-06-26
@@ -19,18 +19,18 @@ created: 2026-06-26
 |----------|-------|
 | **Framework** | vitest ^2.0.0 |
 | **Config file** | `package.json` `vitest` block (`environment: node`, `include: src/**/*.test.ts`) |
-| **Quick run command** | `npx vitest run src/<module>.test.ts` (the module touched by the task) |
+| **Quick run command** | `npx vitest run src/memory.test.ts src/memory-ingest.test.ts` |
 | **Full suite command** | `npm test` (= `vitest run`) |
-| **Estimated runtime** | ~30-60 seconds full suite |
+| **Estimated runtime** | ~30 seconds (full suite); quick run ~5s |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run the task's `npx vitest run src/<module>.test.ts`
+- **After every task commit:** Run the relevant `npx vitest run src/<module>.test.ts`
 - **After every plan wave:** Run `npm test`
 - **Before `/gsd-verify-work`:** Full suite must be green
-- **Max feedback latency:** ~60 seconds
+- **Max feedback latency:** 30 seconds
 
 ---
 
@@ -38,15 +38,16 @@ created: 2026-06-26
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 06-01-01 | 01 | 1 | MEM-01/02 | T-06-01 / T-06-02 | No migration drift; existing rows grandfathered confirmed=1 | unit | `npx vitest run src/migrations.test.ts src/migrate-runner.test.ts` | ✅ | ⬜ pending |
-| 06-01-02 | 01 | 1 | MEM-01/02 | — | Wave 0 RED net pins all behaviors (incl. grouped reader + Add mutator in src/db.test.ts) | unit | `npx vitest run src/memory-provenance.test.ts src/db.test.ts` (RED expected) | ❌ W0 (memory-provenance.test.ts new; db.test.ts cases new) | ⬜ pending |
-| 06-02-01 | 02 | 2 | MEM-01/02 | T-06-03 / T-06-05 | Curated DTO only; email tag honest-coverage gated; grouped reader returns both confirmed states + empty categories suppressed | unit | `npx vitest run src/memory-provenance.test.ts src/db.test.ts` | ✅ | ⬜ pending |
-| 06-02-02 | 02 | 2 | MEM-01 | T-06-04 | Token-gated read; surface shows unconfirmed w/ marker | build | `npm run build` | ✅ (web build) | ⬜ pending |
-| 06-03-01 | 03 | 3 | MEM-02 | T-06-09 | Deleted fact not re-derived (ingest + consolidation); Add mutator inserts confirmed/operator-source/high-salience fact | unit | `npx vitest run src/memory-ingest.test.ts src/memory-consolidate.test.ts src/db.test.ts` | ✅ | ⬜ pending |
-| 06-03-02 | 03 | 3 | MEM-02 | T-06-06 / T-06-07 / T-06-08 / T-06-10 / T-06-11 | Parameterized SQL; inherited CSRF/kill-switch; enum + status guards | unit/integration | `npx vitest run src/dashboard.contract.test.ts` | ✅ | ⬜ pending |
-| 06-04-01 | 04 | 4 | MEM-01/02 | T-06-12 | Unconfirmed excluded from BOTH behavior read paths | unit | `npx vitest run src/memory.test.ts src/memory-projection.test.ts` | ✅ | ⬜ pending |
-| 06-04-02 | 04 | 4 | MEM-01 | T-06-13 / T-06-14 | Category clamped to enum; scrubbed extractor path | unit | `npx vitest run src/memory-ingest.test.ts` | ✅ | ⬜ pending |
-| 06-04-03 | 04 | 4 | MEM-01/02 | T-06-12 | Operator end-to-end sign-off | manual | human-verify checkpoint | n/a | ⬜ pending |
+| 06-01-01 | 01 | 0/1 | MEM-01 / MEM-02 | T-06-03 | Wave 0 test stubs (provenance, tombstone, confirmed-gate, migration cases) compile and run red | unit | `npx vitest run src/memory.test.ts src/memory-ingest.test.ts src/memory-consolidate.test.ts src/memory-projection.test.ts src/migrations.test.ts` | ✅ all exist | ⬜ pending |
+| 06-02-01 | 02 | 2 | MEM-01 / MEM-02 | T-06-04 | Dual-write migration applies idempotently (no drift); `confirmed=1` backfill on existing rows | unit | `npx vitest run src/migrations.test.ts src/migrate-runner.test.ts` | ✅ src/migrations.test.ts, src/migrate-runner.test.ts | ⬜ pending |
+| 06-02-02 | 02 | 2 | MEM-02 | T-06-03 | `deriveProvenance` maps source+agent_id to 3 tags; D-05 email tag only if email row exists; SQL bound via `?` | unit | `npx vitest run src/db.test.ts src/memory.test.ts` | ✅ src/db.test.ts, src/memory.test.ts | ⬜ pending |
+| 06-02-03 | 02 | 2 | MEM-01 / D-04 | T-06-05 (EoP) | Unconfirmed facts excluded from `buildMemoryContext` AND `renderMemoryProjection`; present after confirm | unit | `npx vitest run src/memory.test.ts src/memory-projection.test.ts` | ✅ src/memory.test.ts, src/memory-projection.test.ts | ⬜ pending |
+| 06-03-01 | 03 | 3 | MEM-01 / MEM-02 | T-06-05 / T-06-03 | Mutations inherit token gate + CSRF + kill switch; id/category validated; tombstone-first delete; status-guarded confirm | unit/integration | `npx vitest run src/dashboard.contract.test.ts` | ✅ src/dashboard.contract.test.ts | ⬜ pending |
+| 06-03-02 | 03 | 3 | MEM-01 / MEM-02 | — | TypeScript compiles clean (operator page + nav wiring); no hard-coded hex; redirect removed | typecheck | `! (cd web && npx tsc --noEmit 2>&1 \| grep -v node_modules \| grep -qi error)` | n/a (tsc) | ⬜ pending |
+| 06-03-03 | 03 | 3 | MEM-01 / MEM-02 | — | Operator walks live surface (grouped view, provenance, Add/Edit/Delete/Confirm, demoted developer view) | manual | human-verify checkpoint | n/a | ⬜ pending |
+| 06-04-01 | 04 | 4 | MEM-02 / D-08, D-06 | T-06-04 | Tombstone checked before save on ingest (hash floor + cosine); category from extractor validated or NULL | unit | `npx vitest run src/memory-ingest.test.ts` | ✅ src/memory-ingest.test.ts | ⬜ pending |
+| 06-04-02 | 04 | 4 | MEM-02 / D-08 | T-06-08 | Tombstone checked before `saveConsolidationAtomic`; synthesized tombstoned fact not re-saved | unit | `npx vitest run src/memory-consolidate.test.ts` | ✅ src/memory-consolidate.test.ts | ⬜ pending |
+| 06-04-03 | 04 | 4 | MEM-01 / D-06 | T-06-03 | Backfill script compiles; selects `category IS NULL` only; UPDATE binds via `?`; enum-validated | typecheck | `! (npx tsc --noEmit scripts/backfill-memory-categories.ts 2>&1 \| grep -qi error)` | n/a (tsc) | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -54,14 +55,14 @@ created: 2026-06-26
 
 ## Wave 0 Requirements
 
-- [ ] `src/memory-provenance.test.ts` (NEW) — deriveProvenance mapping + D-05 honest email coverage (MEM-02)
-- [ ] Grouped-reader + Add-mutator cases in `src/db.test.ts` — getMemoriesForOperatorSurface (empty-category suppression + BOTH confirmed states, MEM-01/crit 1, load-bearing for D-04 surface correctness) and the Add mutator (confirmed/operator-source/high-salience, crit 4)
-- [ ] Tombstone suppression cases in `src/memory-ingest.test.ts` + `src/memory-consolidate.test.ts` — success criterion 3 (D-08)
-- [ ] Confirmed-gate cases in `src/memory.test.ts` + `src/memory-projection.test.ts` — D-04, BOTH behavior read paths
-- [ ] Migration cases in `src/migrations.test.ts` — category + confirmed columns + memory_tombstones table, idempotent, existing rows grandfathered confirmed=1
-- [ ] Add/Edit/Delete/Confirm route-contract cases in `src/dashboard.contract.test.ts` — MEM-02 + D-09
+Framework + test files all exist; Wave 0 gaps are new test cases within existing files plus optionally one new provenance test file:
 
-*All target test files exist except `src/memory-provenance.test.ts` (created in Wave 0, Plan 01 Task 2). `src/db.test.ts` exists; new grouped-reader + Add-mutator cases are added to it in Wave 0. Framework is installed.*
+- [ ] Provenance cases in `src/memory.test.ts` (or new `src/memory-provenance.test.ts`) — covers MEM-02 derivation + D-05 honest email coverage
+- [ ] Tombstone suppression cases in `src/memory-ingest.test.ts` + `src/memory-consolidate.test.ts` — covers crit 3
+- [ ] `confirmed`-gate cases in `src/memory.test.ts` and `src/memory-projection.test.ts` — covers D-04 (both behavior read paths)
+- [ ] Migration cases in `src/migrations.test.ts` for the new columns + tombstone table + `confirmed=1` existing-row backfill
+
+*No framework install needed: vitest ^2.0.0 is present and all module test files exist.*
 
 ---
 
@@ -69,19 +70,17 @@ created: 2026-06-26
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Operator surface visual layout, provenance-as-hero, "needs review" marker, Labs demotion of /memories | MEM-01, D-02, D-04 | Visual/interaction verification of the live dashboard | Plan 04 Task 3 checkpoint steps 2-7 |
-
-*All logic-bearing behaviors (provenance derivation, confirmed gate, tombstone suppression, grouped read, Add) have automated verification; only the visual surface is manual.*
+| Live operator Memory surface (grouped view, provenance pills, Add/Edit/Delete/Confirm, on-this-machine assurance, demoted developer view) | MEM-01, MEM-02 | Visual + interactive UI verification of the live dashboard | 06-03 Task 3 checkpoint: open `/memory`, confirm header/assurance copy, grouped categories, provenance pills, Add a fact, Edit, Delete (tombstone toast), Confirm an unconfirmed fact, and that `/memories` is off the daily nav but reachable by URL |
 
 ---
 
 ## Validation Sign-Off
 
-- [x] All tasks have `<automated>` verify or a Wave 0 dependency (Task 06-04-03 is the single allowed human-verify checkpoint; all logic tasks are automated)
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
 - [x] Sampling continuity: no 3 consecutive tasks without automated verify
-- [x] Wave 0 covers all MISSING references (memory-provenance.test.ts + new cases in existing files)
-- [x] No watch-mode flags (all commands are `vitest run`)
-- [x] Feedback latency < 60s
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 30s
 - [x] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** approved 2026-06-26

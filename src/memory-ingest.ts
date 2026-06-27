@@ -1,7 +1,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { cosineSimilarity, embedText } from './embeddings.js';
-import { getMemoriesWithEmbeddings, saveStructuredMemoryAtomic } from './db.js';
+import { getMemoriesWithEmbeddings, isTombstoned, normalizeOperatorCategory, saveStructuredMemoryAtomic } from './db.js';
 import { logger } from './logger.js';
 import { readEnvFile } from './env.js';
 import { getScrubbedSdkEnv } from './security.js';
@@ -106,6 +106,9 @@ interface ExtractionResult {
   entities: string[];
   topics: string[];
   importance: number;
+  // D-06: operator category classified on ingest. One of the 3-value enum or
+  // null. Validated via normalizeOperatorCategory; unknown/absent -> NULL (D-07).
+  category?: string | null;
 }
 
 const EXTRACTION_PROMPT = `You are a memory extraction agent. Given a conversation exchange between a user and their AI assistant, decide if it contains information worth remembering LONG-TERM (weeks/months from now).
@@ -142,8 +145,15 @@ If extracting, return JSON:
   "summary": "1-2 sentence summary focused on the LASTING FACT, not the conversation. Write as a rule or fact, not a narrative.",
   "entities": ["entity1", "entity2"],
   "topics": ["topic1", "topic2"],
-  "importance": 0.0-1.0
+  "importance": 0.0-1.0,
+  "category": "your-business" | "your-clients" | "how-you-work" | null
 }
+
+Category guide (pick the single best fit, or null if none clearly applies):
+- "your-business": facts about the user's own business, company, products, finances, or goals
+- "your-clients": facts about the user's clients, customers, or the people they serve
+- "how-you-work": the user's working preferences, habits, workflows, standing rules, and corrections
+- null: the fact does not clearly fit any of the three categories
 
 Importance guide:
 - 0.8-1.0: Core identity, strong preferences, critical business rules, relationship dynamics
@@ -207,6 +217,11 @@ export async function ingestConversationTurn(
     // Clamp importance to valid range
     const importance = Math.max(0, Math.min(1, result.importance));
 
+    // D-06: validate the model's category against the 3-value enum the same
+    // way importance is clamped. Unknown/absent/invalid -> NULL (D-07). The
+    // db.ts helper is the single source of truth for the enum.
+    const category = normalizeOperatorCategory(result.category);
+
     // Generate embedding early so we can check for duplicates before saving
     let embedding: number[] = [];
     try {
@@ -214,6 +229,17 @@ export async function ingestConversationTurn(
       embedding = await embedText(embeddingText);
     } catch (embErr) {
       logger.warn({ err: embErr }, 'Failed to generate embedding for duplicate check');
+    }
+
+    // Tombstone suppression (D-08): a deleted fact must not re-derive. Check
+    // BEFORE the cosine dedupe and BEFORE save. Hash floor always; the optional
+    // embedding widens to near-duplicates. If tombstoned, skip with no new row.
+    if (isTombstoned(chatId, result.summary, embedding.length > 0 ? embedding : undefined)) {
+      logger.debug(
+        { summary: result.summary.slice(0, 60) },
+        'Skipping tombstoned memory (D-08 suppression)',
+      );
+      return false;
     }
 
     // Duplicate detection: skip if a very similar memory already exists
@@ -241,6 +267,7 @@ export async function ingestConversationTurn(
       embedding,
       'conversation',
       agentId,
+      category,
     );
 
     // Notify on high-importance memories so the user can pin them

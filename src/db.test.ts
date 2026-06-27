@@ -144,8 +144,10 @@ describe('database', () => {
 
   describe('searchMemories', () => {
     it('finds matching summary via FTS5', () => {
-      saveStructuredMemory('chat1', 'raw text about TypeScript', 'User enjoys TypeScript programming', ['TypeScript'], ['coding'], 0.6);
-      saveStructuredMemory('chat1', 'weather stuff', 'The weather is nice today', [], ['weather'], 0.3);
+      // Behavior readers are confirmed-gated (D-04); these retrieval-mechanics
+      // tests save confirmed=1 rows so they exercise the reader, not the gate.
+      saveStructuredMemory('chat1', 'raw text about TypeScript', 'User enjoys TypeScript programming', ['TypeScript'], ['coding'], 0.6, 'conversation', 'main', 1);
+      saveStructuredMemory('chat1', 'weather stuff', 'The weather is nice today', [], ['weather'], 0.3, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'TypeScript', 5);
       expect(results.length).toBeGreaterThanOrEqual(1);
       expect(results[0].summary).toContain('TypeScript');
@@ -171,9 +173,9 @@ describe('database', () => {
     });
 
     it('respects limit parameter', () => {
-      saveStructuredMemory('chat1', 'raw', 'first topic about coding', [], ['coding'], 0.5);
-      saveStructuredMemory('chat1', 'raw', 'second topic about coding', [], ['coding'], 0.5);
-      saveStructuredMemory('chat1', 'raw', 'third topic about coding', [], ['coding'], 0.5);
+      saveStructuredMemory('chat1', 'raw', 'first topic about coding', [], ['coding'], 0.5, 'conversation', 'main', 1);
+      saveStructuredMemory('chat1', 'raw', 'second topic about coding', [], ['coding'], 0.5, 'conversation', 'main', 1);
+      saveStructuredMemory('chat1', 'raw', 'third topic about coding', [], ['coding'], 0.5, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'coding', 2);
       expect(results).toHaveLength(2);
     });
@@ -181,8 +183,8 @@ describe('database', () => {
 
   describe('getRecentHighImportanceMemories', () => {
     it('only returns memories with importance >= 0.5', () => {
-      saveStructuredMemory('chat1', 'raw', 'low importance', [], [], 0.3);
-      saveStructuredMemory('chat1', 'raw', 'high importance', [], [], 0.8);
+      saveStructuredMemory('chat1', 'raw', 'low importance', [], [], 0.3, 'conversation', 'main', 1);
+      saveStructuredMemory('chat1', 'raw', 'high importance', [], [], 0.8, 'conversation', 'main', 1);
       const mems = getRecentHighImportanceMemories('chat1', 10);
       expect(mems).toHaveLength(1);
       expect(mems[0].summary).toBe('high importance');
@@ -350,19 +352,19 @@ describe('database', () => {
 
   describe('FTS5 multi-column search', () => {
     it('finds memory by entity match', () => {
-      saveStructuredMemory('chat1', 'raw text', 'summary text', ['OpenAI', 'GPT-4'], ['AI'], 0.6);
+      saveStructuredMemory('chat1', 'raw text', 'summary text', ['OpenAI', 'GPT-4'], ['AI'], 0.6, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'OpenAI', 5);
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
 
     it('finds memory by topic match', () => {
-      saveStructuredMemory('chat1', 'raw text', 'summary text', [], ['productivity', 'workflow'], 0.6);
+      saveStructuredMemory('chat1', 'raw text', 'summary text', [], ['productivity', 'workflow'], 0.6, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'productivity', 5);
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
 
     it('finds memory by raw_text match', () => {
-      saveStructuredMemory('chat1', 'I absolutely love hiking in the mountains', 'User enjoys outdoor activities', ['hiking'], ['hobbies'], 0.5);
+      saveStructuredMemory('chat1', 'I absolutely love hiking in the mountains', 'User enjoys outdoor activities', ['hiking'], ['hobbies'], 0.5, 'conversation', 'main', 1);
       const results = searchMemories('chat1', 'hiking mountains', 5);
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
@@ -378,7 +380,7 @@ describe('database', () => {
 
   describe('getRecentHighImportanceMemories edge cases', () => {
     it('includes memories with importance exactly 0.5', () => {
-      saveStructuredMemory('chat1', 'raw', 'borderline', [], [], 0.5);
+      saveStructuredMemory('chat1', 'raw', 'borderline', [], [], 0.5, 'conversation', 'main', 1);
       const mems = getRecentHighImportanceMemories('chat1', 10);
       expect(mems).toHaveLength(1);
     });
@@ -391,7 +393,7 @@ describe('database', () => {
 
     it('respects limit parameter', () => {
       for (let i = 0; i < 10; i++) {
-        saveStructuredMemory('chat1', 'raw', `high${i}`, [], [], 0.8);
+        saveStructuredMemory('chat1', 'raw', `high${i}`, [], [], 0.8, 'conversation', 'main', 1);
       }
       const mems = getRecentHighImportanceMemories('chat1', 3);
       expect(mems).toHaveLength(3);
@@ -474,8 +476,8 @@ describe('database', () => {
   // ── Phase 4: memory agent scoping + single store ───────────────────
   describe('memory agent scoping (MEM-02)', () => {
     it('getRecentHighImportanceMemories scopes by agent_id (no cross-agent leakage)', () => {
-      saveStructuredMemory('chat1', 'raw a', 'aos shared topic note', [], ['shared'], 0.8, 'conversation', 'aos');
-      saveStructuredMemory('chat1', 'raw m', 'main shared topic note', [], ['shared'], 0.8, 'conversation', 'main');
+      saveStructuredMemory('chat1', 'raw a', 'aos shared topic note', [], ['shared'], 0.8, 'conversation', 'aos', 1);
+      saveStructuredMemory('chat1', 'raw m', 'main shared topic note', [], ['shared'], 0.8, 'conversation', 'main', 1);
 
       const aos = getRecentHighImportanceMemories('chat1', 10, 'aos');
       const main = getRecentHighImportanceMemories('chat1', 10, 'main');
@@ -487,8 +489,8 @@ describe('database', () => {
     });
 
     it('searchMemories scopes by agent_id for the same chat_id', () => {
-      saveStructuredMemory('chat1', 'raw a', 'aos likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'aos');
-      saveStructuredMemory('chat1', 'raw m', 'main likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'main');
+      saveStructuredMemory('chat1', 'raw a', 'aos likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'aos', 1);
+      saveStructuredMemory('chat1', 'raw m', 'main likes TypeScript', ['TypeScript'], ['coding'], 0.6, 'conversation', 'main', 1);
 
       const aos = searchMemories('chat1', 'TypeScript', 5, undefined, 'aos');
       expect(aos.map((m) => m.summary)).toEqual(['aos likes TypeScript']);
@@ -1096,6 +1098,91 @@ describe('database', () => {
     it('rejects/ignores non-integer input — read stays at the default 90', () => {
       setAuditRetentionDays(12.5);
       expect(getAuditRetentionDays()).toBe(90);
+    });
+  });
+
+  // ── Phase 6 Memory Surface: schema artifacts (Wave 0 RED — MEM-01/MEM-02) ──
+  //
+  // createSchema (via _initTestDatabase) must produce the same three artifacts
+  // the v1.2.6 migration adds for the live store (dual-write, P-4 / Pitfall 1):
+  //   - D-06: memories.category (TEXT, nullable).
+  //   - D-04: memories.confirmed (INTEGER NOT NULL DEFAULT 0).
+  //   - D-08: a memory_tombstones table + (chat_id, text_hash) index.
+  // RED on purpose: db.ts does not yet define these. Plan 02 turns them GREEN.
+
+  describe('memory surface schema (createSchema)', () => {
+    it('memories has a category column: TEXT, nullable (D-06)', () => {
+      const cols = getDb().prepare(`PRAGMA table_info(memories)`).all() as Array<{
+        name: string; type: string; notnull: number;
+      }>;
+      const category = cols.find((c) => c.name === 'category');
+      expect(category, 'memories.category should exist').toBeTruthy();
+      expect(category?.type.toUpperCase()).toBe('TEXT');
+      expect(category?.notnull, 'category must be nullable').toBe(0);
+    });
+
+    it('memories has a confirmed column: INTEGER NOT NULL DEFAULT 0 (D-04)', () => {
+      const cols = getDb().prepare(`PRAGMA table_info(memories)`).all() as Array<{
+        name: string; type: string; notnull: number; dflt_value: string | null;
+      }>;
+      const confirmed = cols.find((c) => c.name === 'confirmed');
+      expect(confirmed, 'memories.confirmed should exist').toBeTruthy();
+      expect(confirmed?.type.toUpperCase()).toBe('INTEGER');
+      expect(confirmed?.notnull, 'confirmed must be NOT NULL').toBe(1);
+      expect(String(confirmed?.dflt_value)).toBe('0');
+    });
+
+    it('inserting a memory without specifying confirmed defaults it to 0 (new facts land unconfirmed)', () => {
+      // Bind via ? placeholders only (no value interpolation, SQLi mitigation).
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      db.prepare(
+        `INSERT INTO memories (chat_id, raw_text, summary, created_at, accessed_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run('chat-conf', 'raw', 'a fresh inferred fact', now, now);
+      const row = db
+        .prepare(`SELECT confirmed, category FROM memories WHERE chat_id = ?`)
+        .get('chat-conf') as { confirmed: number; category: string | null };
+      expect(row.confirmed).toBe(0);
+      expect(row.category).toBeNull();
+    });
+
+    it('memory_tombstones table exists with the documented columns + (chat_id, text_hash) index (D-08)', () => {
+      const db = getDb();
+      const tombCols = db.prepare(`PRAGMA table_info(memory_tombstones)`).all() as Array<{
+        name: string; type: string; notnull: number;
+      }>;
+      const names = tombCols.map((c) => c.name);
+      for (const col of ['id', 'chat_id', 'text_hash', 'embedding', 'summary', 'created_at']) {
+        expect(names, `memory_tombstones should have column "${col}"`).toContain(col);
+      }
+      const textHash = tombCols.find((c) => c.name === 'text_hash');
+      expect(textHash?.type.toUpperCase()).toBe('TEXT');
+      expect(textHash?.notnull, 'text_hash must be NOT NULL').toBe(1);
+
+      const indexes = db.prepare(`PRAGMA index_list(memory_tombstones)`).all() as Array<{ name: string }>;
+      const hasCompositeIndex = indexes.some((idx) => {
+        const idxCols = (
+          db.prepare(`PRAGMA index_info(${idx.name})`).all() as Array<{ name: string }>
+        ).map((c) => c.name);
+        return idxCols.includes('chat_id') && idxCols.includes('text_hash');
+      });
+      expect(hasCompositeIndex, 'expected an index on (chat_id, text_hash)').toBe(true);
+    });
+
+    it('a tombstone row round-trips via parameterized SQL (text_hash floor, optional embedding/summary)', () => {
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      db.prepare(
+        `INSERT INTO memory_tombstones (chat_id, text_hash, embedding, summary, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).run('chat-tomb', 'deadbeefhash', null, 'a deleted fact', now);
+      const row = db
+        .prepare(`SELECT chat_id, text_hash, summary FROM memory_tombstones WHERE chat_id = ?`)
+        .get('chat-tomb') as { chat_id: string; text_hash: string; summary: string };
+      expect(row.chat_id).toBe('chat-tomb');
+      expect(row.text_hash).toBe('deadbeefhash');
+      expect(row.summary).toBe('a deleted fact');
     });
   });
 });

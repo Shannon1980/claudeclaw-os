@@ -42,8 +42,8 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 - [x] **AUD-02**: An admin can export the audit log (CSV/JSON); log retention is bounded and configurable (D10)
 
 ### Memory (MEM)
-- [ ] **MEM-01**: A user can view what the assistant knows about them, grouped by category
-- [ ] **MEM-02**: Each remembered fact shows its provenance and can be edited or deleted in place
+- [x] **MEM-01**: A user can view what the assistant knows about them, grouped by category
+- [x] **MEM-02**: Each remembered fact shows its provenance and can be edited or deleted in place
 
 ### Power Surfaces (PWR)
 - [ ] **PWR-01**: A user can convene multiple teammates on a hard decision and get a converged recommendation with decision buttons (war room)
@@ -87,8 +87,8 @@ Shipped to `main` before this milestone existed; not re-scoped here:
 | TRUST-02 | Phase 4 | Complete |
 | AUD-01 | Phase 5 | Complete |
 | AUD-02 | Phase 5 | Complete |
-| MEM-01 | Phase 6 | Pending |
-| MEM-02 | Phase 6 | Pending |
+| MEM-01 | Phase 6 | Complete |
+| MEM-02 | Phase 6 | Complete |
 | PWR-01 | Phase 7 | Pending |
 | PWR-02 | Phase 7 | Pending |
 | BILL-01 | Phase 8 | Pending |

@@ -29,7 +29,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [ ] **Phase 3: Permissions & Autonomy** - The four-tier autonomy model that gates every external action (plans executed 2026-06-24; verification gaps_found 2/4 — gap closure pending)
 - [x] **Phase 4: Activity Feed** - Operator-facing transparency: what the team did, autonomous vs approved, with undo (executed 2026-06-24; end-of-phase human-verify pending) (completed 2026-06-25)
 - [x] **Phase 5: Audit Log** - Admin-facing immutable, append-only, exportable record of every event (completed 2026-06-26)
-- [ ] **Phase 6: Memory Surface** - "What your assistant knows": editable, provenance-tagged knowledge base
+- [x] **Phase 6: Memory Surface** - "What your assistant knows": editable, provenance-tagged knowledge base (completed 2026-06-26)
 - [ ] **Phase 7: Power Surfaces** - War room decision tool + live team pulse, reframed off the daily path
 - [ ] **Phase 8: Billing & Licensing** - Flat per-seat subscription gated by a license key; spend-and-outcomes view
 
@@ -188,19 +188,20 @@ Plans:
 
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — Wave 0 failing tests + dual-write migration spine (category + confirmed columns + memory_tombstones; grandfather existing rows confirmed=1)
+- [x] 06-01-PLAN.md — Wave 0 failing tests pinning MEM-01/02 + D-03/04/05/06/08 (migration, provenance, confirmed gate, tombstone, mutation contract)
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 06-02-PLAN.md — View slice (MEM-01): operator-surface reader + server-side provenance helper + GET /api/memory + new /memory page (D-01) + /memories Labs demotion (D-02)
+- [x] 06-02-PLAN.md — Data spine: v1.2.5 dual-write migration (category/confirmed/memory_tombstones) + deriveProvenance + confirmed behavior gate + operator-surface reader + tombstone/Add-fact helpers
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 06-03-PLAN.md — Control slice (MEM-02): Add/Edit/Delete/Confirm routes + tombstone helpers + ingest/consolidate suppression hooks (D-08/D-09) + row actions
+- [x] 06-03-PLAN.md — Operator UI slice: /api/memory* routes + new /memory page (grouped + provenance hero + Add/Edit/Delete/Confirm) + Labs demotion of the developer view (human-verify)
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 06-04-PLAN.md — Trust gate slice: confirmed gate on both behavior read paths (D-04) + category classification on ingest + backfill (D-06) + end-of-phase human-verify
+- [x] 06-04-PLAN.md — Enforcement slice: tombstone gate on ingest + consolidation (D-08), category classification on ingest (D-06), idempotent category backfill script
+
 **UI hint**: yes
 
 ### Phase 7: Power Surfaces
@@ -242,7 +243,7 @@ Plans:
 | 3. Permissions & Autonomy | 4/4 | Complete   | 2026-06-24 |
 | 4. Activity Feed | 4/4 | Complete    | 2026-06-25 |
 | 5. Audit Log | 4/4 | Complete    | 2026-06-26 |
-| 6. Memory Surface | 0/? | Not started | - |
+| 6. Memory Surface | 4/4 | Complete   | 2026-06-26 |
 | 7. Power Surfaces | 0/? | Not started | - |
 | 8. Billing & Licensing | 0/? | Not started | - |
 

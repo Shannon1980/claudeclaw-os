@@ -2,44 +2,39 @@
 
 **Mapped:** 2026-06-26
 **Files analyzed:** 13 (new + modified)
-**Analogs found:** 13 / 13 (all in-repo; no new external patterns)
+**Analogs found:** 12 / 13 (1 net-new mechanism with no direct analog)
 
-> All line references verified against this worktree
-> (`.claude/worktrees/compassionate-jepsen-3745c6`), not the main checkout.
-> This is an MVP / vertical-slice frontend phase with no UI-SPEC; UI analogs are
-> the named operator pages (Activity.tsx primary).
+> All paths are worktree-relative to
+> `/Users/shannongueringer/App Repo/claudeclaw/.claude/worktrees/ecstatic-matsumoto-735a37`.
+> Line numbers are from that worktree; re-confirm before editing if the engine/dashboard changed.
 
 ## File Classification
 
-| New/Modified File | New? | Role | Data Flow | Closest Analog | Match Quality |
-|-------------------|------|------|-----------|----------------|---------------|
-| `web/src/pages/Memory.tsx` | NEW | component (operator page) | request-response (grouped read + row mutations) | `web/src/pages/Activity.tsx` | exact |
-| `web/src/lib/routes.ts` | MOD | config (nav source of truth) | — | self (Audit D-13 demotion at `:38-42`) | exact |
-| `web/src/App.tsx` | MOD | route (router table) | — | self (`/audit` route + `/memory` redirect at `:69`) | exact |
-| `web/src/lib/vocabulary.ts` | MOD | config (term registry) | — | existing `nav.*` / `page.*` keys | exact |
-| `web/src/pages/Memories.tsx` | MOD (relocate) | component (developer view) | — | Audit relocation precedent (route stays, nav pulled) | exact |
-| `web/src/components/BrainGraph*.tsx` | unchanged (moves w/ Memories) | component | — | n/a (relocated as-is) | n/a |
-| `src/dashboard.ts` | MOD | controller (Hono routes) | CRUD / request-response | approve `:3587`, task DELETE `:1603`, task PATCH `:1612` | exact |
-| `src/db.ts` | MOD | model + migration (schema + readers/mutators) | CRUD / dual-write migration | ALTER pattern `:743/:783/:791`; readers `:1020/:1131/:1150`; `saveStructuredMemoryAtomic :1118`; dashboard reader `:2346` | exact |
-| `migrations/v1.2.5/<name>.ts` | NEW | migration | batch (DDL) | `migrations/v1.2.4/enrich-audit-log.ts` | exact |
-| `migrations/version.json` | MOD | config | — | self (register `v1.2.4`) | exact |
-| `src/memory-ingest.ts` | MOD | service (ingest engine) | event-driven (per-turn) | self — dedupe loop `:219-232`, save `:234`, `EXTRACTION_PROMPT :111`, `extractViaClaude :39` | exact |
-| `src/memory-consolidate.ts` | MOD | service (consolidation engine) | batch | self — `saveConsolidationAtomic :142` in `runConsolidation :59` | exact |
-| `src/memory.ts` / `src/memory-projection.ts` | MOD | service (behavior read paths) | request-response | `buildMemoryContext :63` / `renderMemoryProjection :42` | exact |
-| `scripts/backfill-memory-categories.ts` | NEW | utility (data migration) | batch / transform | ingest classify path + 429 backoff model in `memory-ingest.ts` | role-match |
-| `src/memory-provenance.test.ts` (+ cases in existing tests) | NEW | test | — | `src/memory.test.ts`, `src/dashboard.contract.test.ts` | role-match |
-
----
+| New/Modified File | Role | Data Flow | Closest Analog | Match Quality |
+|-------------------|------|-----------|----------------|---------------|
+| `web/src/pages/Memory.tsx` (NEW) | component (page) | request-response (grouped read + row mutations) | `web/src/pages/Activity.tsx` | exact (operator surface) |
+| `web/src/lib/routes.ts` (MOD) | config (nav source of truth) | — | self (Audit D-13 demotion at `:38-42`) | exact |
+| `web/src/App.tsx` (MOD) | route (router) | — | self (`:57-72` route block) | exact |
+| `web/src/lib/vocabulary.ts` (MOD) | config (term map) | — | self (existing `term()` keys) | role-match |
+| `src/dashboard.ts` POST/PATCH/DELETE/confirm `/api/memory*` (MOD) | route (API mutation) | CRUD | `src/dashboard.ts` task DELETE/PATCH `:1603`/`:1612`, approve `:3587` | exact |
+| `src/db.ts` operator-surface reader + mutators (MOD) | model (DB access) | CRUD | `src/db.ts` `getMemoriesWithEmbeddings:1131`, `saveStructuredMemory:951` | exact |
+| `src/db.ts` `confirmed` gate on behavior readers (MOD) | model (DB access) | request-response | `src/db.ts` `superseded_by IS NULL` clause (`:1041`,`:1068`,`:1136`) | exact |
+| `src/db.ts` `createSchema`/`runMigrations` dual-write (MOD) | migration | — | `src/db.ts` addColumn pattern `:737-794` | exact |
+| `migrations/v1.2.5/<name>.ts` (NEW) | migration | — | `migrations/v1.2.4/enrich-audit-log.ts` | exact |
+| `migrations/version.json` (MOD) | config | — | self | exact |
+| `src/memory-provenance.ts` `deriveProvenance` (NEW) | utility | transform | (pure fn — no analog; spec'd in RESEARCH) | partial |
+| `src/memory-ingest.ts` tombstone check + category (MOD) | service | event-driven (ingest) | self `:205-244` dedupe loop | exact |
+| `src/memory-consolidate.ts` tombstone check (MOD) | service | batch | self (save path before `saveConsolidationAtomic`) | role-match |
+| `src/db.ts` `memory_tombstones` table + helpers (NEW) | model + new mechanism | CRUD | (table CRUD pattern exists; suppression logic is net-new) | partial |
+| `scripts/backfill-memory-categories.ts` (NEW) | utility (data migration) | batch | (ingest 429 backoff model to copy) | partial |
 
 ## Pattern Assignments
 
-### `web/src/pages/Memory.tsx` (NEW operator page, request-response)
+### `web/src/pages/Memory.tsx` (component/page, request-response)
 
-**Analog:** `web/src/pages/Activity.tsx` (verified closest — grouped read-over-a-table, plain-language rows, per-row actions, provenance-style Pill).
+**Analog:** `web/src/pages/Activity.tsx` (verified closest operator-page analog; same PageHeader/Tab + PageState + Pill + grouped-`useMemo` + per-row mutation + ConfirmModal shape).
 
-**Import + DTO pattern** (Activity.tsx:12-37) — copy this import block and the
-server-DTO interface shape; the new page mirrors `MemoryRow` on whatever the new
-`GET /api/memory` route returns:
+**Imports pattern** (`Activity.tsx:12-22`):
 ```typescript
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks';
 import { PageHeader, Tab } from '@/components/PageHeader';
@@ -49,344 +44,184 @@ import { ConfirmModal } from '@/components/ConfirmModal';
 import { apiGet, apiPost } from '@/lib/api';
 import { term } from '@/lib/vocabulary';
 import { pushToast } from '@/lib/toasts';
-// Mirror the curated row the GET endpoint returns. No secrets, derived fields only.
-interface MemoryRow { id: number; summary: string; category: string | null;
-  provenance: 'told' | 'work' | 'email'; confirmed: 0 | 1; created_at: number; }
+// Memory adds: import { Modal } from '@/components/Modal'; (Add-fact form)
 ```
-Note: PATCH/DELETE are not in the shared `@/lib/api` named exports shown here
-(only `apiGet`/`apiPost` are used by Activity). Confirm `apiPatch`/`apiDelete`
-exist in `web/src/lib/api.ts` during planning; if not, use `apiPost` to a
-`/confirm` + `/delete` shape or extend the api helper.
 
-**Provenance-as-hero tag = the Pill + tone function** (Activity.tsx:42-57, 375).
-Copy `toneForTag` and rename for provenance/needs-review. The "needs review"
-marker on `confirmed === 0` rows uses the amber `'medium'` tone exactly as
-Activity's "Needs you" does:
+**Tag-tone helper** (`Activity.tsx:42-57`) — copy this shape; provenance is the hero, so map the three provenance tags + the "needs review" marker to `Pill` tones per UI-SPEC §Color:
 ```typescript
-type PillTone = 'done' | 'neutral' | 'medium' | 'failed' | 'cancelled';
-// "needs review" (confirmed === 0) -> 'medium' (amber), mirroring "Needs you".
-<Pill tone={toneForTag(row.tag)}>{row.tag}</Pill>
+// Memory's version: provenance -> Pill tone
+// 'You told me'           -> 'accent'  (accent-soft tint; bounded exception, UI-SPEC)
+// 'Learned from your work'-> 'neutral'
+// 'Learned from email'    -> 'neutral' (rendered only if email source exists, D-05)
+// 'Needs review' marker   -> 'medium'  (amber, unconfirmed; mirrors Activity 'Needs you')
 ```
 
-**Grouped render (group by CATEGORY, not day)** — adapt the `useMemo` grouping
-(Activity.tsx:172-184) and the section render (Activity.tsx:261-285). D-07
-(empty categories hidden) is satisfied by only pushing a group when it has rows
-— the same loop already does this. Drop the day-key helpers; group on
-`row.category`, skip `null`-category rows (or a low-key misc affordance — D-07
-discretion).
+**Load + cancel-guard pattern** (`Activity.tsx:136-167`): `useCallback` load with `{ cancelled }` signal, `apiGet<{ ... }>('/api/memory...')`, set rows, `.catch` sets verbatim `err.message`, `.finally` clears loading. Reuse verbatim; swap endpoint.
 
-**Load pattern** (Activity.tsx:136-167) — `useCallback` + cancel-token `load()`
-hitting `apiGet<{ rows: MemoryRow[] }>('/api/memory')`. Reuse verbatim.
+**Grouping pattern** (`Activity.tsx:172-184`): Activity groups by day via `useMemo`; Memory groups by **category** — same reduce-into-ordered-groups shape. Empty categories: only push a group if `rows.length > 0` (D-07).
 
-**PageState loading/empty/error** (Activity.tsx:251-259) — same three-state block.
-Empty copy follows the spec assurance tone ("Stored on this machine…").
+**PageState gating** (`Activity.tsx:251-259`): error/loading/empty exactly via `<PageState ... />`. Empty copy from UI-SPEC: heading `Nothing here yet`.
 
-**Row action + ConfirmModal for Delete** (Activity.tsx:330-361, 433-443) — the
-`busy`/`failure` state machine, destructive `ConfirmModal`, `apiPost`, and the
-honest success/failure `pushToast`. The Memory row reuses this for Delete and
-Confirm; Edit opens an inline edit (no existing modal analog — small new form,
-keep it in-file).
+**Row-card + mutation pattern** (`Activity.tsx:315-446` `ActivityRowCard`): per-row `busy`/`failure` local state, `apiPost` mutation, success/honest-failure `pushToast`, `ConfirmModal` for the one destructive action. Memory row actions:
+- Confirmed fact: `Edit` (Modal) · `Delete` (`ConfirmModal destructive`).
+- Unconfirmed fact: `Confirm` (apiPost, no modal, toast) · `Edit` · `Delete`.
+- **Affordance rule** (`Activity.tsx:393` Undo): a button that cannot act is ABSENT, never disabled-dead. `Confirm` renders only on `confirmed = 0` rows.
 
-**Header + assurance line + Add affordance** (Activity.tsx:188-201) — `PageHeader`
-with `title={term('page.memory')}` (new vocab key), an `actions` slot for the
-"Stored on this machine. Edit or delete anything." line + an "Add" button
-(mirrors the "Summarize Today" button styling at `:194-200`). Copy is Claude's
-discretion (CONTEXT specifics).
+**Card anatomy** (`Activity.tsx:364`): `bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-3`; fact text `text-[12.5px] leading-snug`, provenance `Pill` right-aligned on the top row (`:371-376`). Match verbatim (UI-SPEC §Spacing/Typography).
 
 ---
 
-### `web/src/lib/routes.ts` + `web/src/App.tsx` (nav + router, config/route)
+### `web/src/lib/routes.ts` (config) + `web/src/App.tsx` (route)
 
-**Analog:** the Audit D-13 demotion already encoded in this file.
+**Analog:** the Audit D-13 demotion already encoded here.
 
-**New operator route — add to `ROUTES`** (routes.ts:34-37 is the `intelligence`
-section block; add beside it):
-```typescript
-{ path: '/memory', label: 'Memory', vocabKey: 'nav.memory', section: 'intelligence', icon: Brain },
-```
-Import a lucide icon at routes.ts:1-6 (Brain is already imported; pick a distinct
-one if Memories keeps Brain).
+**Add operator route** (`routes.ts:27-46` ROUTES array): add `{ path: '/memory', label: 'Memory', vocabKey: <new key>, section: 'intelligence', icon: <lucide icon> }`. Note current `/memories` RouteDef at `routes.ts:34` (`label: 'Memories'`, `Brain` icon) — this is the **developer** view that D-02 demotes.
 
-**Labs relocation of `/memories` (D-02) — copy the Audit precedent verbatim**
-(routes.ts:38-42 comment block): REMOVE the `/memories` `RouteDef` from the
-visible `ROUTES` array (currently line 34), but KEEP its `<Route>` in App.tsx for
-deep-link + command-palette reach. There is no `labs` section today (Open Q3);
-default to the simpler Audit-style demotion unless planning adds a section.
+**Labs/demotion pattern** (`routes.ts:38-42` Audit comment): pull the `/memories` RouteDef OUT of the visible `intelligence` list (comment it like Audit), keep its `<Route>` in `App.tsx` for deep-link + command palette. No new "Labs" section exists — follow the lower-risk Audit-style demotion (RESEARCH Open Q3).
 
-**App.tsx router edits** (App.tsx:57, 60-61, 69):
-- Add `<Route path="/memory"><Memory /></Route>` and import `Memory` (App.tsx:10
-  import style).
-- KEEP `<Route path="/memories"><Memories /></Route>` (App.tsx:57) — relocated,
-  not deleted.
-- REMOVE/REPOINT the legacy redirect `<Route path="/memory"><Redirect to="/memories" /></Route>`
-  (App.tsx:69) — this phase TAKES `/memory` for the operator surface (Open Q2).
-- **CRITICAL (Pitfall 2):** edit `web/src/App.tsx` — `git ls-files` confirms
-  `App.tsx` is tracked and `app.tsx` is NOT. `main.tsx` imports `./App`. Editing
-  the lowercase stray no-ops on the case-insensitive macOS FS.
+**App.tsx route block** (`App.tsx:57-72`): routes registered as `<Route path="/memories"><Memories /></Route>` (`:57`). Add `<Route path="/memory"><Memory /></Route>`. **Critical:** `App.tsx:69` currently has `<Route path="/memory"><Redirect to="/memories" /></Route>` — this phase TAKES `/memory`, so **remove that redirect line** (RESEARCH Open Q2, Pitfall — also edit `App.tsx`, NOT the untracked `app.tsx`).
 
-**vocabulary.ts:** add the `nav.memory` (+ `page.memory`) `TermKey` and term,
-matching the existing `nav.*`/`page.*` entries that routes resolve through
-`term()`.
+**Vocabulary** (`web/src/lib/vocabulary.ts`): add the new `vocabKey` term (e.g. `page.memory` / `nav.memory`) so `term(r.vocabKey)` resolves the operator label (`routes.ts:56-58`).
 
 ---
 
-### `src/dashboard.ts` (NEW mutation routes — controller, CRUD)
+### `src/dashboard.ts` — net-new mutation routes (route, CRUD)
 
-**Analog:** approve route (`:3587`), task DELETE (`:1603`), task PATCH (`:1612`).
+**Analog:** task DELETE/PATCH (`dashboard.ts:1603`, `:1612`) + approve (`:3587`). Existing memory routes are read-only (`:2300`, `:2311`, `:2317`).
 
-**House style is fully inherited — do NOT re-implement auth/CSRF/kill-switch.**
-RESEARCH verified: `requireToken` query-token gate (`:432`),
-`DASHBOARD_MUTATIONS_ENABLED` 503 kill-switch on non-GET (`:449`), and Origin
-allowlist CSRF (`:495`) are app-level middleware. New routes get them for free.
+**Read-route scope pattern** (`dashboard.ts:2317-2323`): `chatId = c.req.query('chatId') || ALLOWED_CHAT_ID || ''`, paginate via parsed `limit`/`offset`, return `c.json(result)`. The new operator GET reader uses this same `ALLOWED_CHAT_ID` default (RESEARCH A1).
 
-**id-validate + status-guard + `.changes`-aware pattern** (approve `:3587-3608`):
+**Mutation route house style** (`dashboard.ts:1603-1607` DELETE, `:1612-1634` PATCH):
 ```typescript
-app.post('/api/approvals/:id/approve', async (c) => {
+// id validation + verbatim-error JSON; all SQL delegated to db.ts.
+app.delete('/api/memory/:id', (c) => {
   const id = parseInt(c.req.param('id'), 10);
   if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
-  // ... status-guard: if not in expected state, return { ok:false } WITHOUT acting
-  const changed = approve(id, replay.message); // a db.ts fn; check .changes === 1 inside
-  if (!changed) return c.json({ ok: false, error: 'already decided' });
-  return c.json({ ok: true });
+  const tomb = writeTombstoneForMemory(id);  // tombstone FIRST (Pitfall 6, fail-safe)
+  if (!tomb) return c.json({ ok: false, error: 'not found' }, 404);
+  const changed = deleteMemory(id);           // then delete the row
+  return c.json({ ok: changed });
 });
 ```
-Mirror this for the four new routes (mount under `/api/memory/...` beside the
-read routes at `:2300-2324`):
-- `POST /api/memory` (Add, D-09) — `{ summary, category }`; validate `category`
-  against the 3-value enum; call a `db.ts` Add helper (NOT a raw INSERT here).
-- `PATCH /api/memory/:id` (Edit) — `{ summary?, category? }`; the `AFTER UPDATE OF`
-  FTS trigger (db.ts:772) keeps search in sync, do not rebuild manually.
-- `DELETE /api/memory/:id` (Delete + D-08) — **tombstone FIRST, then delete row**
-  (Pitfall 6, fail-safe ordering). See the RESEARCH Code Example at lines 301-308.
-- `POST /api/memory/:id/confirm` (D-04) — flip `confirmed=1`; status-guard so a
-  double-click is a no-op (`.changes`).
+**Inherited middleware — do NOT re-implement** (RESEARCH §Don't Hand-Roll): query-token gate (`requireToken:432`), `DASHBOARD_MUTATIONS_ENABLED` kill switch on non-GET (`:449`), CSRF Origin allowlist (`:495`). All four new routes (`POST`/`PATCH`/`DELETE`/`POST :id/confirm`) are covered automatically.
 
-**Body-parse pattern** (task PATCH `:1612-1618`):
-`const body = await c.req.json().catch(() => ({})) as { ... };` then per-field
-validation returning `c.json({ ok:false, error }, 400)`.
-
-**House rule (V5/security): all SQL lives in `db.ts`** — routes call functions,
-never inline SQL. Bind via `?` placeholders.
+Routes to add (RESEARCH §Net-New Mutation API): `POST /api/memory` (Add, D-09), `PATCH /api/memory/:id` (Edit), `DELETE /api/memory/:id` (Delete + tombstone, D-08), `POST /api/memory/:id/confirm` (D-04). Validate `category` against the 3-value enum; status-guard `confirm` for double-click no-op.
 
 ---
 
-### `src/db.ts` (schema dual-write + readers/mutators — model, CRUD)
+### `src/db.ts` — readers, mutators, confirmed-gate (model, CRUD + request-response)
 
-**Analog:** self — multiple verified patterns in this file.
+**Add-fact write** — model on `saveStructuredMemory` (`db.ts:951-978`): parameterized INSERT, `now` for `created_at`/`accessed_at`, returns `lastInsertRowid`. The Add route writes through a variant: `source='you-told-me'`, `confirmed=1`, high importance (~0.9, Claude's discretion), `category` from operator. Embedding best-effort via `saveStructuredMemoryAtomic` (`:1118-1129`) which wraps save + `saveMemoryEmbedding` in a txn.
 
-**Dual-write ADD COLUMN — `createSchema`/`runMigrations` half** (db.ts:728-794,
-the PRAGMA-guarded idempotent block). Copy this shape for `category` + `confirmed`:
+**Behavior-read gate** (D-04) — mirror the existing `superseded_by IS NULL` clause. It appears in THREE readers; append `AND confirmed = 1` to each:
+- `getMemoriesWithEmbeddings` (`db.ts:1136-1137`) — `WHERE chat_id = ? AND ... AND superseded_by IS NULL` → add `AND confirmed = 1`.
+- `searchMemories` (`db.ts:1041`, `:1068`) — both the IN-clause and FTS JOIN carry `superseded_by IS NULL`; add `confirmed = 1` to both.
+- `getRecentHighImportanceMemories` (`db.ts:1150-1168`) — add `AND confirmed = 1` to both branches.
+
+**Operator-surface reader** (MEM-01) — a SEPARATE, clearly-named reader (e.g. `getMemoriesForOperatorSurface`) that does NOT filter `confirmed` (shows unconfirmed with the marker) and returns rows grouped/groupable by `category`. Model the row shape on `getDashboardMemoriesList` (`:2346`) but distinct so the two never drift (RESEARCH §Confirmed Gate).
+
+**FTS sync** — do not hand-roll: the `memories_fts` `AFTER UPDATE OF summary, raw_text, entities, topics` trigger (`db.ts:772`) keeps search in sync on Edit automatically.
+
+---
+
+### `src/db.ts` createSchema/runMigrations + `migrations/v1.2.5/<name>.ts` (migration)
+
+**Dual-write analog:** `migrations/v1.2.4/enrich-audit-log.ts` (full file) + the `addColumn` block in `db.ts:737-794`.
+
+**db.ts side** (`db.ts:783-794` pattern): PRAGMA-guarded idempotent ADD COLUMN:
 ```typescript
-const memColsPost = database.prepare(`PRAGMA table_info(memories)`).all() as Array<{ name: string }>;
-if (!memColsPost.some((c) => c.name === 'pinned')) {                      // :791 — copy this guard
-  database.exec(`ALTER TABLE memories ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`);
+if (!memColsPost.some((c) => c.name === 'confirmed')) {
+  database.exec(`ALTER TABLE memories ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 0`);
 }
-// New: category TEXT (nullable); confirmed INTEGER NOT NULL DEFAULT 0.
-// Existing-row backfill: see Open Q1 — grandfather existing rows confirmed=1.
-// Plus a CREATE TABLE IF NOT EXISTS memory_tombstones here (dual-written).
-```
-Column names/types MUST be byte-identical to the migration file (Pitfall 1).
-
-**Behavior-read gate (D-04) — copy the `superseded_by IS NULL` clause shape**
-(getMemoriesWithEmbeddings db.ts:1136-1137 already carries it). Add `AND confirmed = 1`
-to the three behavior-feeding readers:
-- `getMemoriesWithEmbeddings` (:1131) — already has `AND superseded_by IS NULL`;
-  append `AND confirmed = 1`.
-- `searchMemories` (:1020) — the vector branch IN-query (:1041) already has
-  `AND superseded_by IS NULL`; append `AND confirmed = 1` (and to the FTS branch).
-- `getRecentHighImportanceMemories` (:1150) — **NOTE: this reader does NOT
-  currently carry `superseded_by IS NULL`** (:1158, :1165). Add `AND confirmed = 1`
-  here; consider adding the superseded clause too while you are in it.
-
-**Operator-surface reader (MEM-01) — model on `getDashboardMemoriesList`**
-(db.ts:2346-2369) but it must do the OPPOSITE of the gate: return BOTH confirmed
-and unconfirmed, grouped/selectable by `category`, scoped to `chat_id`. Keep the
-two readers distinctly named (e.g. `getMemoriesForOperatorSurface` vs the gated
-behavior readers). Do NOT add the `confirmed=1` clause here.
-
-**Add mutator — variant of `saveStructuredMemoryAtomic`** (db.ts:1118-1128). The
-Add route inserts through a variant that stamps `source='you-told-me'`,
-`confirmed=1`, high salience/importance, operator `agent_id`, operator `category`,
-best-effort embedding. Reuse the txn + `saveMemoryEmbedding` shape; do not write a
-raw INSERT in dashboard.ts.
-
-**Tombstone helpers** (NEW in db.ts): `writeTombstoneForMemory(id)` (hash +
-optional embedding + summary), `isTombstoned(chatId, hash, embedding?)`,
-`deleteMemory(id)`. Hash = `sha256(normalize(summary))`; reuse the normalization
-spirit of `extractKeywords` (db.ts:~1003) per RESEARCH.
-
----
-
-### `migrations/v1.2.5/<name>.ts` + `version.json` (migration, batch)
-
-**Analog:** `migrations/v1.2.4/enrich-audit-log.ts` (read in full — copy structure
-exactly).
-
-**Migration file shape** (enrich-audit-log.ts:1-46):
-```typescript
-import Database from 'better-sqlite3';
-import path from 'path';
-export const description = 'Add category + confirmed columns and memory_tombstones (Phase 6)';
-export async function run(): Promise<void> {
-  const dbPath = path.join(process.cwd(), 'store', 'claudeclaw.db'); // never hardcode abs path
-  const db = new Database(dbPath);
-  try {
-    const have = new Set((db.prepare(`PRAGMA table_info(memories)`).all() as Array<{ name: string }>).map((c) => c.name));
-    const add = (col: string, type: string) => { if (!have.has(col)) db.exec(`ALTER TABLE memories ADD COLUMN ${col} ${type}`); };
-    add('category', 'TEXT');                       // byte-identical to db.ts
-    add('confirmed', 'INTEGER NOT NULL DEFAULT 0'); // byte-identical to db.ts
-    db.exec(`CREATE TABLE IF NOT EXISTS memory_tombstones (...)`); // mirror createSchema
-    // Existing-row confirmed backfill decision (Open Q1): grandfather to 1.
-  } finally { db.close(); }
+if (!memColsPost.some((c) => c.name === 'category')) {
+  database.exec(`ALTER TABLE memories ADD COLUMN category TEXT`);
 }
+// CREATE TABLE IF NOT EXISTS memory_tombstones (...) here too.
 ```
-The header comment in v1.2.4 (lines 14-23) documents the dual-write + Pitfall-1
-discipline — keep an equivalent comment.
 
-**`version.json`** (current content has 4 entries up to `v1.2.4`): add
-`"v1.2.5": ["<migration-filename-without-ext>"]`.
+**Migration file side** (`enrich-audit-log.ts:7-45`): open own `better-sqlite3` handle via `path.join(process.cwd(), 'store', 'claudeclaw.db')`, build a `have` Set from `PRAGMA table_info(memories)`, `add(col, type)` only if missing, `db.close()` in `finally`. **Column names/types MUST be byte-identical to db.ts** (Pitfall 1 — drift crash-loops the live service).
+
+**version.json** (full file, 8 lines): add `"v1.2.5": ["<migration-name>"]` to the `migrations` object.
+
+**Existing-row `confirmed` backfill decision** (RESEARCH Open Q1): recommend defaulting existing rows to `confirmed=1` (grandfather) so the gate doesn't strip the whole memory the moment the migration runs; only NEW inferred facts land `confirmed=0`. Confirm in planning.
 
 ---
 
-### `src/memory-ingest.ts` (ingest engine — service, event-driven)
+### `src/memory-provenance.ts` `deriveProvenance` (utility, transform) — NO direct analog
 
-**Analog:** self — the dedupe loop and save call are the verified hook points.
+Net-new pure server-side function (RESEARCH §Provenance Derivation). Pin the mapping from real `source` + `agent_id`:
+| Tag | Condition |
+|-----|-----------|
+| `You told me` | `source IN ('you-told-me', 'checkpoint')` (Add route stamps `'you-told-me'`; existing `'checkpoint'` is operator-authored) |
+| `Learned from your work` | `source = 'conversation'` (the default for all code-ingested rows; these land unconfirmed) |
+| `Learned from email` | `source = 'email'` — emit ONLY if `SELECT 1 FROM memories WHERE source='email' LIMIT 1` returns a row (D-05) |
+Keep the derivation in `src/` (shared by the API DTO + tests), never in the Preact layer. Pitfall 4: "You told me" is forward-stamped, not back-derived.
 
-**Tombstone check (D-08) — slot in at the existing dedupe loop** (:219-232,
-verified). Insert BEFORE `saveStructuredMemoryAtomic` (:234), after embedding
-(:214), co-located with the 0.85 cosine dedupe:
+---
+
+### `src/memory-ingest.ts` tombstone + category (service, event-driven)
+
+**Analog (self):** the dedupe loop at `memory-ingest.ts:205-244`.
+
+**Tombstone hook** — slot in beside the existing cosine dedupe (`:219-232`), BEFORE `saveStructuredMemoryAtomic` (`:234`), after `embedText` (`:214`):
 ```typescript
-// existing: embedding generated at :214, dedupe loop at :219-232
 const hash = sha256(normalizeSummary(result.summary)); // hash floor, always on
-if (isTombstoned(chatId, hash, embedding /* optional, GOOGLE_API_KEY-gated */)) {
+if (isTombstoned(chatId, hash, embedding /* optional */)) {
   logger.debug({ summary: result.summary.slice(0, 60) }, 'Skipping tombstoned memory');
-  return false; // mirrors the dedupe `return false` at :229
+  return false;
 }
+// then existing 0.85 cosine dedupe loop (:220-232), then save.
 ```
 
-**Category classification (D-06) — extend the existing extractor, no new LLM path.**
-`EXTRACTION_PROMPT` (:111) + `extractViaClaude` (:39, verified Haiku-via-OAuth, no
-key). Add `"category": "your-business" | "your-clients" | "how-you-work" | null` to
-the returned JSON contract; validate/clamp like the existing `importance` handling
-(:205-208); `null`/unknown → store NULL (D-07). Pass `category` through the
-`saveStructuredMemoryAtomic` call (:234-244).
-
-**Confirmed default:** ingest-written memories are machine-inferred →
-`confirmed=0`. This flows through the `saveStructuredMemoryAtomic` variant.
+**Category hook** — extend `EXTRACTION_PROMPT` (`:111`) so the existing `extractViaClaude` call (`:39`) also returns `"category": "your-business" | "your-clients" | "how-you-work" | null`; validate/clamp like `importance` (`:208`); null/unknown → store NULL (D-07). One Haiku-via-OAuth call, no new key.
 
 ---
 
-### `src/memory-consolidate.ts` (consolidation engine — service, batch)
+### `src/memory-consolidate.ts` tombstone (service, batch)
 
-**Analog:** self — `runConsolidation` (:59), `saveConsolidationAtomic` (:142).
-
-**Second tombstone consult (D-08):** before `saveConsolidationAtomic` (:142),
-tombstone-check the SYNTHESIZED summary/insight so a deleted fact cannot re-enter
-as a consolidation. Same `isTombstoned` helper as ingest.
+Second tombstone consult (D-08): before `saveConsolidationAtomic` in `runConsolidation`, hash-and-cosine-check the synthesized `summary`/`insight` so a deleted fact cannot re-enter as a "consolidation." Same `isTombstoned` helper as ingest.
 
 ---
 
-### `src/memory.ts` + `src/memory-projection.ts` (behavior read paths — service)
+### `scripts/backfill-memory-categories.ts` (utility, batch) — partial analog
 
-**Analog:** self. The gate is applied ONCE at the `db.ts` reader layer (see db.ts
-above), so these files need NO per-call-site filter IF the readers they call are
-gated. Verify each still routes through the gated readers:
-- `src/memory.ts buildMemoryContext` (:63) → `searchMemories`,
-  `getRecentHighImportanceMemories`, `getMemoriesWithEmbeddings` (all gated above).
-- `src/memory-projection.ts renderMemoryProjection` (:29) → calls
-  `getRecentHighImportanceMemories` (verified :42). Gating that reader covers this
-  path automatically (Pitfall 3 — do NOT forget this second path).
-
----
-
-### `scripts/backfill-memory-categories.ts` (NEW data migration — utility, batch)
-
-**Analog:** the ingest classify path + 429 backoff model in `memory-ingest.ts`.
-Standalone `tsx`-runnable script: `SELECT` rows `WHERE category IS NULL`, classify
-each `summary` via `extractViaClaude` (same helper), `UPDATE` the row. Idempotent
-(only touches NULL). Separate from the schema migration; both are needed.
-
----
+Standalone `tsx` script: select rows `WHERE category IS NULL`, classify each `summary` via the same `extractViaClaude` classify prompt, UPDATE. Idempotent (only touches NULL). Copy the ingest 429-backoff model. Data migration, separate from the schema migration; both required.
 
 ## Shared Patterns
 
-### Auth / CSRF / Kill-switch (all new mutation routes)
-**Source:** `src/dashboard.ts` — `requireToken` (:432), kill-switch (:449), CSRF
-Origin allowlist (:495). **Apply to:** every new route in dashboard.ts.
-**Action:** NOTHING per-route — it is inherited app-level middleware. Re-implementing
-it risks a gap. Confirmed by RESEARCH (Don't Hand-Roll table).
+### Mutation auth / CSRF / kill-switch (cross-cutting, all new API routes)
+**Source:** `src/dashboard.ts` `requireToken:432`, kill-switch `:449`, CSRF Origin allowlist `:495`.
+**Apply to:** every new `/api/memory*` route. App-level middleware covers all non-GET automatically — do NOT add per-route auth (RESEARCH §Don't Hand-Roll, Security §V2/V4).
 
-### SQL lives in db.ts, parameterized
-**Source:** house convention (RESEARCH Security V5; FTS quoting db.ts:1054-1059).
-**Apply to:** every new route + reader. Routes call `db.ts` functions; all SQL binds
-via `?`; never interpolate `summary`/`category`.
+### Parameterized SQL (all new db.ts functions)
+**Source:** `src/db.ts:962-965` (`?` placeholders), FTS quote-strip `:1059`.
+**Apply to:** every new reader/mutator. Never interpolate `summary`/`category` into SQL (Security §V5, SQLi mitigation).
 
-### Dual-write migration discipline (Pitfall 1)
-**Source:** `migrations/v1.2.4/enrich-audit-log.ts` header (:14-23) + db.ts:728-794.
-**Apply to:** the `category`/`confirmed`/`memory_tombstones` schema. Byte-identical
-DDL in BOTH `db.ts createSchema` and `migrations/v1.2.5/*.ts`; register in
-`version.json`; PRAGMA-guard both. Drift crash-loops the live service on restart.
+### Pill provenance tag (all fact rows)
+**Source:** `web/src/components/Pill.tsx:23-29` — tones `accent` (`--color-accent-soft`), `medium` (amber), `neutral`.
+**Apply to:** every fact row. Provenance pill is the primary visual anchor (UI-SPEC §Visual Hierarchy); `Needs review` uses `medium`.
 
-### Provenance derivation = pure server-side helper (D-03)
-**Source:** RESEARCH "Provenance Derivation" mapping (verified every `source`/`agent_id`
-writer). **Apply to:** the operator-surface read DTO + tests. A
-`deriveProvenance(memory): 'told' | 'work' | 'email'` helper in `src/`:
-- `'told'`: `source IN ('you-told-me', 'checkpoint')`.
-- `'work'`: `source = 'conversation'` (the default — the unconfirmed majority).
-- `'email'`: `source = 'email'` AND emit ONLY if `SELECT 1 FROM memories WHERE
-  source='email' LIMIT 1` returns a row (D-05 honest coverage; matches Audit 05 D-13).
-Do NOT compute provenance in the Preact layer — keep it in `src/` so API + tests agree.
+### ConfirmModal for the one destructive action (Delete)
+**Source:** `web/src/components/ConfirmModal.tsx:23-67` (`destructive` prop → `--color-status-failed` button).
+**Apply to:** Delete only. Copy from UI-SPEC §Copywriting: title `Delete this fact?`, body states the tombstone guarantee, success toast `Deleted. It will not come back.` Edit/Add/Confirm are non-destructive (Modal or inline, no confirm modal).
 
-### Operator surface ≠ developer surface (D-01/D-02)
-**Source:** `routes.ts:38-42` (Audit D-13 demotion); `web/src/pages/Activity.tsx`
-header/card language. **Apply to:** the new `/memory` page is card/plain-language
-(Activity-style); the relocated `/memories` (BrainGraph, salience/decay) stays the
-dense developer view, route-only in App.tsx, pulled from visible nav.
+### Honest-failure toasts (all mutations)
+**Source:** `web/src/pages/Activity.tsx:343-358` — `pushToast` with verbatim server reason, never a generic line.
+**Apply to:** Edit/Delete/Confirm failures; surface `res.error`/`err.message` verbatim per UI-SPEC.
 
-### Test homes (Wave 0)
-**Source:** RESEARCH Test Map. **Apply to:** new cases land in existing files plus one
-new file:
-- `src/memory-provenance.test.ts` (NEW) — derivation + D-05 email honesty.
-- `src/memory-ingest.test.ts` / `src/memory-consolidate.test.ts` — tombstone suppression.
-- `src/memory.test.ts` / `src/memory-projection.test.ts` — confirmed gate, BOTH paths.
-- `src/migrations.test.ts` / `src/migrate-runner.test.ts` — dual-write columns + table.
-- `src/dashboard.contract.test.ts` — Edit/Delete/Add/Confirm route contracts.
-
----
+### PageState for loading/error/empty
+**Source:** `Activity.tsx:251-259`.
+**Apply to:** the new page — never hand-roll states.
 
 ## No Analog Found
 
-None. Every file maps to an in-repo analog. The two genuinely new mechanisms
-(tombstone table + confirmed gate) reuse existing patterns: the tombstone reuses
-the dedupe-loop hook and embeddings/cosine; the gate reuses the `superseded_by IS NULL`
-reader-clause pattern.
-
-| Pseudo-gap | Why it is still covered |
-|------------|-------------------------|
-| `memory_tombstones` table | New table, but DDL + reader follow the `superseded_by`/dedupe patterns; helpers modeled on existing db.ts mutators. |
-| Inline Edit form on the operator page | No existing inline-edit modal analog; small in-file form. Delete/Confirm reuse Activity's ConfirmModal + toast flow. |
-
----
+| File / Mechanism | Role | Data Flow | Reason |
+|------|------|-----------|--------|
+| `memory_tombstones` suppression logic (`isTombstoned`, hash+cosine) | new mechanism | CRUD | No existing suppression/tombstone table; the genuinely new mechanism this phase adds (D-08). Table CRUD shape is conventional, but the hash-floor + 0.88-cosine suppression check has no codebase precedent — implement per RESEARCH §Tombstone (sha256 over normalized summary as primary key; optional embedding secondary at the named 0.88 threshold). |
+| `deriveProvenance` (`src/memory-provenance.ts`) | utility | transform | Net-new pure function; mapping spec'd in RESEARCH §Provenance, not copied from an existing analog. |
 
 ## Metadata
 
-**Analog search scope:** `web/src/pages/`, `web/src/lib/`, `src/` (db, dashboard,
-memory-*, embeddings), `migrations/`. All reads against the worktree path in
-`<critical_cwd>`.
-**Files scanned (read):** Activity.tsx, routes.ts, App.tsx,
-migrations/v1.2.4/enrich-audit-log.ts, version.json, dashboard.ts (3 ranges),
-db.ts (5 ranges), memory-ingest.ts (2 ranges); grep-verified memory-consolidate.ts,
-memory-projection.ts, git-tracked status of App.tsx vs app.tsx.
+**Analog search scope:** `web/src/pages/`, `web/src/components/`, `web/src/lib/`, `src/` (db, dashboard, memory-ingest, memory-consolidate, memory, memory-projection, embeddings), `migrations/`.
+**Files scanned (read):** Activity.tsx, routes.ts, App.tsx, dashboard.ts (3 ranges), db.ts (4 ranges), memory-ingest.ts, enrich-audit-log.ts, version.json, Pill.tsx, ConfirmModal.tsx.
 **Pattern extraction date:** 2026-06-26
-
-### Planner watch-items surfaced during mapping (verified facts)
-1. `getRecentHighImportanceMemories` (db.ts:1150) does NOT currently carry
-   `superseded_by IS NULL` — unlike the other two readers. Add `confirmed=1` here
-   and consider the superseded clause.
-2. `web/src/app.tsx` is UNTRACKED (`git ls-files` shows only `App.tsx`). Edit
-   `App.tsx`. Flag the stray to the operator (out of scope to delete).
-3. App.tsx:69 redirect `/memory` → `/memories` must be removed/repointed (Open Q2).
-4. Confirm `apiPatch`/`apiDelete` exist in `web/src/lib/api.ts`; Activity only uses
-   `apiGet`/`apiPost`.
-5. Existing-row `confirmed` backfill (Open Q1): grandfather existing rows to
-   `confirmed=1` so the migration does not strip the operator's whole memory.

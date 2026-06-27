@@ -818,6 +818,33 @@ function runMigrations(database: Database.Database): void {
     logger.info('Migration: added pinned column to memories table');
   }
 
+  // Phase 6 Memory Surface (MEM-01/MEM-02, v1.2.6 dual-write). These three
+  // artifacts MUST stay byte-identical to migrations/v1.2.6/add-memory-surface-columns.ts
+  // (Pitfall 1 / T-06-01 — drift crash-loops the live service on the next restart).
+  // NEW inserts default confirmed=0 (machine-inferred facts land unconfirmed,
+  // D-04); the grandfather UPDATE that flips EXISTING rows to confirmed=1 lives
+  // ONLY in the versioned migration, never here.
+  if (!memColsPost.some((c: { name: string }) => c.name === 'category')) {
+    database.exec(`ALTER TABLE memories ADD COLUMN category TEXT`);
+    logger.info('Migration: added category column to memories table');
+  }
+  if (!memColsPost.some((c: { name: string }) => c.name === 'confirmed')) {
+    database.exec(`ALTER TABLE memories ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 0`);
+    logger.info('Migration: added confirmed column to memories table');
+  }
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS memory_tombstones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT,
+      text_hash TEXT NOT NULL,
+      embedding TEXT,
+      summary TEXT,
+      created_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_tombstones_chat_hash
+      ON memory_tombstones(chat_id, text_hash);
+  `);
+
   // Mission Control: migrate assigned_agent from NOT NULL to nullable (allow unassigned tasks)
   const missionCols = database.prepare(`PRAGMA table_info(mission_tasks)`).all() as Array<{ name: string; notnull: number }>;
   const assignedCol = missionCols.find((c) => c.name === 'assigned_agent');
@@ -973,6 +1000,24 @@ export interface Consolidation {
   embedding_model?: string;
 }
 
+/**
+ * Validate a candidate operator category against the 3-value enum (D-06).
+ * Returns the category when it is one of {your-business, your-clients,
+ * how-you-work}; anything else (including null/undefined/empty) -> null (D-07).
+ * Shared by the ingest classifier, the backfill script, and the save path so
+ * the enum lives in exactly one place. Defined here (not beside the const at
+ * the bottom) so the save functions above the operator-seam section can call
+ * it — `const OPERATOR_FACT_CATEGORIES` is not hoisted.
+ */
+export function normalizeOperatorCategory(value: unknown): string | null {
+  // References OPERATOR_FACT_CATEGORIES (declared lower in this file) at call
+  // time — single source of truth for the enum, no duplicated literal list.
+  return typeof value === 'string'
+    && (OPERATOR_FACT_CATEGORIES as readonly string[]).includes(value)
+    ? value
+    : null;
+}
+
 export function saveStructuredMemory(
   chatId: string,
   rawText: string,
@@ -982,11 +1027,18 @@ export function saveStructuredMemory(
   importance: number,
   source = 'conversation',
   agentId = 'main',
+  // D-04: new machine-inferred facts land UNCONFIRMED (confirmed=0) so they
+  // never influence behavior until the operator confirms. The operator
+  // Add-fact path (addOperatorFact) forward-stamps confirmed=1.
+  confirmed = 0,
+  // D-06: optional operator category classified on ingest. Validated against
+  // the 3-value enum at the call site; unknown/invalid -> null (D-07).
+  category: string | null = null,
 ): number {
   const now = Math.floor(Date.now() / 1000);
   const result = db.prepare(
-    `INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, agent_id, created_at, accessed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, agent_id, confirmed, category, created_at, accessed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     chatId,
     source,
@@ -996,6 +1048,8 @@ export function saveStructuredMemory(
     JSON.stringify(topics),
     importance,
     agentId,
+    confirmed ? 1 : 0,
+    normalizeOperatorCategory(category),
     now,
     now,
   );
@@ -1063,7 +1117,7 @@ export function searchMemories(
         const ids = scored.map((s) => s.id);
         const placeholders = ids.map(() => '?').join(',');
         const rows = db
-          .prepare(`SELECT * FROM memories WHERE id IN (${placeholders}) AND superseded_by IS NULL`)
+          .prepare(`SELECT * FROM memories WHERE id IN (${placeholders}) AND superseded_by IS NULL AND confirmed = 1`)
           .all(...ids) as Memory[];
         // Preserve similarity-score ordering (SQL IN doesn't guarantee order)
         const rowMap = new Map(rows.map((r) => [r.id, r]));
@@ -1090,7 +1144,7 @@ export function searchMemories(
     .prepare(
       `SELECT memories.* FROM memories
        JOIN memories_fts ON memories.id = memories_fts.rowid
-       WHERE memories_fts MATCH ? AND memories.chat_id = ? AND memories.superseded_by IS NULL${ftsAgentClause}
+       WHERE memories_fts MATCH ? AND memories.chat_id = ? AND memories.superseded_by IS NULL AND memories.confirmed = 1${ftsAgentClause}
        ORDER BY rank
        LIMIT ?`,
     )
@@ -1115,7 +1169,7 @@ export function searchMemories(
   results = db
     .prepare(
       `SELECT * FROM memories
-       WHERE chat_id = ? AND superseded_by IS NULL AND (${likeConditions})${likeAgentClause}
+       WHERE chat_id = ? AND superseded_by IS NULL AND confirmed = 1 AND (${likeConditions})${likeAgentClause}
        ORDER BY importance DESC, accessed_at DESC
        LIMIT ?`,
     )
@@ -1142,9 +1196,14 @@ export function saveStructuredMemoryAtomic(
   embedding: number[],
   source = 'conversation',
   agentId = 'main',
+  // D-06: validated operator category from the ingest classifier; null when
+  // the model returned an unknown/absent value (D-07).
+  category: string | null = null,
 ): number {
   const txn = db.transaction(() => {
-    const memoryId = saveStructuredMemory(chatId, rawText, summary, entities, topics, importance, source, agentId);
+    const memoryId = saveStructuredMemory(
+      chatId, rawText, summary, entities, topics, importance, source, agentId, 0, category,
+    );
     if (embedding.length > 0) {
       saveMemoryEmbedding(memoryId, embedding);
     }
@@ -1153,13 +1212,214 @@ export function saveStructuredMemoryAtomic(
   return txn();
 }
 
+// ── Memory surface operator seam (Phase 6, MEM-01 / D-08 / D-09) ───────────
+//
+// These functions are the ONLY seam plan 03's /api/memory* routes call. No
+// raw SQL lives in dashboard.ts; every reader/mutator here binds via `?`
+// placeholders (T-06-03 SQLi mitigation).
+
+/** The three-value operator category enum (D-06). */
+export const OPERATOR_FACT_CATEGORIES = ['your-business', 'your-clients', 'how-you-work'] as const;
+export type OperatorFactCategory = (typeof OPERATOR_FACT_CATEGORIES)[number];
+
+/**
+ * Secondary tombstone match threshold (D-08). When a tombstone carries an
+ * embedding and a candidate embedding is available, a cosine similarity above
+ * this value is treated as the same suppressed fact. The sha256 hash floor is
+ * always checked first; this only widens suppression to near-duplicates.
+ */
+export const TOMBSTONE_COSINE_THRESHOLD = 0.88;
+
+/**
+ * Normalize a summary for hashing: lowercase, strip punctuation, collapse
+ * whitespace. Mirrors extractKeywords' normalization spirit so a re-derived
+ * fact with trivial punctuation/casing differences hashes identically. The
+ * sha256 of this is the tombstone primary key.
+ */
+export function normalizeSummary(text: string): string {
+  return text
+    .replace(/[“”]/g, '"')
+    .replace(/[^\w\s]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+/** sha256 hex of the normalized summary (tombstone primary key). */
+function summaryHash(summary: string): string {
+  return crypto.createHash('sha256').update(normalizeSummary(summary)).digest('hex');
+}
+
+/**
+ * Operator-surface reader (MEM-01). Returns BOTH confirmed and unconfirmed
+ * rows scoped to chatId, each carrying the fields the operator UI groups by
+ * category. DISTINCT from the behavior readers: it does NOT filter confirmed,
+ * so the surface can show "needs review" (confirmed=0) rows. Ordered so equal
+ * categories sit together (NULLs last) for the UI's grouped render.
+ */
+export function getMemoriesForOperatorSurface(
+  chatId: string,
+): Array<{
+  id: number;
+  source: string;
+  category: string | null;
+  confirmed: number;
+  summary: string;
+  importance: number;
+  created_at: number;
+}> {
+  return db
+    .prepare(
+      `SELECT id, source, category, confirmed, summary, importance, created_at
+       FROM memories
+       WHERE chat_id = ? AND superseded_by IS NULL
+       ORDER BY (category IS NULL), category ASC, confirmed ASC, created_at DESC`,
+    )
+    .all(chatId) as Array<{
+      id: number;
+      source: string;
+      category: string | null;
+      confirmed: number;
+      summary: string;
+      importance: number;
+      created_at: number;
+    }>;
+}
+
+/**
+ * Write a tombstone for a memory (D-08). Reads the row, records the sha256 of
+ * its normalized summary (plus its embedding/summary/chat_id) into
+ * memory_tombstones so the fact cannot re-derive via ingest/consolidation.
+ * Returns false if the memory id does not exist (so DELETE can 404). Called
+ * BEFORE deleteMemory (tombstone-first, Pitfall 6).
+ */
+export function writeTombstoneForMemory(id: number): boolean {
+  const row = db
+    .prepare(`SELECT chat_id, summary, embedding FROM memories WHERE id = ?`)
+    .get(id) as { chat_id: string; summary: string; embedding: string | null } | undefined;
+  if (!row) return false;
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `INSERT INTO memory_tombstones (chat_id, text_hash, embedding, summary, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(row.chat_id, summaryHash(row.summary), row.embedding ?? null, row.summary, now);
+  return true;
+}
+
+/**
+ * Is a fact tombstoned (D-08)? Hash floor always: true if the sha256 of the
+ * normalized summary matches any tombstone for the chat. Secondary: when an
+ * embedding is supplied, true if cosine vs any tombstone embedding exceeds
+ * TOMBSTONE_COSINE_THRESHOLD. Accepts either a raw summary or a precomputed
+ * hash for the first arg's flexibility at the call site.
+ */
+export function isTombstoned(chatId: string, summaryOrHash: string, embedding?: number[]): boolean {
+  // Treat a 64-char hex string as an already-computed hash; otherwise hash it.
+  const hash = /^[0-9a-f]{64}$/.test(summaryOrHash) ? summaryOrHash : summaryHash(summaryOrHash);
+  const hit = db
+    .prepare(`SELECT 1 FROM memory_tombstones WHERE chat_id = ? AND text_hash = ? LIMIT 1`)
+    .get(chatId, hash);
+  if (hit) return true;
+
+  if (embedding && embedding.length > 0) {
+    const rows = db
+      .prepare(`SELECT embedding FROM memory_tombstones WHERE chat_id = ? AND embedding IS NOT NULL`)
+      .all(chatId) as Array<{ embedding: string }>;
+    for (const r of rows) {
+      try {
+        const tombEmb = JSON.parse(r.embedding) as number[];
+        if (cosineSimilarity(embedding, tombEmb) > TOMBSTONE_COSINE_THRESHOLD) return true;
+      } catch {
+        // Malformed stored embedding — skip; hash floor already covers exacts.
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Operator Add-fact writer (D-09 / MEM-02). Stamps source='you-told-me',
+ * confirmed=1, high importance, and the validated category. Rejects a category
+ * outside the three-value enum. Returns the new memory id.
+ */
+export function addOperatorFact(
+  chatId: string,
+  summary: string,
+  category: string,
+): number {
+  if (!OPERATOR_FACT_CATEGORIES.includes(category as OperatorFactCategory)) {
+    throw new Error(`invalid category: ${category}`);
+  }
+  const id = saveStructuredMemory(
+    chatId,
+    summary,            // operator-authored: raw_text == summary
+    summary,
+    [],
+    [],
+    0.9,                // operator facts are high importance (D-09)
+    'you-told-me',      // forward-stamped provenance (Pitfall 4)
+    'main',
+    1,                  // confirmed: operator-authored facts skip the gate
+  );
+  db.prepare(`UPDATE memories SET category = ? WHERE id = ?`).run(category, id);
+  return id;
+}
+
+/**
+ * Confirm an unconfirmed memory (D-04). Status-guarded: flips confirmed 0->1
+ * only when currently 0, so a double-call is a no-op. Returns true exactly
+ * once per memory.
+ */
+export function confirmMemory(id: number): boolean {
+  const info = db
+    .prepare(`UPDATE memories SET confirmed = 1 WHERE id = ? AND confirmed = 0`)
+    .run(id);
+  return info.changes === 1;
+}
+
+/**
+ * Update an operator fact's summary and/or category (Edit). Validates category
+ * against the enum when provided. Returns true if a row changed.
+ */
+export function updateOperatorFact(
+  id: number,
+  fields: { summary?: string; category?: string },
+): boolean {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (typeof fields.summary === 'string') {
+    sets.push('summary = ?');
+    params.push(fields.summary);
+  }
+  if (typeof fields.category === 'string') {
+    if (!OPERATOR_FACT_CATEGORIES.includes(fields.category as OperatorFactCategory)) {
+      throw new Error(`invalid category: ${fields.category}`);
+    }
+    sets.push('category = ?');
+    params.push(fields.category);
+  }
+  if (sets.length === 0) return false;
+  params.push(id);
+  const info = db.prepare(`UPDATE memories SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  return info.changes === 1;
+}
+
+/**
+ * Delete a memory row (called AFTER writeTombstoneForMemory by the route,
+ * Pitfall 6). Returns true if a row was removed.
+ */
+export function deleteMemory(id: number): boolean {
+  const info = db.prepare(`DELETE FROM memories WHERE id = ?`).run(id);
+  return info.changes === 1;
+}
+
 export function getMemoriesWithEmbeddings(
   chatId: string,
   agentId?: string,
 ): Array<{ id: number; embedding: number[]; summary: string; importance: number }> {
   const sql = agentId
-    ? 'SELECT id, embedding, summary, importance FROM memories WHERE chat_id = ? AND agent_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL'
-    : 'SELECT id, embedding, summary, importance FROM memories WHERE chat_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL';
+    ? 'SELECT id, embedding, summary, importance FROM memories WHERE chat_id = ? AND agent_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL AND confirmed = 1'
+    : 'SELECT id, embedding, summary, importance FROM memories WHERE chat_id = ? AND embedding IS NOT NULL AND superseded_by IS NULL AND confirmed = 1';
   const params = agentId ? [chatId, agentId] : [chatId];
   const rows = db
     .prepare(sql)
@@ -1180,14 +1440,14 @@ export function getRecentHighImportanceMemories(
   if (agentId) {
     return db
       .prepare(
-        `SELECT * FROM memories WHERE chat_id = ? AND agent_id = ? AND importance >= 0.5
+        `SELECT * FROM memories WHERE chat_id = ? AND agent_id = ? AND importance >= 0.5 AND confirmed = 1
          ORDER BY accessed_at DESC LIMIT ?`,
       )
       .all(chatId, agentId, limit) as Memory[];
   }
   return db
     .prepare(
-      `SELECT * FROM memories WHERE chat_id = ? AND importance >= 0.5
+      `SELECT * FROM memories WHERE chat_id = ? AND importance >= 0.5 AND confirmed = 1
        ORDER BY accessed_at DESC LIMIT ?`,
     )
     .all(chatId, limit) as Memory[];

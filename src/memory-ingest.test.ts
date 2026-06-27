@@ -29,6 +29,15 @@ vi.mock('./env.js', () => ({
 vi.mock('./db.js', () => ({
   saveStructuredMemoryAtomic: vi.fn(() => 1),
   getMemoriesWithEmbeddings: vi.fn(() => []),
+  // Phase 6 tombstone suppression helpers (D-08).
+  isTombstoned: vi.fn(() => false),
+  writeTombstone: vi.fn(),
+  // D-06 category validator: mirror db.ts's enum so the ingest classifier maps
+  // the model's category onto the 3-value enum (unknown/absent -> null, D-07).
+  normalizeOperatorCategory: vi.fn((value: unknown) => {
+    const VALID = ['your-business', 'your-clients', 'how-you-work'];
+    return typeof value === 'string' && VALID.includes(value) ? value : null;
+  }),
 }));
 
 vi.mock('./embeddings.js', () => ({
@@ -42,11 +51,12 @@ vi.mock('./logger.js', () => ({
 
 import { ingestConversationTurn } from './memory-ingest.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
-import { saveStructuredMemoryAtomic } from './db.js';
+import { saveStructuredMemoryAtomic, isTombstoned } from './db.js';
 
 const mockGenerateContent = vi.mocked(generateContent);
 const mockParseJson = vi.mocked(parseJsonResponse);
 const mockSave = vi.mocked(saveStructuredMemoryAtomic);
+const mockIsTombstoned = vi.mocked(isTombstoned);
 
 describe('ingestConversationTurn', () => {
   beforeEach(() => {
@@ -130,6 +140,7 @@ describe('ingestConversationTurn', () => {
       expect.any(Array),
       'conversation',
       'main',
+      null, // no category in this extraction -> NULL (D-07)
     );
   });
 
@@ -223,6 +234,7 @@ describe('ingestConversationTurn', () => {
       expect.any(Array),
       'conversation',
       'main',
+      null,
     );
   });
 
@@ -299,6 +311,7 @@ describe('ingestConversationTurn', () => {
       expect.any(Array),
       'conversation',
       'main',
+      null,
     );
   });
 
@@ -325,5 +338,138 @@ describe('ingestConversationTurn', () => {
     // The prompt should contain the truncated message, not the full 5000 chars
     expect(promptArg).not.toContain('x'.repeat(3000));
     expect(promptArg).toContain('x'.repeat(2000));
+  });
+
+  // ── Tombstone suppression (Wave 0 RED — D-08, crit 3) ─────────────────
+  //
+  // A deleted fact writes a tombstone (sha256 of the normalized summary, plus
+  // optional embedding). When the SAME turn is re-fed through ingestion, the
+  // tombstone check must fire BEFORE save and skip it: no new memory row is
+  // created. RED today: ingestConversationTurn does not consult isTombstoned,
+  // so a re-fed deleted fact would be saved again. Plan 02 slots the check in
+  // at the existing dedupe point.
+
+  it('does not create a new memory row when the extracted fact is tombstoned (D-08)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User prefers dark mode in all applications',
+      entities: ['dark mode'],
+      topics: ['preferences'],
+      importance: 0.8,
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+    // This summary was deleted earlier -> its hash is tombstoned.
+    mockIsTombstoned.mockReturnValue(true);
+
+    const result = await ingestConversationTurn(
+      'chat1',
+      'I always want dark mode enabled in everything',
+      'Got it.',
+    );
+
+    // The tombstone check must have run...
+    expect(mockIsTombstoned).toHaveBeenCalled();
+    // ...and suppressed the save: no new row.
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(result).toBe(false);
+  });
+
+  it('still saves when the fact is NOT tombstoned (suppression is targeted, not blanket)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User wants weekly invoice reminders',
+      entities: [],
+      topics: ['invoices'],
+      importance: 0.7,
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+    mockIsTombstoned.mockReturnValue(false);
+
+    const result = await ingestConversationTurn('chat1', 'remind me about invoices weekly please', 'ok');
+    expect(result).toBe(true);
+    expect(mockSave).toHaveBeenCalled();
+  });
+
+  // ── Category classification on ingest (D-06 / D-07) ───────────────────
+  //
+  // The extraction prompt now returns a `category` constrained to the 3-value
+  // operator enum or null. The value is validated like importance and persisted
+  // on the new row. A valid category is passed through; an unknown/invalid one
+  // (or an absent one) is clamped to NULL so the surface never shows a junk bucket.
+
+  it('persists a valid category from the extraction (D-06)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User invoices clients on net-30 terms',
+      entities: ['invoicing'],
+      topics: ['billing'],
+      importance: 0.8,
+      category: 'how-you-work',
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+
+    const result = await ingestConversationTurn('chat1', 'I always bill clients on net-30 terms', 'noted');
+    expect(result).toBe(true);
+    expect(mockSave).toHaveBeenCalledWith(
+      'chat1',
+      expect.any(String),
+      'User invoices clients on net-30 terms',
+      ['invoicing'],
+      ['billing'],
+      0.8,
+      expect.any(Array),
+      'conversation',
+      'main',
+      'how-you-work',
+    );
+  });
+
+  it('clamps an unknown category to NULL (D-07)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User likes concise summaries',
+      entities: [],
+      topics: [],
+      importance: 0.6,
+      category: 'totally-made-up-bucket',
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+
+    const result = await ingestConversationTurn('chat1', 'keep your summaries short and to the point', 'ok');
+    expect(result).toBe(true);
+    expect(mockSave).toHaveBeenCalledWith(
+      'chat1',
+      expect.any(String),
+      'User likes concise summaries',
+      [],
+      [],
+      0.6,
+      expect.any(Array),
+      'conversation',
+      'main',
+      null, // unknown enum value -> NULL
+    );
+  });
+
+  it('treats an absent category as NULL (D-07)', async () => {
+    const extraction = {
+      skip: false,
+      summary: 'User runs a consulting business',
+      entities: [],
+      topics: [],
+      importance: 0.7,
+      // no category field at all
+    };
+    mockGenerateContent.mockResolvedValue(JSON.stringify(extraction));
+    mockParseJson.mockReturnValue(extraction);
+
+    const result = await ingestConversationTurn('chat1', 'my consulting business is the main focus', 'got it');
+    expect(result).toBe(true);
+    const lastCall = mockSave.mock.calls[mockSave.mock.calls.length - 1];
+    expect(lastCall[9]).toBeNull();
   });
 });

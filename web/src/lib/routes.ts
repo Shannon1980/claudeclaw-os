@@ -1,6 +1,6 @@
 import {
   LayoutGrid, FolderKanban, Repeat, Users, MessageSquare,
-  Brain, Network, Activity, ListChecks,
+  Network, Activity, ListChecks, BookOpen,
   Swords,
   Settings,
 } from 'lucide-preact';
@@ -31,7 +31,13 @@ export const ROUTES: RouteDef[] = [
   { path: '/agents',     label: 'Agents',          vocabKey: 'nav.team',      section: 'workspace',    icon: Users,         shortcut: 'g a' },
   { path: '/chat',       label: 'Chat',            vocabKey: 'nav.chat',      section: 'workspace',    icon: MessageSquare, shortcut: 'g c' },
 
-  { path: '/memories',   label: 'Memories',        vocabKey: 'nav.knowledge', section: 'intelligence', icon: Brain,         shortcut: 'g e' },
+  { path: '/memory',     label: 'Memory',          vocabKey: 'nav.memory',    section: 'intelligence', icon: BookOpen,      shortcut: 'g e' },
+  // Memories (D-02): the developer Brain Graph view is demoted OUT of the daily
+  // intelligence nav. The route still exists in App.tsx for deep-linking and the
+  // command palette; it is no longer a primary sidebar item. The operator-facing
+  // Memory surface above (/memory) is now the daily entry point. vocabKey
+  // nav.knowledge / page.knowledge are kept for the demoted view — only the
+  // placement changed (mirrors the Audit D-13 demotion precedent below).
   { path: '/hive',       label: 'Hive Mind',       vocabKey: 'nav.pulse',     section: 'intelligence', icon: Network,       shortcut: 'g h' },
   { path: '/usage',      label: 'Usage',           vocabKey: 'nav.usage',     section: 'intelligence', icon: Activity,      shortcut: 'g u' },
   { path: '/activity',   label: 'Activity',        vocabKey: 'nav.activity',  section: 'intelligence', icon: ListChecks                    },

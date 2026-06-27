@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Operator Product
-status: planning
-last_updated: "2026-06-26T13:03:42.582Z"
-last_activity: 2026-06-26 -- Phase 06 planning complete
+status: verifying
+last_updated: "2026-06-26T17:47:26.094Z"
+last_activity: 2026-06-26
 progress:
   total_phases: 8
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 24
-  completed_plans: 20
-  percent: 63
+  completed_plans: 24
+  percent: 75
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** A local-first desktop AI chief-of-staff for business operators — install with no terminal, runs the real Claude engine on the operator's own machine, keeps work moving and never lets anything fall through.
-**Current focus:** Phase 6 — memory surface
+**Current focus:** Phase 06 — memory-surface
 
 ## Current Position
 
-Phase: 6
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-26 -- Phase 06 planning complete
+Phase: 06 (memory-surface) — EXECUTING
+Plan: 4 of 4
+Status: Phase complete — ready for verification
+Last activity: 2026-06-26
 
 ## Performance Metrics
 
@@ -66,6 +66,10 @@ Last activity: 2026-06-26 -- Phase 06 planning complete
 | Phase 05-audit-log P02 | 9min | 2 tasks | 11 files |
 | Phase 05 P03 | ~14min | 2 tasks | 5 files |
 | Phase 05 P04 | ~25min | 1 of 2 tasks (human-verify pending) | 7 files |
+| Phase 06 PP01 | 12min | 3 tasks tasks | 8 files files |
+| Phase 06 P06-02 | ~10min | 3 tasks | 8 files |
+| Phase 06 P06-03 | ~20min | 3 tasks | 5 files |
+| Phase 06 P06-04 | ~6min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -97,6 +101,9 @@ Recent decisions affecting current work:
 - [Phase ?]: 05-02: insertAuditLog widened to a single options object; all positional call sites migrated (no half-migrated signature)
 - [Phase ?]: 05-02: audit retention storage in db.ts (default 90, append-only); audited setAuditRetention wrapper in permissions-config.ts mirrors setMode
 - [Phase 05]: 05-04: auth/routine/error events emit at their sources through the single audit() choke point; checkOAuthHealth exported + dependency-injected so the auth row has a REAL automated seam (not manual-only); auth event fires per determination, decoupled from the anti-spam sender; no auth event when neither credentials file nor env auth exists (Open Q3, no fake refresh events); error detail = first-line + 500-cap (no stack frames, T-05-10); turn model/session/_startMs threaded via GateContext per-turn (no module globals, T-05-11). Task 2 end-of-phase human-verify checkpoint AWAITING operator sign-off.
+- [Phase ?]: [Phase 06]: 06-02: v1.2.5 dual-write adds memories.category (D-06) + confirmed (D-04) + memory_tombstones (D-08); grandfather confirmed=1 in migration only, new inferred facts default 0; confirmed=1 gate on all three behavior readers; getMemoriesForOperatorSurface is a separate ungated reader; isTombstoned = sha256 hash floor + 0.88 cosine, consulted by ingest+consolidate
+- [Phase ?]: [Phase 06]: 06-03: operator Memory surface (/memory) GREEN + human-verify APPROVED; four /api/memory* routes inherit token gate + kill switch + CSRF (no bespoke auth); DELETE tombstone-first (Pitfall 6); D-05 email pill only when email-sourced row exists; D-07 empty categories hidden; D-02 developer /memories demoted but reachable, /memory redirect removed.
+- [Phase ?]: [Phase 06]: 06-04: category classified on ingest via the existing Haiku extractor (normalizeOperatorCategory single-source enum, unknown->NULL D-07); category threaded through saveStructuredMemory* as a trailing nullable param; D-08 two-point tombstone gate confirmed GREEN (consolidate already wired by 06-02 d190ac1, not duplicated); idempotent backfill script implemented + tsc-verified but DEFERRED to operator (24 live NULL rows, agents live, real LLM calls)
 
 ### Pending Todos
 
@@ -124,9 +131,9 @@ Items acknowledged and carried forward:
 
 ## Session Continuity
 
-Last session: 2026-06-26T10:43:21.718Z
+Last session: 2026-06-26T17:47:14.739Z
 Stopped at: Phase 6 UI-SPEC approved
-Resume file: .planning/phases/06-memory-surface/06-UI-SPEC.md
+Resume file: None
 
 ## Operator Next Steps
 
