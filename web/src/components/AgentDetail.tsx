@@ -71,14 +71,19 @@ function Header({ agent }: { agent: Agent }) {
   const [avatarVersion, setAvatarVersion] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  // True while a file is being dragged over the avatar drop target, so we can
+  // show a highlight ring. dragCounter guards against child-element dragenter/
+  // dragleave flicker (events fire per descendant, not per box).
+  const [dragging, setDragging] = useState(false);
+  const dragCounter = useRef(0);
 
-  async function pickAndUpload(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
+  async function uploadFile(file: File) {
+    if (!file.type.startsWith('image/')) {
+      pushToast({ tone: 'error', title: 'Not an image', description: 'Drop a PNG, JPEG, or WebP.', durationMs: 6000 });
+      return;
+    }
     if (file.size > 5 * 1024 * 1024) {
       pushToast({ tone: 'error', title: 'Image too large', description: 'Max 5 MB.', durationMs: 6000 });
-      input.value = '';
       return;
     }
     setBusy(true);
@@ -104,8 +109,43 @@ function Header({ agent }: { agent: Agent }) {
       pushToast({ tone: 'error', title: 'Upload failed', description: err?.message || String(err), durationMs: 7000 });
     } finally {
       setBusy(false);
-      input.value = '';
     }
+  }
+
+  async function pickAndUpload(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    await uploadFile(file);
+    input.value = '';
+  }
+
+  function onDragEnter(e: DragEvent) {
+    if (busy) return;
+    e.preventDefault();
+    dragCounter.current += 1;
+    setDragging(true);
+  }
+
+  function onDragOver(e: DragEvent) {
+    // Must preventDefault on dragover or the browser blocks the drop.
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function onDragLeave(e: DragEvent) {
+    e.preventDefault();
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setDragging(false);
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDragging(false);
+    if (busy) return;
+    const file = e.dataTransfer?.files?.[0];
+    if (file) void uploadFile(file);
   }
 
   async function clearAvatar() {
@@ -140,8 +180,15 @@ function Header({ agent }: { agent: Agent }) {
           type="button"
           onClick={() => fileRef.current?.click()}
           disabled={busy}
-          class="relative block rounded-full focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:outline-none disabled:opacity-50"
-          title="Change avatar"
+          onDragEnter={onDragEnter}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          class={[
+            'relative block rounded-full focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:outline-none disabled:opacity-50',
+            dragging ? 'ring-2 ring-[var(--color-accent)] ring-offset-2 ring-offset-[var(--color-bg)]' : '',
+          ].join(' ')}
+          title="Change avatar (click or drop an image)"
         >
           {/* cacheBust appends ?v=<n> to the avatar URL so the browser
               skips its 1h HTTP cache and refetches after upload/delete.
@@ -155,7 +202,10 @@ function Header({ agent }: { agent: Agent }) {
             size={44}
             cacheBust={avatarVersion}
           />
-          <span class="absolute inset-0 rounded-full flex items-center justify-center bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+          <span class={[
+            'absolute inset-0 rounded-full flex items-center justify-center bg-black/60 text-white transition-opacity',
+            dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+          ].join(' ')}>
             <Camera size={16} />
           </span>
         </button>
