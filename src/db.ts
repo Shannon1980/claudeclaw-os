@@ -270,11 +270,31 @@ function createSchema(database: Database.Database): void {
       completed_at    INTEGER,
       project_id      TEXT,
       blocked_on      TEXT,     -- who/what the task is waiting on (free text)
-      blocked_since   INTEGER   -- unix seconds the block was set
+      blocked_since   INTEGER,  -- unix seconds the block was set
+      slack_message_ts TEXT     -- ts of the result message posted to chat; the thread anchor operators reply under to send feedback
     );
 
     CREATE INDEX IF NOT EXISTS idx_mission_status
       ON mission_tasks(assigned_agent, status, priority DESC, created_at ASC);
+
+    -- Per-run history of a mission task. mission_tasks holds the LATEST run
+    -- (result/status/completed_at drive the card summary + Home grouping); this
+    -- keeps every run as its own version so a re-run doesn't lose what shipped
+    -- before. The feedback column is the operator note that triggered this run
+    -- (null for v1 and for bare re-runs).
+    CREATE TABLE IF NOT EXISTS mission_task_runs (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id         TEXT NOT NULL,
+      version         INTEGER NOT NULL,   -- 1-based, per task
+      result          TEXT,
+      status          TEXT NOT NULL,      -- completed | needs_you | failed
+      error           TEXT,
+      feedback        TEXT,               -- operator note that triggered this run
+      feedback_msg_id INTEGER,            -- task_messages.id consumed as feedback (high-water mark; clock-independent)
+      created_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mission_task_runs
+      ON mission_task_runs(task_id, version);
 
     -- Per-task conversation thread. When an agent kicks a task back to the
     -- operator (needs_you) it records an 'agent' turn; the operator's answer is
@@ -882,6 +902,33 @@ function runMigrations(database: Database.Database): void {
   // claims 'queued', so a blocked task is naturally skipped until unblocked.
   addColumnIfMissing(database, 'mission_tasks', 'blocked_on', 'TEXT');
   addColumnIfMissing(database, 'mission_tasks', 'blocked_since', 'INTEGER');
+
+  // Task output routing: the ts of the Slack message the result was posted as.
+  // Operators reply in that message's thread to send feedback, which routes
+  // back onto the task (requeue-with-reply). Dual-written via the versioned
+  // migration migrations/v1.2.7/add-mission-task-chat-ref.ts — column name +
+  // type MUST stay byte-identical there or the live service crash-loops on the
+  // next restart's checkPendingMigrations.
+  addColumnIfMissing(database, 'mission_tasks', 'slack_message_ts', 'TEXT');
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_mission_slack_ts ON mission_tasks(slack_message_ts)`);
+
+  // Per-run version history (task output versioning). Mirrors the createSchema
+  // block above and the versioned migration migrations/v1.2.8/add-mission-task-runs.ts
+  // (dual-write, P-4) — DDL MUST stay byte-identical across all three.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS mission_task_runs (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id         TEXT NOT NULL,
+      version         INTEGER NOT NULL,
+      result          TEXT,
+      status          TEXT NOT NULL,
+      error           TEXT,
+      feedback        TEXT,
+      feedback_msg_id INTEGER,
+      created_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mission_task_runs ON mission_task_runs(task_id, version);
+  `);
 
   // Projects gain an operator-facing type (client / internal / hiring / other).
   addColumnIfMissing(database, 'projects', 'type', "TEXT NOT NULL DEFAULT 'internal'");
@@ -2879,6 +2926,10 @@ export interface MissionTask {
   project_id: string | null;
   blocked_on: string | null;
   blocked_since: number | null;
+  // ts of the result message posted to chat (Slack). The thread anchor an
+  // operator replies under to send feedback; null until the result is posted,
+  // and preserved across re-runs so the whole correction loop stays in one thread.
+  slack_message_ts: string | null;
 }
 
 export function createMissionTask(
@@ -2956,6 +3007,27 @@ export function getMissionTask(id: string): MissionTask | null {
   return (db.prepare('SELECT * FROM mission_tasks WHERE id = ?').get(id) as MissionTask) ?? null;
 }
 
+/**
+ * Record the chat message a task's result was posted as, so a threaded reply
+ * can be routed back onto the task. Set once, when the result first ships; kept
+ * stable across re-runs so every round of feedback stays in the same thread.
+ */
+export function setMissionTaskChatRef(id: string, slackMessageTs: string): void {
+  db.prepare('UPDATE mission_tasks SET slack_message_ts = ? WHERE id = ?').run(slackMessageTs, id);
+}
+
+/**
+ * Find the task whose result was posted as this chat message ts. Powers Slack
+ * thread-reply feedback: an operator replies under a result message and the
+ * handler resolves which task the thread belongs to. Returns null for threads
+ * that aren't a task result (ordinary chat).
+ */
+export function getMissionTaskByChatRef(slackMessageTs: string): MissionTask | null {
+  return (
+    (db.prepare('SELECT * FROM mission_tasks WHERE slack_message_ts = ?').get(slackMessageTs) as MissionTask) ?? null
+  );
+}
+
 export function claimNextMissionTask(agentId: string): MissionTask | null {
   const txn = db.transaction(() => {
     const task = db
@@ -2985,6 +3057,73 @@ export function completeMissionTask(
   db.prepare(
     `UPDATE mission_tasks SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?`,
   ).run(status, result, error ?? null, now, id);
+  // Append this settle as a version so a later re-run doesn't erase what shipped.
+  recordMissionTaskRun(id, result, status, error ?? null, now);
+}
+
+// ── Mission task run history (output versioning) ─────────────────────
+
+export interface MissionTaskRun {
+  id: number;
+  task_id: string;
+  version: number;
+  result: string | null;
+  status: string;
+  error: string | null;
+  /** The operator note that triggered this run (null for v1 and bare re-runs). */
+  feedback: string | null;
+  /** Internal: task_messages.id consumed as this run's feedback (high-water mark). */
+  feedback_msg_id: number | null;
+  created_at: number;
+}
+
+/**
+ * Record one settled run of a task as the next version. The triggering operator
+ * feedback is the newest 'operator' turn in the thread that no earlier run has
+ * already consumed — tracked by task_messages.id against the high-water mark
+ * stored on prior runs (feedback_msg_id), so it's independent of the clock. A
+ * bare re-run (no new operator turn since the last run) gets null, so versions
+ * never inherit a stale note even when events land in the same second.
+ */
+function recordMissionTaskRun(
+  taskId: string,
+  result: string | null,
+  status: string,
+  error: string | null,
+  now: number,
+): void {
+  const prev = db
+    .prepare('SELECT version FROM mission_task_runs WHERE task_id = ? ORDER BY version DESC LIMIT 1')
+    .get(taskId) as { version: number } | undefined;
+  const version = (prev?.version ?? 0) + 1;
+
+  // Highest operator message already attributed to a prior run (0 if none).
+  const hwm = db
+    .prepare('SELECT MAX(feedback_msg_id) AS m FROM mission_task_runs WHERE task_id = ?')
+    .get(taskId) as { m: number | null } | undefined;
+  const consumed = hwm?.m ?? 0;
+
+  const fb = db
+    .prepare(
+      `SELECT id, body FROM task_messages
+       WHERE task_id = ? AND role = 'operator' AND id > ?
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .get(taskId, consumed) as { id: number; body: string } | undefined;
+  const feedback = fb?.body ?? null;
+  const feedbackMsgId = fb?.id ?? null;
+
+  db.prepare(
+    `INSERT INTO mission_task_runs (task_id, version, result, status, error, feedback, feedback_msg_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(taskId, version, result, status, error, feedback, feedbackMsgId, now);
+}
+
+/** The full run history of a task, oldest version first. */
+export function getMissionTaskRuns(taskId: string): MissionTaskRun[] {
+  return db
+    .prepare('SELECT * FROM mission_task_runs WHERE task_id = ? ORDER BY version ASC')
+    .all(taskId) as MissionTaskRun[];
 }
 
 export function cancelMissionTask(id: string): boolean {
@@ -3028,20 +3167,30 @@ export function unblockMissionTask(id: string): boolean {
  * once the operator has granted access. Active tasks (queued/running) are a
  * no-op so an in-flight run is never disturbed.
  *
- * `operatorReply` closes the loop on a 'needs_you' task: the agent paused and
- * asked a question (a missing path, a decision), and this is the operator's
- * answer. The reply is recorded as an 'operator' turn in the task_messages
- * thread (the source of truth for the back-and-forth); the runner rebuilds the
- * effective prompt from that thread on the next run via `buildTaskRunPrompt`.
- * Replies are only honored for 'needs_you' tasks (the only state where the agent
- * is actually waiting on the operator); a reply passed for any other state is
- * ignored and the task re-runs as-is.
+ * `operatorReply` closes the loop in two cases:
+ *   - 'needs_you': the agent paused and asked a question (a missing path, a
+ *     decision) and this is the operator's answer.
+ *   - 'completed': the task shipped but the operator wants changes — feedback on
+ *     a "Shipped this week" item, sent from the dashboard card or by replying in
+ *     the result's chat thread.
+ * The reply is recorded as an 'operator' turn in the task_messages thread (the
+ * source of truth for the back-and-forth); the runner rebuilds the effective
+ * prompt from that thread on the next run via `buildTaskRunPrompt`. For a shipped
+ * task we first record the delivered result as an 'agent' turn (needs_you tasks
+ * already recorded theirs when they kicked back), so the re-run sees both what it
+ * produced and the correction. A reply passed for any other state is ignored and
+ * the task re-runs as-is.
  */
 export function requeueMissionTask(id: string, operatorReply?: string): boolean {
   const reply = operatorReply?.trim();
   if (reply) {
     const task = getMissionTask(id);
     if (task && task.status === 'needs_you') {
+      addTaskMessage(id, 'operator', reply);
+    } else if (task && task.status === 'completed') {
+      // Anchor the correction to what shipped: record the delivered result as
+      // the agent's turn, then the operator's feedback on it.
+      if (task.result && task.result.trim()) addTaskMessage(id, 'agent', task.result);
       addTaskMessage(id, 'operator', reply);
     }
   }
@@ -3098,11 +3247,14 @@ export function getTaskMessages(taskId: string): TaskMessage[] {
 export function buildTaskRunPrompt(task: MissionTask): string {
   const thread = getTaskMessages(task.id);
   if (thread.length === 0) return task.prompt;
-  const lines = thread.map((m) =>
-    m.role === 'operator'
-      ? 'Operator: ' + m.body
-      : 'You previously paused and said: ' + (m.reason ? m.reason + ' — ' : '') + m.body,
-  );
+  const lines = thread.map((m) => {
+    if (m.role === 'operator') return 'Operator: ' + m.body;
+    // Agent turns with a reason are kick-backs (needs_you); without one they're
+    // a delivered result the operator is now giving feedback on (shipped).
+    return m.reason
+      ? 'You previously paused and said: ' + m.reason + ' — ' + m.body
+      : 'You previously delivered this result:\n' + m.body;
+  });
   return (
     task.prompt +
     '\n\n--- conversation so far ---\n' +

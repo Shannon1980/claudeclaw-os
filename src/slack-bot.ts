@@ -17,7 +17,7 @@ import {
   DASHBOARD_URL,
   DASHBOARD_PORT,
 } from './config.js';
-import { clearSession, getSession, getSessionConversation, getRecentConversation, getRecentMemories, pinMemory, unpinMemory, logToHiveMind } from './db.js';
+import { clearSession, getSession, getSessionConversation, getRecentConversation, getRecentMemories, pinMemory, unpinMemory, logToHiveMind, getMissionTaskByChatRef, requeueMissionTask } from './db.js';
 import { formatForSlack, splitMessage } from './format.js';
 import { logger } from './logger.js';
 import { buildPhotoMessage, buildDocumentMessage, buildVideoMessage, UPLOADS_DIR } from './media.js';
@@ -517,7 +517,65 @@ export interface SlackBot {
   stop: () => Promise<void>;
   /** Proactively DM the configured user (scheduler, alerts, dashboard relay). */
   postToUser: (text: string) => Promise<void>;
+  /**
+   * Post a mission-task result as a rich (Block Kit) message and return its ts,
+   * the thread anchor the operator replies under to send feedback. When
+   * `threadTs` is given (a re-run), the result posts INTO that thread and
+   * returns undefined so the caller keeps the original anchor.
+   */
+  postTaskResult: (post: TaskResultPost) => Promise<string | undefined>;
 }
+
+/** A mission-task result to render into chat. */
+export interface TaskResultPost {
+  title: string;
+  body: string;
+  status: 'completed' | 'needs_you';
+  taskId: string;
+  /** Set when the task ran on behalf of an offline teammate (delegated). */
+  agentId?: string | null;
+  /** Set on a re-run: post into this existing thread instead of anchoring anew. */
+  threadTs?: string;
+}
+
+// Slack Block Kit hard limits we build within.
+const HEADER_MAX = 150; // header block plain_text
+const SECTION_MAX = 2900; // section mrkdwn (Slack's ceiling is 3000; leave slack)
+const MAX_SECTIONS = 8; // body sections in the anchor message; the rest thread below
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * Render a mission-task result as Block Kit: a header (status + title), the
+ * body as one or more mrkdwn sections, and a context footer telling the
+ * operator they can reply in-thread to request changes. Long bodies overflow
+ * into plain threaded follow-ups (returned separately) so the anchor message
+ * stays within Slack's 50-block ceiling.
+ */
+export function buildTaskResultBlocks(post: TaskResultPost): { blocks: any[]; overflow: string[] } {
+  const emoji = post.status === 'needs_you' ? '⏳' : '✅';
+  const via = post.agentId ? `via ${post.agentId} · ` : '';
+  const header = `${emoji} ${post.title}`.slice(0, HEADER_MAX);
+
+  const chunks = splitMessage(formatForSlack(post.body) || '_(no output)_', SECTION_MAX);
+  const shown = chunks.slice(0, MAX_SECTIONS);
+  const overflow = chunks.slice(MAX_SECTIONS);
+
+  const blocks: any[] = [
+    { type: 'header', text: { type: 'plain_text', text: header, emoji: true } },
+    ...shown.map((c) => ({ type: 'section', text: { type: 'mrkdwn', text: c } })),
+    {
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: `${via}task \`${post.taskId.slice(0, 8)}\` · reply in this thread to request changes`,
+        },
+      ],
+    },
+  ];
+  return { blocks, overflow };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export function createSlackBot(): SlackBot {
   const app = new App({
@@ -623,6 +681,32 @@ export function createSlackBot(): SlackBot {
       return;
     }
 
+    // ── Feedback on a task result ──────────────────────────────────
+    // A reply in the thread of a posted mission-task result routes back onto
+    // that task (requeue-with-reply) instead of starting a fresh chat turn.
+    // The thread root ts is the task's stored anchor.
+    if (m.thread_ts) {
+      const task = getMissionTaskByChatRef(m.thread_ts);
+      if (task) {
+        const feedback = (m.text || '').trim();
+        if (feedback) {
+          const ok = requeueMissionTask(task.id, feedback);
+          logger.info({ taskId: task.id, ok }, 'Task feedback from Slack thread');
+          await client.chat
+            .postMessage({
+              channel: m.channel,
+              thread_ts: m.thread_ts,
+              text: ok
+                ? '_On it — re-running with your changes. I\'ll post the update here._'
+                : '_That task is still in flight; hang tight and reply once it lands._',
+              mrkdwn: true,
+            })
+            .catch((err) => logger.error({ err }, 'Task feedback ack failed'));
+        }
+        return; // handled — don't fall through to a normal chat turn
+      }
+    }
+
     const chatId = slackChatId(m.user!);
     const cb = buildSlackCallbacks(client, m.channel, chatId);
     const caption = (m.text || '').trim();
@@ -709,6 +793,38 @@ export function createSlackBot(): SlackBot {
         await app.client.chat.postMessage({ channel, text: chunk }).catch((err) =>
           logger.error({ err }, 'Slack postToUser failed'),
         );
+      }
+    },
+    postTaskResult: async (post) => {
+      const channel = await resolveDmChannel();
+      if (!channel) {
+        logger.warn('Cannot post task result to Slack: ALLOWED_SLACK_USER_ID not set');
+        return undefined;
+      }
+      const { blocks, overflow } = buildTaskResultBlocks(post);
+      // Plain-text fallback for notifications + accessibility (blocks aren't read
+      // in previews). Keep it short and status-first.
+      const fallback = `${post.status === 'needs_you' ? 'Needs you' : 'Shipped'}: ${post.title}`;
+      const thread = post.threadTs ? { thread_ts: post.threadTs } : {};
+      try {
+        const res = await app.client.chat.postMessage({ channel, text: fallback, blocks, ...thread });
+        // Anchor for future replies: the new message on a fresh post; the
+        // existing root on a re-run (so the whole loop stays in one thread).
+        const rootTs = post.threadTs ?? (res.ts as string | undefined);
+        for (const extra of overflow) {
+          await app.client.chat
+            .postMessage({ channel, text: extra, ...(rootTs ? { thread_ts: rootTs } : {}) })
+            .catch((err) => logger.error({ err }, 'Slack postTaskResult overflow failed'));
+        }
+        // On a re-run we already have the anchor stored — signal "don't overwrite".
+        return post.threadTs ? undefined : (res.ts as string | undefined);
+      } catch (err) {
+        // Never drop output: fall back to a plain post if Block Kit is rejected.
+        logger.error({ err, taskId: post.taskId }, 'Slack postTaskResult failed — falling back to plain');
+        for (const chunk of splitMessage(formatForSlack(post.body), SLACK_MAX_LEN)) {
+          await app.client.chat.postMessage({ channel, text: chunk, ...thread }).catch(() => {});
+        }
+        return undefined;
       }
     },
   };

@@ -18,6 +18,7 @@ import {
   buildTaskRunPrompt,
   resetStuckMissionTasks,
   getMissionTask,
+  setMissionTaskChatRef,
   isAgentPaused,
   getRoutineSteps,
   getLastRoutineOutcome,
@@ -35,8 +36,16 @@ import { extractBlockedMarker } from './format.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { isAgentRunning } from './agent-create.js';
 import { AOS_CRON_SOURCE, parseJobFile } from './aos-cron.js';
+import type { TaskResultPost } from './slack-bot.js';
 
 type Sender = (text: string) => Promise<void>;
+/**
+ * Posts a mission-task result as a rich, thread-anchored chat message and
+ * returns the anchor ts (so a threaded reply can route feedback back onto the
+ * task). Only wired on the full Slack transport; undefined elsewhere, where we
+ * fall back to the plain `sender`.
+ */
+type TaskPoster = (post: TaskResultPost) => Promise<string | undefined>;
 
 /** Max time (ms) a scheduled task can run before being killed. */
 export const TASK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
@@ -70,6 +79,7 @@ export interface AosFireDeps {
 }
 
 let sender: Sender;
+let taskPoster: TaskPoster | undefined;
 
 /**
  * In-memory set of task IDs currently being executed.
@@ -83,11 +93,12 @@ const runningTaskIds = new Set<string>();
  */
 let schedulerAgentId = 'main';
 
-export function initScheduler(send: Sender, agentId = 'main'): void {
+export function initScheduler(send: Sender, agentId = 'main', postTask?: TaskPoster): void {
   if (!ALLOWED_CHAT_ID) {
     logger.warn('ALLOWED_CHAT_ID not set — scheduler will not send results');
   }
   sender = send;
+  taskPoster = postTask;
   schedulerAgentId = agentId;
 
   // Recover tasks stuck in 'running' from a previous crash
@@ -534,12 +545,44 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
           logger.info({ missionId: mission.id, delegateAgentId }, 'Mission task completed');
         }
 
-        // Send result to the user
-        const outText = delegateAgentId
-          ? '[' + delegateAgentId + '] ' + mission.title + '\n\n' + text
-          : text;
-        for (const chunk of splitMessage(formatForTelegram(outText))) {
-          await sender(chunk);
+        // Send result to the user. On the full Slack transport, a delivered
+        // result (completed or needs_you) posts as a rich, thread-anchored Block
+        // Kit message whose ts we remember, so a threaded reply routes feedback
+        // back onto this task (the "manage output through chat" loop). A re-run
+        // posts into the existing thread (mission.slack_message_ts) so the whole
+        // correction back-and-forth stays in one place.
+        //   - waiting-on-approval (pendingGates) is NOT a shippable result — it's
+        //     a please-approve notice, so it goes out plain and un-anchored.
+        //   - non-Slack transports fall back to the plain sender with Telegram
+        //     formatting and the delegated-agent prefix, as before.
+        const deliveredResult = pendingGates === 0;
+        if (taskPoster && deliveredResult) {
+          try {
+            const ts = await taskPoster({
+              title: mission.title,
+              body: text,
+              status: blocked ? 'needs_you' : 'completed',
+              taskId: mission.id,
+              agentId: delegateAgentId,
+              threadTs: mission.slack_message_ts ?? undefined,
+            });
+            if (ts && !mission.slack_message_ts) setMissionTaskChatRef(mission.id, ts);
+          } catch (postErr) {
+            // taskPoster is only wired on Slack, whose `sender` formats for Slack
+            // itself — hand it raw text so we don't double-format.
+            logger.warn({ err: postErr, missionId: mission.id }, 'Rich task post failed — falling back to plain sender');
+            for (const chunk of splitMessage(text)) await sender(chunk);
+          }
+        } else if (taskPoster) {
+          // Slack, but a please-approve notice — plain, not anchored as a result.
+          for (const chunk of splitMessage(text)) await sender(chunk);
+        } else {
+          const outText = delegateAgentId
+            ? '[' + delegateAgentId + '] ' + mission.title + '\n\n' + text
+            : text;
+          for (const chunk of splitMessage(formatForTelegram(outText))) {
+            await sender(chunk);
+          }
         }
 
         // Inject into conversation context so agent can reference it
