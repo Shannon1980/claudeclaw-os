@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
-import { slackChatId, slackChannelChatId, resolveSlackCommandTarget, isAuthorisedSlack, classifyFile, createSlackSender, type SlackFile } from './slack-bot.js';
+import { slackChatId, slackChannelChatId, resolveSlackCommandTarget, isAuthorisedSlack, classifyFile, createSlackSender, buildTaskResultBlocks, type SlackFile } from './slack-bot.js';
 
 describe('createSlackSender (send-only Slack poster for sub-agents)', () => {
   function fakeClient() {
@@ -112,5 +112,55 @@ describe('classifyFile', () => {
   it('defaults unknown files to document', () => {
     expect(classifyFile(f({ filetype: 'pdf' }))).toBe('document');
     expect(classifyFile(f({}))).toBe('document');
+  });
+});
+
+describe('buildTaskResultBlocks (rich task output)', () => {
+  it('renders a header (status + title), a body section, and a reply-in-thread footer', () => {
+    const { blocks, overflow } = buildTaskResultBlocks({
+      title: 'Draft the Q3 board update',
+      body: 'Here is the **draft** with three sections.',
+      status: 'completed',
+      taskId: 'm-abc12345-tail',
+    });
+    expect(overflow).toEqual([]);
+    expect(blocks[0]).toMatchObject({ type: 'header' });
+    expect(blocks[0].text.text).toContain('✅');
+    expect(blocks[0].text.text).toContain('Draft the Q3 board update');
+    // Body becomes a mrkdwn section, markdown converted to Slack mrkdwn (*bold*).
+    const section = blocks.find((b: any) => b.type === 'section');
+    expect(section.text.text).toContain('*draft*');
+    // Footer is a context block telling the operator how to send feedback.
+    const context = blocks[blocks.length - 1];
+    expect(context.type).toBe('context');
+    expect(context.elements[0].text).toContain('reply in this thread');
+    expect(context.elements[0].text).toContain('m-abc123'); // short id
+  });
+
+  it('uses the needs-you glyph and names the delegate agent', () => {
+    const { blocks } = buildTaskResultBlocks({
+      title: 'Chase the vendor',
+      body: 'stuck, need the contract',
+      status: 'needs_you',
+      taskId: 'm-xyz',
+      agentId: 'comms',
+    });
+    expect(blocks[0].text.text).toContain('⏳');
+    expect(blocks[blocks.length - 1].elements[0].text).toContain('via comms');
+  });
+
+  it('overflows a very long body into threaded follow-ups, keeping the anchor within block limits', () => {
+    const body = 'x'.repeat(2900 * 12); // 12 sections' worth
+    const { blocks, overflow } = buildTaskResultBlocks({
+      title: 'Big report',
+      body,
+      status: 'completed',
+      taskId: 'm-big',
+    });
+    // header + up to 8 sections + context, never exceeding Slack's 50-block cap.
+    expect(blocks.length).toBeLessThanOrEqual(50);
+    const sections = blocks.filter((b: any) => b.type === 'section');
+    expect(sections.length).toBe(8);
+    expect(overflow.length).toBeGreaterThan(0);
   });
 });

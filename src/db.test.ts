@@ -40,6 +40,7 @@ import {
   requeueMissionTask,
   addTaskMessage,
   getTaskMessages,
+  getMissionTaskRuns,
   buildTaskRunPrompt,
   getMissionTask,
   getTeamRoster,
@@ -748,14 +749,71 @@ describe('database', () => {
       expect(runPrompt).toContain('/Users/shannon/dev/signmeup');
     });
 
-    it('ignores an operator reply unless the task is needs_you (no thread turn)', () => {
+    it('feedback on a shipped (completed) task threads the delivered result + the correction', () => {
       createMissionTask('m-done', 'Pull the inbox', 'original prompt', 'comms');
       claimNextMissionTask('comms');
-      completeMissionTask('m-done', 'done', 'completed');
-      // A reply on a completed task is a plain re-run — no turn recorded.
-      expect(requeueMissionTask('m-done', 'some answer')).toBe(true);
-      expect(getMissionTask('m-done')?.prompt).toBe('original prompt');
-      expect(getTaskMessages('m-done')).toEqual([]);
+      completeMissionTask('m-done', 'the delivered summary', 'completed');
+      // Feedback on a shipped result reworks the same task: the prior result is
+      // recorded as the agent's turn, then the operator's correction.
+      expect(requeueMissionTask('m-done', 'tighten the intro')).toBe(true);
+      expect(getMissionTask('m-done')?.prompt).toBe('original prompt'); // base prompt never mutated
+      const thread = getTaskMessages('m-done');
+      expect(thread.map((m) => m.role)).toEqual(['agent', 'operator']);
+      expect(thread[0].body).toBe('the delivered summary');
+      expect(thread[1].body).toBe('tighten the intro');
+      // The re-run prompt replays the delivery + the correction.
+      const runPrompt = buildTaskRunPrompt(getMissionTask('m-done')!);
+      expect(runPrompt).toContain('You previously delivered this result:');
+      expect(runPrompt).toContain('the delivered summary');
+      expect(runPrompt).toContain('tighten the intro');
+    });
+
+    it('ignores an operator reply on a non-resumable state (e.g. cancelled) — plain re-run', () => {
+      createMissionTask('m-cancel', 'Pull the inbox', 'original prompt', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-cancel', 'done', 'failed');
+      // A reply on a failed task is a plain re-run — no turn recorded.
+      expect(requeueMissionTask('m-cancel', 'some answer')).toBe(true);
+      expect(getMissionTask('m-cancel')?.prompt).toBe('original prompt');
+      expect(getTaskMessages('m-cancel')).toEqual([]);
+    });
+
+    it('records each settled run as a version, tagging reworks with the feedback that drove them', () => {
+      createMissionTask('m-ver', 'Weekly digest', 'compile the digest', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-ver', 'v1 output', 'completed');
+
+      // First settle is version 1, with no triggering feedback.
+      let runs = getMissionTaskRuns('m-ver');
+      expect(runs.map((r) => r.version)).toEqual([1]);
+      expect(runs[0]).toMatchObject({ result: 'v1 output', status: 'completed', feedback: null });
+
+      // Feedback + re-run + settle → version 2 carries the feedback and the new result.
+      requeueMissionTask('m-ver', 'add the revenue line');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-ver', 'v2 output', 'completed');
+      runs = getMissionTaskRuns('m-ver');
+      expect(runs.map((r) => r.version)).toEqual([1, 2]);
+      expect(runs[1]).toMatchObject({ result: 'v2 output', feedback: 'add the revenue line' });
+
+      // mission_tasks still holds the latest run for the card summary + Home grouping.
+      expect(getMissionTask('m-ver')?.result).toBe('v2 output');
+    });
+
+    it('a bare re-run (no feedback) records a version with null feedback, not a stale note', () => {
+      createMissionTask('m-bare', 'Task', 'do it', 'comms');
+      claimNextMissionTask('comms');
+      completeMissionTask('m-bare', 'first', 'completed');
+      requeueMissionTask('m-bare', 'tweak the tone'); // v2 driven by feedback
+      claimNextMissionTask('comms');
+      completeMissionTask('m-bare', 'second', 'completed');
+      requeueMissionTask('m-bare'); // bare re-run, no new feedback
+      claimNextMissionTask('comms');
+      completeMissionTask('m-bare', 'third', 'completed');
+
+      const runs = getMissionTaskRuns('m-bare');
+      expect(runs.map((r) => r.feedback)).toEqual([null, 'tweak the tone', null]);
+      expect(runs.map((r) => r.result)).toEqual(['first', 'second', 'third']);
     });
 
     it('a blank operator reply is a plain re-run (no thread turn)', () => {

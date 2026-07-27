@@ -7,7 +7,7 @@
 import { useState } from 'preact/hooks';
 import {
   Inbox, Hourglass, CheckCircle2, X, Wand2, Sparkles, Trash2, ArrowRight,
-  Clock, Undo2, PauseCircle, RotateCcw,
+  Clock, Undo2, PauseCircle, RotateCcw, ChevronLeft, ChevronRight, History,
 } from 'lucide-preact';
 import { Pill, StatusDot } from '@/components/Pill';
 import { AgentAvatar } from '@/components/AgentAvatar';
@@ -24,6 +24,17 @@ interface TaskMessage {
   role: 'agent' | 'operator';
   body: string;
   reason: string | null;
+  created_at: number;
+}
+
+interface MissionTaskRun {
+  id: number;
+  task_id: string;
+  version: number;
+  result: string | null;
+  status: string;
+  error: string | null;
+  feedback: string | null;
   created_at: number;
 }
 
@@ -507,22 +518,56 @@ function WaitingItem({ task, agent, onChange }: { task: MissionTask; agent?: Age
 function ShippedItem({ task, agent, onChange }: { task: MissionTask; agent?: Agent; onChange: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  // Run history (output versioning). `viewIdx` is which version is on screen;
+  // null tracks "latest" so the card follows new re-runs without a manual bump.
+  const [runs, setRuns] = useState<MissionTaskRun[] | null>(null);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+  const [viewIdx, setViewIdx] = useState<number | null>(null);
 
-  async function rerun(e: MouseEvent) {
-    e.stopPropagation(); // don't toggle the card's expand on a Re-run click
+  // Lazy-load the run history the first time the card is opened.
+  async function toggle() {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && runs === null && !loadingRuns) {
+      setLoadingRuns(true);
+      try {
+        const res = await apiGet<{ runs: MissionTaskRun[] }>(`/api/mission/tasks/${task.id}/runs`);
+        setRuns(res.runs);
+      } catch { setRuns([]); }
+      finally { setLoadingRuns(false); }
+    }
+  }
+
+  // `changes` folds the operator's feedback into the resumed run — corrections
+  // on a shipped result; a bare re-run just retries the same task as-is.
+  async function rerun(changes?: string) {
     setBusy(true);
     try {
-      await apiPost(`/api/mission/tasks/${task.id}/requeue`);
+      await apiPost(`/api/mission/tasks/${task.id}/requeue`, changes ? { reply: changes } : undefined);
       onChange();
-      pushToast({ tone: 'success', title: 'Re-running', description: 'Back in the queue.' });
+      pushToast({
+        tone: 'success',
+        title: changes ? 'Sent — reworking' : 'Re-running',
+        description: changes ? `${agent?.name || 'The agent'} will rework it and post the update.` : 'Back in the queue.',
+      });
     } catch (err: any) {
       pushToast({ tone: 'error', title: 'Could not re-run', description: err?.message || String(err), durationMs: 6000 });
     } finally { setBusy(false); }
   }
 
+  const stop = (e: MouseEvent) => e.stopPropagation();
+
+  // Which version is on screen: an explicit pick, else the latest run, else the
+  // task snapshot (pre-versioning tasks with no run rows yet).
+  const total = runs?.length ?? 0;
+  const idx = viewIdx ?? (total > 0 ? total - 1 : 0);
+  const current = runs && total > 0 ? runs[Math.min(idx, total - 1)] : null;
+  const shownResult = current ? current.result : task.result;
+
   return (
     <div
-      onClick={() => setExpanded((v) => !v)}
+      onClick={toggle}
       class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded-md p-2.5 cursor-pointer hover:border-[var(--color-border-strong)] transition-colors"
     >
       <div class="flex items-center gap-1.5 mb-1.5">
@@ -537,17 +582,86 @@ function ShippedItem({ task, agent, onChange }: { task: MissionTask; agent?: Age
         <TeammatePill agent={agent} fallback={task.assigned_agent} />
         <button
           type="button"
-          onClick={rerun}
+          onClick={(e) => { stop(e); rerun(); }}
           disabled={busy}
           class="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-40"
-          title="Re-run this task"
+          title="Re-run this task as-is"
         >
-          <RotateCcw size={11} /> {busy ? '…' : 'Re-run'}
+          <RotateCcw size={11} /> {busy && !feedback.trim() ? '…' : 'Re-run'}
         </button>
       </div>
-      {expanded && task.result && (
-        <div class="mt-2 text-[11px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed border-t border-[var(--color-border)] pt-2">
-          {task.result}
+      {expanded && (
+        <div class="mt-2 border-t border-[var(--color-border)] pt-2 space-y-2" onClick={stop}>
+          {/* Version pager: only when a task has been re-run at least once. Steps
+              through each shipped version and shows the feedback that drove it. */}
+          {total > 1 && (
+            <div class="flex items-center gap-1.5">
+              <History size={11} class="text-[var(--color-text-faint)]" />
+              <span class="text-[10px] text-[var(--color-text-muted)] tabular-nums">
+                Version {current?.version ?? total} of {total}
+              </span>
+              <span class="ml-auto flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setViewIdx(Math.max(0, idx - 1))}
+                  disabled={idx <= 0}
+                  class="p-0.5 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-30"
+                  title="Older version"
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewIdx(Math.min(total - 1, idx + 1))}
+                  disabled={idx >= total - 1}
+                  class="p-0.5 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-30"
+                  title="Newer version"
+                >
+                  <ChevronRight size={13} />
+                </button>
+              </span>
+            </div>
+          )}
+          {current && (
+            <div class="flex items-center gap-1.5 text-[9.5px] text-[var(--color-text-faint)]">
+              <span class="uppercase tracking-wider">{current.status === 'completed' ? 'Shipped' : current.status}</span>
+              <span class="tabular-nums">{formatRelativeTime(current.created_at)}</span>
+            </div>
+          )}
+          {current?.feedback && (
+            <div class="text-[10.5px] text-[var(--color-accent)] leading-snug">
+              <span class="text-[var(--color-text-faint)]">Reworked after: </span>{current.feedback}
+            </div>
+          )}
+          {loadingRuns && <div class="text-[10.5px] text-[var(--color-text-faint)]">Loading history…</div>}
+          {shownResult && (
+            <div class="text-[11px] text-[var(--color-text)] whitespace-pre-wrap leading-relaxed">{shownResult}</div>
+          )}
+          {/* Request changes: the feedback is threaded into a re-run of the same
+              task on the same teammate, and the reworked result ships back. This
+              mirrors replying in the result's chat thread. */}
+          <div>
+            <div class="text-[9.5px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Request changes</div>
+            <textarea
+              value={feedback}
+              onInput={(e) => setFeedback((e.target as HTMLTextAreaElement).value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && feedback.trim() && !busy) rerun(feedback.trim());
+              }}
+              placeholder="What should change? e.g. tighten the intro, add the Q3 numbers…"
+              rows={2}
+              disabled={busy}
+              class="w-full bg-[var(--color-card)] border border-[var(--color-border)] rounded text-[11px] text-[var(--color-text)] px-2 py-1.5 outline-none focus:border-[var(--color-accent)] resize-none placeholder:text-[var(--color-text-faint)] disabled:opacity-40"
+            />
+            <button
+              type="button"
+              onClick={() => { const r = feedback.trim(); if (r) rerun(r); }}
+              disabled={busy || !feedback.trim()}
+              class="inline-flex items-center gap-1 mt-1.5 px-2 py-1 rounded text-[10.5px] font-medium bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white transition-colors disabled:opacity-40"
+            >
+              <ArrowRight size={11} /> {busy && feedback.trim() ? '…' : 'Send changes'}
+            </button>
+          </div>
         </div>
       )}
     </div>

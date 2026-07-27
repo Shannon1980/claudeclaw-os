@@ -31,6 +31,7 @@ export interface MissionTask {
   project_id: string | null;
   blocked_on: string | null;
   blocked_since: number | null;
+  slack_message_ts: string | null;
 }
 
 export interface Agent {

@@ -392,8 +392,11 @@ async function main(): Promise<void> {
       syncAosCronJobs();
     }
 
-    // The notifier handles chunking and transport-specific formatting.
-    initScheduler(async (text) => { await notifyUser(text); }, AGENT_ID);
+    // The notifier handles chunking and transport-specific formatting. On the
+    // full Slack transport we also hand the scheduler a rich task-result poster
+    // so mission output ships as a thread-anchored Block Kit message the operator
+    // can reply under to send feedback (task output routing).
+    initScheduler(async (text) => { await notifyUser(text); }, AGENT_ID, slack ? slack.postTaskResult : undefined);
 
     // Proactive OAuth health monitoring — alerts before the Claude CLI token
     // expires. OPT-IN: users were getting spammed with "Expiring soon" alerts

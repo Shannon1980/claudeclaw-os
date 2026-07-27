@@ -68,6 +68,7 @@ import {
   unblockMissionTask,
   requeueMissionTask,
   getTaskMessages,
+  getMissionTaskRuns,
   getUpcomingScheduledTasks,
   getAuditLogCount,
   getAuditLogFiltered,
@@ -2056,6 +2057,14 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   app.get('/api/mission/tasks/:id/messages', (c) => {
     const id = c.req.param('id');
     return c.json({ messages: getTaskMessages(id) });
+  });
+
+  // The task's run history (output versioning): every settled run kept as its
+  // own version, so the Shipped card can page through what shipped before a
+  // re-run and see the feedback that drove each rework.
+  app.get('/api/mission/tasks/:id/runs', (c) => {
+    const id = c.req.param('id');
+    return c.json({ runs: getMissionTaskRuns(id) });
   });
 
   // Auto-assign all unassigned tasks. MUST register before /:id/auto-assign
