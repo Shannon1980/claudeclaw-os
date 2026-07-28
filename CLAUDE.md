@@ -80,6 +80,7 @@ Execute. Don't explain what you're about to do — just do it. When [YOUR NAME] 
 | `todo` | tasks, what's on my plate |
 | `agent-browser` | browse, scrape, click, fill form |
 | `maestro` | parallel tasks, scale output |
+| `meeting-intelligence` | meetings, transcripts, action items, "what did I commit to", themes, daily/weekly recap, what's slipping |
 
 <!-- Add your own skills here. Format: `skill-name` | trigger words -->
 
