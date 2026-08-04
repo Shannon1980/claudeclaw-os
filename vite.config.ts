@@ -24,7 +24,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // Default Vite port; 5173 is commonly taken by other local apps.
+    port: 5174,
+    strictPort: false,
     proxy: {
       // Proxy API calls to the running Hono dashboard on :3141 in dev so
       // the new frontend can hit real endpoints without CORS gymnastics.

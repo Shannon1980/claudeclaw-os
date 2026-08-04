@@ -11,8 +11,8 @@
     "build:web": "vite build",
     "build:server": "tsc",
     "start": "node dist/index.js",
-    "electron": "electron .",
-    "electron:dev": "vite build && electron .",
+    "electron": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "electron:dev": "vite build && env -u ELECTRON_RUN_AS_NODE electron .",
     "electron:build": "npm run build && electron-builder install-app-deps && electron-builder",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit",
@@ -123,5 +123,8 @@
     "linux": {
       "target": "AppImage"
     }
+  },
+  "allowScripts": {
+    "electron@33.4.11": true
   }
 }
