@@ -36,6 +36,8 @@ import { extractBlockedMarker, extractHeartbeatMarker, isHeartbeatPrompt } from 
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { isAgentRunning } from './agent-create.js';
 import { AOS_CRON_SOURCE, parseJobFile } from './aos-cron.js';
+import { autoAssignUnassignedTasks } from './task-router.js';
+import { isEnabled } from './kill-switches.js';
 import type { TaskResultPost } from './slack-bot.js';
 
 type Sender = (text: string) => Promise<void>;
@@ -49,6 +51,25 @@ type TaskPoster = (post: TaskResultPost) => Promise<string | undefined>;
 
 /** Max time (ms) a scheduled task can run before being killed. */
 export const TASK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * How often the mission queue is polled for claimable work, separate from the
+ * 60s scheduled-task tick. Overridable via MISSION_POLL_SECONDS (min 5).
+ */
+export const MISSION_POLL_MS = Math.max(5, Number(process.env.MISSION_POLL_SECONDS) || 15) * 1000;
+
+/**
+ * Appended to every mission-task run prompt. The scheduler parses [BLOCKED:]
+ * out of every mission result (own-agent AND delegated), but only main's
+ * CLAUDE.md documents the marker — a delegated agent (research, comms, ...)
+ * runs with its own CLAUDE.md and had no idea the protocol existed, so its
+ * "I'm stuck" prose was filed under Shipped. Teaching it at the prompt level
+ * covers every agent without touching each CLAUDE.md.
+ */
+export const BLOCKED_PROTOCOL_FOOTER = `
+
+---
+If you cannot finish this task because you need information, access, or a decision only the operator can provide, put [BLOCKED: short reason] on its own line in your reply (bare [BLOCKED] works too) and explain around it what you tried and what you need. Only use it when genuinely stuck; a finished task is just a normal reply.`;
 
 /**
  * Parse a per-job timeout token ('5m'/'10m'/'15m'/'1h'/'2h') to milliseconds
@@ -123,7 +144,15 @@ export function initScheduler(send: Sender, agentId = 'main', postTask?: TaskPos
   }
 
   setInterval(() => void runDueTasks(), 60_000);
-  logger.info({ agentId }, 'Scheduler started (checking every 60s)');
+  // Mission tasks get their own faster loop: a delegated chat task ("have
+  // research look into X") shouldn't wait out the tail of a 60s cron tick
+  // before it even starts. Claims are atomic and startMissionTask guards on
+  // runningTaskIds, so overlapping with the 60s tick is safe.
+  setInterval(() => void runDueMissionTasks(), MISSION_POLL_MS);
+  logger.info(
+    { agentId, missionPollSeconds: MISSION_POLL_MS / 1000 },
+    'Scheduler started (tasks every 60s, mission queue on its own poll)',
+  );
 }
 
 /**
@@ -237,6 +266,10 @@ export async function runAosCronTaskOnce(
 }
 
 async function runDueTasks(): Promise<void> {
+  // Incident kill switch: skip the whole tick. next_run is untouched, so
+  // due work fires on the first tick after the switch is re-enabled.
+  if (!isEnabled('SCHEDULER_ENABLED')) return;
+
   const tasks = getDueTasks(schedulerAgentId);
 
   if (tasks.length > 0) {
@@ -436,6 +469,19 @@ export function triggerRoutineRun(task: ScheduledTask, nextRun: number): boolean
 }
 
 async function runDueMissionTasks(): Promise<void> {
+  if (!isEnabled('SCHEDULER_ENABLED')) return;
+
+  // Route unassigned tasks first so a task created without an agent (chat,
+  // CLI, capture bar) is claimable on this same tick instead of sitting in
+  // "Needs you" until someone opens the dashboard. Main only — one router.
+  if (schedulerAgentId === 'main') {
+    try {
+      await autoAssignUnassignedTasks();
+    } catch (err) {
+      logger.warn({ err }, 'Auto-assign sweep failed — unassigned tasks wait for the next tick');
+    }
+  }
+
   // Tasks assigned to this process's own agent (unless the operator paused it).
   if (!isAgentPaused(schedulerAgentId)) {
     startMissionTask(claimNextMissionTask(schedulerAgentId), null);
@@ -496,8 +542,10 @@ function startMissionTask(mission: MissionTask | null, delegateAgentId: string |
       chatId,
     };
     // The base prompt plus any prior blocked-back conversation (operator
-    // answers fold in here so a resumed needs_you task sees them).
-    const runPrompt = buildTaskRunPrompt(mission);
+    // answers fold in here so a resumed needs_you task sees them), plus the
+    // [BLOCKED:] protocol so every agent — not just main — can kick a task
+    // back to the operator instead of shipping an "I'm stuck" as done.
+    const runPrompt = buildTaskRunPrompt(mission) + BLOCKED_PROTOCOL_FOOTER;
     try {
       let result: { text: string | null; aborted?: boolean };
       if (delegateAgentId) {

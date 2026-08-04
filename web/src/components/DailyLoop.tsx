@@ -163,7 +163,15 @@ function NeedsItem({ task, agents, agentById, onChange }: {
     try {
       await apiPatch(`/api/mission/tasks/${task.id}`, { assigned_agent: agentId });
       onChange();
-      pushToast({ tone: 'success', title: 'Assigned', description: `Sent to ${agentById.get(agentId)?.name || agentId}.` });
+      // A settled task (kicked back / failed) requeues on the new teammate,
+      // so say so — it's a re-run, not just a label change.
+      pushToast({
+        tone: 'success',
+        title: settled ? 'Rerouted' : 'Assigned',
+        description: settled
+          ? `Back in the queue with ${agentById.get(agentId)?.name || agentId}.`
+          : `Sent to ${agentById.get(agentId)?.name || agentId}.`,
+      });
     } catch (err: any) {
       pushToast({ tone: 'error', title: 'Assign failed', description: err?.message || String(err), durationMs: 6000 });
     } finally { setBusy(null); }
@@ -304,17 +312,19 @@ function NeedsItem({ task, agents, agentById, onChange }: {
             >
               <Wand2 size={11} /> {busy === 'auto' ? '…' : 'Route for me'}
             </button>
-            <select
-              value=""
-              onChange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) manualAssign(v); }}
-              disabled={busy !== null}
-              class="flex-1 bg-[var(--color-card)] border border-[var(--color-border)] rounded text-[10.5px] text-[var(--color-text-muted)] px-1 py-0.5 outline-none"
-            >
-              <option value="">Assign to…</option>
-              {agents.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}
-            </select>
           </>
         )}
+        <select
+          value=""
+          onChange={(e) => { const v = (e.target as HTMLSelectElement).value; if (v) manualAssign(v); }}
+          disabled={busy !== null}
+          class="flex-1 bg-[var(--color-card)] border border-[var(--color-border)] rounded text-[10.5px] text-[var(--color-text-muted)] px-1 py-0.5 outline-none"
+        >
+          <option value="">{settled ? 'Send to someone else…' : 'Assign to…'}</option>
+          {agents.filter((a) => !settled || a.id !== task.assigned_agent).map((a) => (
+            <option key={a.id} value={a.id}>{a.name || a.id}</option>
+          ))}
+        </select>
         {isFailed && (
           <button
             type="button"
@@ -326,7 +336,6 @@ function NeedsItem({ task, agents, agentById, onChange }: {
             <RotateCcw size={11} /> {busy === 'rerun' ? '…' : 'Re-run'}
           </button>
         )}
-        {settled && <div class="flex-1" />}
         <button
           type="button"
           onClick={remove}

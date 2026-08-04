@@ -124,23 +124,31 @@ node "$PROJECT_ROOT/dist/schedule-cli.js" resume <id>
 
 ## Mission Tasks (Delegating to Other Agents)
 
-When [YOUR NAME] asks you to delegate work to another agent, or says things like "have research look into X" or "get comms to handle Y", create a mission task using the CLI. Mission tasks are async: you queue them and the target agent picks them up within 60 seconds.
+When [YOUR NAME] asks you to delegate work to another agent, or says things like "have research look into X" or "get comms to handle Y", create a mission task using the CLI. Mission tasks are async: you queue them and the target agent picks them up within seconds.
 
 ```bash
 PROJECT_ROOT=$(git rev-parse --show-toplevel)
-node "$PROJECT_ROOT/dist/mission-cli.js" create --agent research --title "Short label" "Full detailed prompt for the agent"
+node "$PROJECT_ROOT/dist/mission-cli.js" create --title "Short label" "Full detailed prompt for the agent"
+```
+
+**Omit `--agent` and the task is auto-routed to the best-suited agent** — the CLI prints which one it picked, so tell [YOUR NAME] where it went. Only pass `--agent <id>` when [YOUR NAME] named a specific agent. Never guess agent ids from memory; the roster changes. If you need to see it:
+
+```bash
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+node "$PROJECT_ROOT/dist/mission-cli.js" agents                   # live roster with descriptions
 ```
 
 The task appears on the Mission Control dashboard. You do NOT need to wait for the result.
 
 ```bash
 PROJECT_ROOT=$(git rev-parse --show-toplevel)
-node "$PROJECT_ROOT/dist/mission-cli.js" list                    # see all tasks
+node "$PROJECT_ROOT/dist/mission-cli.js" list                     # see all tasks
+node "$PROJECT_ROOT/dist/mission-cli.js" list --agent research    # one agent's tasks
 node "$PROJECT_ROOT/dist/mission-cli.js" result <task-id>         # get a task's result
 node "$PROJECT_ROOT/dist/mission-cli.js" cancel <task-id>         # cancel a queued task
 ```
 
-Available agents: main, research, comms, content, ops. Use `--priority 10` for high priority, `--priority 0` for low (default is 5).
+Use `--priority 10` for high priority, `--priority 0` for low (default is 5).
 
 ## Sending Files Back
 
