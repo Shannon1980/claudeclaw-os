@@ -48,6 +48,39 @@ describe('classify', () => {
     expect(classifyTier('Bash', { command: 'drop table users' })).toBe(4 as Tier);
   });
 
+  it('maps ship-shaped Bash commands to Tier 4 so Autonomous cannot auto-run them', () => {
+    // Landing on main / rewriting shared history.
+    expect(classifyTier('Bash', { command: 'git push origin main' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'git push -f origin feature' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'git push --force-with-lease' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'gh pr merge 103 --squash' })).toBe(4 as Tier);
+    // Publishing outward.
+    expect(classifyTier('Bash', { command: 'npm publish --access public' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'gh release create v1.3.0' })).toBe(4 as Tier);
+    // Deploying locally.
+    expect(classifyTier('Bash', { command: 'npm run electron:build' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'npm run migrate' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'ditto /tmp/x/ClaudeClaw.app /Applications/ClaudeClaw.app' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'launchctl bootout gui/501/com.claudeclaw.main' })).toBe(4 as Tier);
+  });
+
+  it('leaves ordinary PR-flow Bash commands below Tier 4', () => {
+    // Agents must still be able to branch, commit and push a feature branch
+    // unattended — the PR is the artifact the operator reviews.
+    expect(classifyTier('Bash', { command: 'git checkout -b claude/fix-thing' })).toBe(3 as Tier);
+    expect(classifyTier('Bash', { command: 'git commit -m "fix: thing"' })).toBe(3 as Tier);
+    expect(classifyTier('Bash', { command: 'git push -u origin claude/fix-thing' })).toBe(3 as Tier);
+    expect(classifyTier('Bash', { command: 'gh pr create --base main --title x --body y' })).toBe(3 as Tier);
+    expect(classifyTier('Bash', { command: 'npm test' })).toBe(3 as Tier);
+  });
+
+  it('locks ship-shaped Bash even in Autonomous mode with a send override', () => {
+    // The whole point: Tier 3 auto-runs under Autonomous, Tier 4 never does.
+    expect(resolveOutcome(classifyTier('Bash', { command: 'npm run electron:build' }), 'autonomous', { send: 'always' })).toBe('ask');
+    expect(resolveOutcome(classifyTier('Bash', { command: 'git push origin main' }), 'autonomous', {})).toBe('ask');
+    expect(resolveOutcome(classifyTier('Bash', { command: 'git push -u origin claude/x' }), 'autonomous', {})).toBe('allow');
+  });
+
   it('maps read-only Bash and read-only built-ins to Tier 1', () => {
     expect(classifyTier('Bash', { command: 'ls -la' })).toBe(1 as Tier);
     expect(classifyTier('Bash', { command: 'cat package.json' })).toBe(1 as Tier);

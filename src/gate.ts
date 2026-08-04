@@ -75,15 +75,45 @@ const TIER3_PATTERNS: RegExp[] = [
 const TIER2_PATTERNS: RegExp[] = [/label/i, /save/i, /upload/i, /drive/i, /archive/i];
 
 /**
+ * Ship-shaped Bash commands: landing code on main, or putting a build in front
+ * of the operator's users. These are Tier 4 (LOCKED, always ask) rather than
+ * Tier 3, because Tier 3 silently auto-runs in Autonomous mode and "no code
+ * ships without my approval" has to survive that mode being on.
+ *
+ * Deliberately NOT here: `git commit`, `git checkout -b`, and a plain
+ * `git push` with no main/master target. Agents need those to do the work and
+ * open a PR unattended; the PR itself is the reviewable artifact. The pre-push
+ * hook (.githooks/pre-push) is what hard-blocks main, since only it can see the
+ * refs a bare `git push` would actually update.
+ */
+const SHIP_PATTERNS: RegExp[] = [
+  // Landing on main, or rewriting shared history.
+  /\bgit\s+push\b[^|;&]*?(--force|--force-with-lease|\s-f\b)/i,
+  /\bgit\s+push\b[^|;&]*?\b(main|master)\b/i,
+  /\bgh\s+pr\s+merge\b/i,
+  // Publishing artifacts outward.
+  /\bnpm\s+publish\b/i,
+  /\bgh\s+release\s+(create|upload|edit)\b/i,
+  // Deploying locally: packaging, installing over the live app, restarting the
+  // service fleet, or migrating the live store.
+  /\bnpm\s+run\s+(electron:build|migrate)\b/i,
+  /\belectron-builder\b/i,
+  /\b(ditto|cp|rsync|mv|rm)\b[^|;&]*\/Applications\//i,
+  /\blaunchctl\s+(bootstrap|bootout|kickstart|load|unload)\b/i,
+];
+
+/**
  * Bash is special: anything but a recognized read-only command defaults to
- * Tier 3 (ask), and known-destructive commands escalate to Tier 4, because
- * Bash can do anything including move money or permanently delete.
+ * Tier 3 (ask), and known-destructive or ship-shaped commands escalate to
+ * Tier 4, because Bash can do anything including move money, permanently
+ * delete, or push straight to main.
  */
 function classifyBash(input: Record<string, unknown>): Tier {
   const cmd = String(input.command ?? '');
   const DESTRUCTIVE = /\b(rm\s+-rf?\b|git\s+push\s+--force|drop\s+table|shred\b|dd\s+if=)/i;
   const READ_ONLY = /^\s*(ls|cat|grep|rg|find|head|tail|wc|pwd|echo|git\s+(status|log|diff|show))\b/i;
   if (DESTRUCTIVE.test(cmd)) return 4; // irreversible
+  if (SHIP_PATTERNS.some((r) => r.test(cmd))) return 4; // needs the operator (D-01 lock)
   if (READ_ONLY.test(cmd)) return 1;
   return 3; // unknown command = ask (D-03 safe default)
 }

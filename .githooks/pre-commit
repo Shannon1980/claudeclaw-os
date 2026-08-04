@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# Refuse to commit while sitting on main. Work happens on a branch so it can
+# become a pull request; a commit made on main is a change that never got
+# reviewed, even if the push is blocked afterwards.
+#
+# Enabled by: git config core.hooksPath .githooks   (scripts/install-hooks.sh)
+# Genuine emergency override: git commit --no-verify
+
+branch=$(git symbolic-ref --short -q HEAD) || exit 0  # detached HEAD, rebase, etc.
+
+case "$branch" in
+  main|master)
+    echo "pre-commit: refusing to commit on $branch." >&2
+    echo "" >&2
+    echo "  Move this work to a branch first:" >&2
+    echo "    git checkout -b <branch>" >&2
+    echo "" >&2
+    echo "  Already staged? The stage survives the checkout." >&2
+    echo "  If you are the operator and you really mean it: git commit --no-verify" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

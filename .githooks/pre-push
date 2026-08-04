@@ -1,0 +1,43 @@
+#!/bin/sh
+#
+# Refuse to push anything directly to main. Code lands on main through a pull
+# request, reviewed by the operator, never by an agent pushing straight at it.
+#
+# This is the layer that actually holds: the permission gate classifies
+# ship-shaped commands as Tier 4 (always ask), but only this hook sees the refs
+# a bare `git push` would update, and it applies to every tool — agents,
+# Claude Code sessions, and a human in a hurry.
+#
+# Enabled by: git config core.hooksPath .githooks   (scripts/install-hooks.sh)
+# Genuine emergency override: git push --no-verify
+
+remote="$1"
+protected="main master"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "$remote_ref" ] && continue
+  branch=${remote_ref#refs/heads/}
+
+  for p in $protected; do
+    if [ "$branch" = "$p" ]; then
+      # A delete (all-zero local sha) is even worse than a push.
+      case "$local_sha" in
+        0000000000000000000000000000000000000000)
+          echo "pre-push: refusing to DELETE $p on $remote." >&2
+          ;;
+        *)
+          echo "pre-push: refusing to push directly to $p on $remote." >&2
+          echo "" >&2
+          echo "  Open a pull request instead:" >&2
+          echo "    git checkout -b <branch> && git push -u origin <branch>" >&2
+          echo "    gh pr create --base $p" >&2
+          ;;
+      esac
+      echo "" >&2
+      echo "  If you are the operator and you really mean it: git push --no-verify" >&2
+      exit 1
+    fi
+  done
+done
+
+exit 0
