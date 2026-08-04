@@ -536,9 +536,11 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   });
 
   // Top-level static files copied from web/public/ at build time
-  // (e.g. /brain.glb for the 3D Hive Mind view). These have stable
-  // names so they sit at the root rather than under /assets/.
-  app.get('/:filename{.+\\.(glb|gltf|bin|ktx2|wasm)}', (c) => {
+  // (e.g. /brain.glb for the 3D Hive Mind view, /favicon.svg for the app
+  // mark). These have stable names so they sit at the root rather than
+  // under /assets/. Without this route they fall through to the SPA
+  // catch-all and the browser gets index.html back instead of the file.
+  app.get('/:filename{.+\\.(glb|gltf|bin|ktx2|wasm|svg|png|ico)}', (c) => {
     const filename = c.req.param('filename');
     const filePath = path.join(PROJECT_ROOT, 'dist', 'web', filename);
     const root = path.join(PROJECT_ROOT, 'dist', 'web');
@@ -549,6 +551,9 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const ctype = ext === '.glb' ? 'model/gltf-binary'
       : ext === '.gltf' ? 'model/gltf+json'
       : ext === '.wasm' ? 'application/wasm'
+      : ext === '.svg' ? 'image/svg+xml'
+      : ext === '.png' ? 'image/png'
+      : ext === '.ico' ? 'image/x-icon'
       : 'application/octet-stream';
     return new Response(new Uint8Array(data), {
       headers: {
