@@ -17,17 +17,20 @@
  *     (D-03 safe side).
  *   - Never return `updatedPermissions` — every call re-enters the gate so no
  *     cached allow can bypass the lock (D-05).
- *   - Fail to the SAFE-USABLE side: a classify/resolve throw OR the
+ *   - Fail to the SAFE-USABLE side: a classify/resolve/config throw OR the
  *     PERMISSION_GATE_ENABLED kill switch being off routes to the Tier 3
  *     ask/queue path — never deny-all (bricks the bot) or allow-all (L-2).
  *   - Audit detail carries only tool/tier/mode/outcome — never env/secrets
  *     (D-10, L-4, ASVS V8).
+ *   - EVERY return value must satisfy the SDK's RUNTIME PermissionResult
+ *     schema, which is stricter than its .d.ts — see allowResult() below.
  */
 
 import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { audit } from './security.js';
 import { getMode, getOverrides, type Mode, type OverrideValue } from './permissions-config.js';
 import { isEnabled } from './kill-switches.js';
+import { logger } from './logger.js';
 
 export type { Mode } from './permissions-config.js';
 export type Tier = 1 | 2 | 3 | 4;
@@ -46,7 +49,23 @@ const TIER4_PATTERNS: RegExp[] = [
 
 // Tier 1 — read & prepare (read-only built-ins + read-only MCP).
 const TIER1_BUILTINS = new Set(['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'NotebookRead']);
-const TIER1_MCP: RegExp[] = [/(^|__)(get|list|read|search|find|fetch|summar)/i, /draft/i];
+
+// Read verbs that make an MCP tool Tier 1. Matched against the TOOL segment of
+// `mcp__<server>__<tool>` at a word boundary, not against the whole name:
+// connector tool names routinely repeat the server name first
+// (mcp__claude_ai_Slack__slack_search_public_and_private), so anchoring on
+// `(^|__)` alone missed the verb and dropped plain reads to the Tier 3 default.
+const TIER1_MCP_VERBS = /(^|[_-])(get|list|read|search|find|fetch|summar|draft)/i;
+
+// Send-ish verbs beat the Tier 1 read fast path: `gmail_send_draft` contains
+// "draft" but SENDS, so it must not classify as read-only.
+const MCP_SEND_VERBS = /(^|[_-])(send|post|publish|repl(y|ies))/i;
+
+/** The `<tool>` part of `mcp__<server>__<tool>`; the whole name if unsplittable. */
+function mcpToolSegment(toolName: string): string {
+  const parts = toolName.split('__');
+  return parts.length >= 3 ? parts.slice(2).join('__') : toolName;
+}
 
 // Tier 3 — consequential external send/post/reply/book-with-external.
 const TIER3_PATTERNS: RegExp[] = [
@@ -59,15 +78,45 @@ const TIER3_PATTERNS: RegExp[] = [
 const TIER2_PATTERNS: RegExp[] = [/label/i, /save/i, /upload/i, /drive/i, /archive/i];
 
 /**
+ * Ship-shaped Bash commands: landing code on main, or putting a build in front
+ * of the operator's users. These are Tier 4 (LOCKED, always ask) rather than
+ * Tier 3, because Tier 3 silently auto-runs in Autonomous mode and "no code
+ * ships without my approval" has to survive that mode being on.
+ *
+ * Deliberately NOT here: `git commit`, `git checkout -b`, and a plain
+ * `git push` with no main/master target. Agents need those to do the work and
+ * open a PR unattended; the PR itself is the reviewable artifact. The pre-push
+ * hook (.githooks/pre-push) is what hard-blocks main, since only it can see the
+ * refs a bare `git push` would actually update.
+ */
+const SHIP_PATTERNS: RegExp[] = [
+  // Landing on main, or rewriting shared history.
+  /\bgit\s+push\b[^|;&]*?(--force|--force-with-lease|\s-f\b)/i,
+  /\bgit\s+push\b[^|;&]*?\b(main|master)\b/i,
+  /\bgh\s+pr\s+merge\b/i,
+  // Publishing artifacts outward.
+  /\bnpm\s+publish\b/i,
+  /\bgh\s+release\s+(create|upload|edit)\b/i,
+  // Deploying locally: packaging, installing over the live app, restarting the
+  // service fleet, or migrating the live store.
+  /\bnpm\s+run\s+(electron:build|migrate)\b/i,
+  /\belectron-builder\b/i,
+  /\b(ditto|cp|rsync|mv|rm)\b[^|;&]*\/Applications\//i,
+  /\blaunchctl\s+(bootstrap|bootout|kickstart|load|unload)\b/i,
+];
+
+/**
  * Bash is special: anything but a recognized read-only command defaults to
- * Tier 3 (ask), and known-destructive commands escalate to Tier 4, because
- * Bash can do anything including move money or permanently delete.
+ * Tier 3 (ask), and known-destructive or ship-shaped commands escalate to
+ * Tier 4, because Bash can do anything including move money, permanently
+ * delete, or push straight to main.
  */
 function classifyBash(input: Record<string, unknown>): Tier {
   const cmd = String(input.command ?? '');
   const DESTRUCTIVE = /\b(rm\s+-rf?\b|git\s+push\s+--force|drop\s+table|shred\b|dd\s+if=)/i;
   const READ_ONLY = /^\s*(ls|cat|grep|rg|find|head|tail|wc|pwd|echo|git\s+(status|log|diff|show))\b/i;
   if (DESTRUCTIVE.test(cmd)) return 4; // irreversible
+  if (SHIP_PATTERNS.some((r) => r.test(cmd))) return 4; // needs the operator (D-01 lock)
   if (READ_ONLY.test(cmd)) return 1;
   return 3; // unknown command = ask (D-03 safe default)
 }
@@ -81,7 +130,10 @@ export function classifyTier(toolName: string, input: Record<string, unknown> = 
   if (TIER1_BUILTINS.has(toolName)) return 1;
   if (toolName === 'Write' || toolName === 'Edit' || toolName === 'NotebookEdit') return 2;
   if (toolName === 'Bash') return classifyBash(input);
-  if (TIER1_MCP.some((r) => r.test(toolName))) return 1;
+  if (toolName.startsWith('mcp__')) {
+    const tool = mcpToolSegment(toolName);
+    if (!MCP_SEND_VERBS.test(tool) && TIER1_MCP_VERBS.test(tool)) return 1;
+  }
   if (TIER3_PATTERNS.some((r) => r.test(toolName))) return 3;
   if (TIER2_PATTERNS.some((r) => r.test(toolName))) return 2;
   return 3; // D-03 safe default — never silent auto-run an unclassified tool
@@ -254,6 +306,27 @@ function recordDecision(
 }
 
 /**
+ * An 'allow' PermissionResult that the SDK will actually accept.
+ *
+ * The SDK's TYPES mark `updatedInput` optional, but the control protocol
+ * validates our reply against a zod schema where it is REQUIRED:
+ *
+ *   z.object({ behavior: z.literal('allow'), updatedInput: z.record(...), ... })
+ *
+ * So a bare `{ behavior: 'allow' }` type-checks, then fails the runtime parse,
+ * and the SDK converts the parse error into `deny` with the message
+ * "Tool permission request failed: <ZodError>". That turns EVERY allowed tool
+ * call into an opaque failure while the audit log still reads 'allow' —
+ * exactly what happened in Autonomous mode, where nearly everything allows.
+ *
+ * We pass the model's own input straight back: the gate never rewrites params,
+ * it only decides. Keep this the single place any allow is constructed.
+ */
+function allowResult(input: Record<string, unknown>): PermissionResult {
+  return { behavior: 'allow', updatedInput: input };
+}
+
+/**
  * Build the SDK `CanUseTool` callback for one turn, closing over `ctx`.
  *
  * - 'allow'                     → { behavior:'allow' } + one audit row.
@@ -273,11 +346,16 @@ export function makeCanUseTool(ctx: GateContext): CanUseTool {
     // first canUseTool of a turn sets it, later calls reuse the caller's value.
     if (ctx._startMs === undefined) ctx._startMs = Date.now();
 
-    const mode: Mode = ctx.mode ?? getMode();
+    // 'balanced' is the D-11 default AND the fail-safe if the config read
+    // throws. getMode() hits the DB, so it belongs INSIDE the try: an
+    // uninitialized/locked store must degrade to Tier 3 ask, not throw out of
+    // canUseTool (which the SDK reports as "Tool permission request failed").
+    let mode: Mode = 'balanced';
     let tier: Tier;
     let outcome: 'allow' | 'ask';
 
     try {
+      mode = ctx.mode ?? getMode();
       if (!isEnabled('PERMISSION_GATE_ENABLED')) {
         // Emergency switch off → degrade to the safe-usable side, not allow-all.
         tier = 3;
@@ -295,7 +373,7 @@ export function makeCanUseTool(ctx: GateContext): CanUseTool {
 
     if (outcome === 'allow') {
       recordDecision(ctx, input, { tool: toolName, tier, mode, outcome: 'allow' }, false);
-      return { behavior: 'allow' };
+      return allowResult(input);
     }
 
     // outcome === 'ask'
@@ -308,21 +386,41 @@ export function makeCanUseTool(ctx: GateContext): CanUseTool {
         !ok,
       );
       return ok
-        ? { behavior: 'allow' }
+        ? allowResult(input)
         : { behavior: 'deny', message: 'Operator declined this action.' };
     }
 
     // Background → enqueue + immediate deny (turn continues, model reports it queued).
-    const queueId = ctx.enqueue?.({
-      toolName,
+    // The enqueue hits the DB, so a failure here must still produce a valid deny
+    // rather than throwing out of the callback — the operator loses the queued
+    // row, not the whole turn. 'queue-failed' deliberately renders nowhere in
+    // the Activity feed: when it fires the store itself is broken, so the audit
+    // write is failing too. logger.error (file, not DB) is the honest signal.
+    let queueId: number | string | undefined;
+    let queueFailed = false;
+    try {
+      queueId = ctx.enqueue?.({
+        toolName,
+        input,
+        tier,
+        mode,
+        agentId: ctx.agentId,
+        chatId: ctx.chatId,
+        runId: ctx.runId,
+      });
+    } catch (err) {
+      queueFailed = true;
+      logger.error(
+        { tool: toolName, tier, err: err instanceof Error ? err.message : String(err) },
+        'Approval enqueue failed — denying without a queued row',
+      );
+    }
+    recordDecision(
+      ctx,
       input,
-      tier,
-      mode,
-      agentId: ctx.agentId,
-      chatId: ctx.chatId,
-      runId: ctx.runId,
-    });
-    recordDecision(ctx, input, { tool: toolName, tier, mode, outcome: 'queued', queueId }, true);
+      { tool: toolName, tier, mode, outcome: queueFailed ? 'queue-failed' : 'queued', queueId },
+      true,
+    );
     return {
       behavior: 'deny',
       message:

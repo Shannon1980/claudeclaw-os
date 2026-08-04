@@ -16,6 +16,11 @@
 // kept around as the notification-preview `text` and as the fallback if Slack
 // ever rejects the blocks.
 
+import type { WebClient } from '@slack/web-api';
+
+import { formatForSlack } from './format.js';
+import { logger } from './logger.js';
+
 // ── Types (the subset of the rich_text schema we emit) ────────────────
 
 export interface RichTextStyle {
@@ -420,4 +425,38 @@ export function markdownToRichTextElements(md: string): RichTextElement[] {
 export function markdownToBlocks(md: string): RichTextBlock[] {
   const elements = markdownToRichTextElements(md ?? '');
   return elements.length ? [{ type: 'rich_text', elements }] : [];
+}
+
+// ── Posting ───────────────────────────────────────────────────────────
+
+/** The Web API surface the rich-text poster needs (narrow, so it's mockable). */
+export type RichTextPoster = Pick<WebClient, 'chat'>;
+
+/**
+ * Post Markdown to Slack as Block Kit rich_text.
+ *
+ * The `text` field still carries the mrkdwn rendering: with `blocks` present
+ * Slack only uses it for the notification/preview line, and it doubles as the
+ * fallback body if Slack ever rejects the blocks (never drop output).
+ */
+export async function postRichText(
+  client: RichTextPoster,
+  channel: string,
+  markdown: string,
+  extra: Record<string, unknown> = {},
+): Promise<{ ts?: string }> {
+  const fallback = formatForSlack(markdown);
+  const blocks = markdownToBlocks(markdown);
+  if (!blocks.length) {
+    const res = await client.chat.postMessage({ channel, text: fallback || markdown, ...extra });
+    return { ts: res.ts as string | undefined };
+  }
+  try {
+    const res = await client.chat.postMessage({ channel, text: fallback, blocks, ...extra });
+    return { ts: res.ts as string | undefined };
+  } catch (err) {
+    logger.warn({ err }, 'Slack rejected rich_text blocks — falling back to mrkdwn');
+    const res = await client.chat.postMessage({ channel, text: fallback, ...extra });
+    return { ts: res.ts as string | undefined };
+  }
 }

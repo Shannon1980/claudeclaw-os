@@ -34,6 +34,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { loadMcpServers } from './agent.js';
+import { WORKSPACE_ROOT } from './config.js';
 import { logger } from './logger.js';
 
 export interface ReplayResult {
@@ -79,9 +80,12 @@ async function replayWrite(input: Record<string, unknown>): Promise<ReplayResult
   const filePath = typeof input.file_path === 'string' ? input.file_path : '';
   const content = typeof input.content === 'string' ? input.content : '';
   if (!filePath) return { ok: false, message: "Couldn't replay — no file_path in the prepared action." };
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.promises.writeFile(filePath, content, 'utf-8');
-  return { ok: true, message: `Wrote ${filePath}.` };
+  // A relative path was captured relative to the agent's cwd, not the host
+  // process's (in the packaged .app that is the read-only bundle).
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(WORKSPACE_ROOT, filePath);
+  await fs.promises.mkdir(path.dirname(resolved), { recursive: true });
+  await fs.promises.writeFile(resolved, content, 'utf-8');
+  return { ok: true, message: `Wrote ${resolved}.` };
 }
 
 /**
@@ -95,8 +99,14 @@ function replayBash(input: Record<string, unknown>): Promise<ReplayResult> {
   if (!command) return Promise.resolve({ ok: false, message: "Couldn't replay — no command in the prepared action." });
   return new Promise<ReplayResult>((resolve) => {
     // Run the already-gated literal command. We pass it as the single program
-    // argument to the shell — no concatenation with any other input.
-    const child = spawn('/bin/sh', ['-c', command], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // argument to the shell — no concatenation with any other input. `cwd` is
+    // the agent's workspace: the command was written against that directory, so
+    // replaying it from the host process cwd (the read-only .app bundle) turned
+    // every `git rev-parse` / relative path into a bogus failure.
+    const child = spawn('/bin/sh', ['-c', command], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: WORKSPACE_ROOT,
+    });
     let out = '';
     let settled = false;
     const finish = (r: ReplayResult) => { if (!settled) { settled = true; resolve(r); } };
@@ -133,9 +143,17 @@ function replayMcp(toolName: string, input: Record<string, unknown>): Promise<Re
   const servers = loadMcpServers();
   const cfg = servers[serverName];
   if (!cfg) {
+    // Only locally configured *stdio* servers can be replayed: we speak JSON-RPC
+    // to a process we spawn ourselves. claude.ai connectors are HTTP servers the
+    // CLI subprocess owns, so there is nothing here to spawn — saying "isn't
+    // connected" blamed the connector for a limit of the replay path (they are
+    // reachable fine during a live turn).
+    const isRemoteConnector = serverName.startsWith('claude_ai_');
     return Promise.resolve({
       ok: false,
-      message: `Couldn't replay — the "${serverName}" tool isn't connected. Connect it in Settings, then try again.`,
+      message: isRemoteConnector
+        ? `Couldn't replay — "${serverName}" is a claude.ai connector, which only runs inside a live agent turn. Re-run the request instead of approving it here.`
+        : `Couldn't replay — no local MCP server named "${serverName}" is configured, so there's nothing to call. Add it to settings.json, or re-run the request instead.`,
     });
   }
 
@@ -145,6 +163,7 @@ function replayMcp(toolName: string, input: Record<string, unknown>): Promise<Re
 
     const child = spawn(cfg.command, cfg.args ?? [], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: WORKSPACE_ROOT,
       env: { ...process.env, ...(cfg.env ?? {}) },
     });
 

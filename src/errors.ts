@@ -8,6 +8,7 @@
 
 export type ErrorCategory =
   | 'auth'
+  | 'stale_session'
   | 'rate_limit'
   | 'session_limit'
   | 'context_exhausted'
@@ -54,6 +55,19 @@ const AUTH_PATTERNS = [
   'token expired',
   'invalid_grant',
   'login required',
+];
+
+// The stored session id points at a transcript the CLI can't find, so
+// `--resume` fails before a single token is spent. This happens whenever the
+// SDK cwd changes (dev checkout -> packaged .app, or a moved repo): the
+// transcript lives under ~/.claude/projects/<slug-of-cwd>/ and the new slug
+// has no such file. Zero cost + immediate exit makes it look exactly like a
+// rejected credential, so it MUST be matched before the auth default.
+const STALE_SESSION_PATTERNS = [
+  'no conversation found',
+  'no conversation with session id',
+  'session id not found',
+  'could not find session',
 ];
 
 const RATE_LIMIT_PATTERNS = [
@@ -143,6 +157,24 @@ function extractResetTime(text: string): string | null {
  * retryable here (the cap resets on the account's clock, not in seconds), and
  * they are explicitly NOT a credentials problem.
  */
+/**
+ * Build the AgentError for a `--resume` against a transcript the CLI can't
+ * find. Recoverable without user action: the caller drops the stored session
+ * id and re-runs the same turn as a fresh session, so it is marked retryable
+ * with no backoff.
+ */
+function staleSessionError(raw: Error): AgentError {
+  return new AgentError('stale_session', {
+    shouldRetry: true,
+    shouldNewChat: true,
+    shouldSwitchModel: false,
+    retryAfterMs: 0,
+    userMessage:
+      'Previous chat session was gone (its transcript no longer exists for this '
+      + 'working directory). Starting a fresh session — prior context is lost.',
+  }, raw);
+}
+
 function sessionLimitError(text: string, raw: Error): AgentError {
   const resetTime = extractResetTime(text);
   const resetClause = resetTime ? ` (resets ${resetTime})` : '';
@@ -195,6 +227,14 @@ export function classifyError(
   // which yields a zero-cost "success"-subtype result with is_error:true and
   // then exit code 1. Classify from the API error detail so the user gets an
   // actionable message instead of an endless "subprocess crashed. Retrying...".
+  // A stale `--resume` id fails identically to a rejected credential (zero
+  // cost, immediate exit), so it is checked first, against both the raw error
+  // and the result envelope.
+  const resumeText = `${text} ${resultError?.resultText ?? ''} ${assistantText}`;
+  if (matchesAny(resumeText, STALE_SESSION_PATTERNS)) {
+    return staleSessionError(raw);
+  }
+
   if (resultError?.isError) {
     const apiText = `${resultError.apiErrorStatus ?? ''} ${resultError.resultText ?? ''} ${assistantText}`.trim();
     // Check session/usage caps before rate_limit and the auth default: a

@@ -25,7 +25,7 @@ import { messageQueue } from './message-queue.js';
 import { processUserMessage, clearSessionBaseline, type TransportCallbacks, type ProcessOptions } from './message-core.js';
 import { getAvailableAgents } from './orchestrator.js';
 import { getSecurityStatus, audit } from './security.js';
-import { markdownToBlocks } from './slack-rich-text.js';
+import { markdownToBlocks, postRichText } from './slack-rich-text.js';
 import { abortActiveQuery } from './state.js';
 import { transcribeAudio, voiceCapabilities } from './voice.js';
 
@@ -193,38 +193,6 @@ export function resolveSlackCommandTarget(
 export function isAuthorisedSlack(userId: string | undefined): boolean {
   if (!ALLOWED_SLACK_USER_ID) return false; // not configured → reject (see /whoami)
   return userId === ALLOWED_SLACK_USER_ID;
-}
-
-/** The Web API surface the rich-text poster needs (narrow, so it's mockable). */
-type PostingClient = Pick<WebClient, 'chat'>;
-
-/**
- * Post Markdown to Slack as Block Kit rich_text.
- *
- * The `text` field still carries the mrkdwn rendering: with `blocks` present
- * Slack only uses it for the notification/preview line, and it doubles as the
- * fallback body if Slack ever rejects the blocks (never drop output).
- */
-async function postRichText(
-  client: PostingClient,
-  channel: string,
-  markdown: string,
-  extra: Record<string, unknown> = {},
-): Promise<{ ts?: string }> {
-  const fallback = formatForSlack(markdown);
-  const blocks = markdownToBlocks(markdown);
-  if (!blocks.length) {
-    const res = await client.chat.postMessage({ channel, text: fallback || markdown, ...extra });
-    return { ts: res.ts as string | undefined };
-  }
-  try {
-    const res = await client.chat.postMessage({ channel, text: fallback, blocks, ...extra });
-    return { ts: res.ts as string | undefined };
-  } catch (err) {
-    logger.warn({ err }, 'Slack rejected rich_text blocks — falling back to mrkdwn');
-    const res = await client.chat.postMessage({ channel, text: fallback, ...extra });
-    return { ts: res.ts as string | undefined };
-  }
 }
 
 /**

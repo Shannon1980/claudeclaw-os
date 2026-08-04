@@ -107,14 +107,24 @@ logger = logging.getLogger("warroom.server")
 # ─── Shared helpers ────────────────────────────────────────────────────────
 
 def load_env():
-    # The Node service passes CLAUDECLAW_ENV_FILE so we read the same .env it
-    # did. That matters in a packaged .app, where PROJECT_ROOT is the read-only
-    # bundle and the real .env lives in the per-user data dir. The service keeps
-    # secrets out of its own environment, so inheriting them is not an option.
+    # In the packaged .app, PROJECT_ROOT is the read-only bundle and the real
+    # .env lives in the writable data dir the Electron shell passes down. Look
+    # there first: relying on a bundle-side .env means a missing symlink takes
+    # the whole voice server down with "Missing required API keys" (exit 1),
+    # which then burns all three crash respawns.
+    #
+    # CLAUDECLAW_ENV_FILE wins when present: the Node service passes the exact
+    # file its own readEnvFile read, so the two cannot drift (it resolves to
+    # cwd/.env when no data dir is set, which is not PROJECT_ROOT/.env when the
+    # service was started from elsewhere). The data-dir guess stays as the
+    # fallback for a hand-run server.py that has no parent to ask.
     candidates = []
     override = os.environ.get("CLAUDECLAW_ENV_FILE")
     if override:
         candidates.append(Path(override))
+    data_dir = os.environ.get("CLAUDECLAW_DATA_DIR")
+    if data_dir:
+        candidates.append(Path(data_dir) / ".env")
     candidates.append(PROJECT_ROOT / ".env")
 
     for env_path in candidates:
@@ -124,8 +134,8 @@ def load_env():
             return
 
     logger.warning(
-        "No .env found (looked in: %s), relying on shell environment",
-        ", ".join(str(p) for p in candidates),
+        "No .env found at %s, relying on shell environment",
+        " or ".join(str(p) for p in candidates),
     )
 
 

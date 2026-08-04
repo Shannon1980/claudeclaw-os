@@ -48,6 +48,39 @@ describe('classify', () => {
     expect(classifyTier('Bash', { command: 'drop table users' })).toBe(4 as Tier);
   });
 
+  it('maps ship-shaped Bash commands to Tier 4 so Autonomous cannot auto-run them', () => {
+    // Landing on main / rewriting shared history.
+    expect(classifyTier('Bash', { command: 'git push origin main' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'git push -f origin feature' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'git push --force-with-lease' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'gh pr merge 103 --squash' })).toBe(4 as Tier);
+    // Publishing outward.
+    expect(classifyTier('Bash', { command: 'npm publish --access public' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'gh release create v1.3.0' })).toBe(4 as Tier);
+    // Deploying locally.
+    expect(classifyTier('Bash', { command: 'npm run electron:build' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'npm run migrate' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'ditto /tmp/x/ClaudeClaw.app /Applications/ClaudeClaw.app' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'launchctl bootout gui/501/com.claudeclaw.main' })).toBe(4 as Tier);
+  });
+
+  it('leaves ordinary PR-flow Bash commands below Tier 4', () => {
+    // Agents must still be able to branch, commit and push a feature branch
+    // unattended — the PR is the artifact the operator reviews.
+    expect(classifyTier('Bash', { command: 'git checkout -b claude/fix-thing' })).toBe(3 as Tier);
+    expect(classifyTier('Bash', { command: 'git commit -m "fix: thing"' })).toBe(3 as Tier);
+    expect(classifyTier('Bash', { command: 'git push -u origin claude/fix-thing' })).toBe(3 as Tier);
+    expect(classifyTier('Bash', { command: 'gh pr create --base main --title x --body y' })).toBe(3 as Tier);
+    expect(classifyTier('Bash', { command: 'npm test' })).toBe(3 as Tier);
+  });
+
+  it('locks ship-shaped Bash even in Autonomous mode with a send override', () => {
+    // The whole point: Tier 3 auto-runs under Autonomous, Tier 4 never does.
+    expect(resolveOutcome(classifyTier('Bash', { command: 'npm run electron:build' }), 'autonomous', { send: 'always' })).toBe('ask');
+    expect(resolveOutcome(classifyTier('Bash', { command: 'git push origin main' }), 'autonomous', {})).toBe('ask');
+    expect(resolveOutcome(classifyTier('Bash', { command: 'git push -u origin claude/x' }), 'autonomous', {})).toBe('allow');
+  });
+
   it('maps read-only Bash and read-only built-ins to Tier 1', () => {
     expect(classifyTier('Bash', { command: 'ls -la' })).toBe(1 as Tier);
     expect(classifyTier('Bash', { command: 'cat package.json' })).toBe(1 as Tier);
@@ -65,6 +98,22 @@ describe('classify', () => {
   it('maps external send/post MCP tools to Tier 3', () => {
     expect(classifyTier('mcp__gmail__send-email')).toBe(3 as Tier);
     expect(classifyTier('mcp__slack__post-message')).toBe(3 as Tier);
+  });
+
+  it('maps read-only MCP tools to Tier 1 even when the tool name repeats the server name', () => {
+    // Connector-style names: the read verb is mid-segment, not right after `__`.
+    expect(classifyTier('mcp__claude_ai_Slack__slack_search_public_and_private')).toBe(1 as Tier);
+    expect(classifyTier('mcp__claude_ai_Slack__slack_read_channel')).toBe(1 as Tier);
+    expect(classifyTier('mcp__claude_ai_Gmail__search_threads')).toBe(1 as Tier);
+    expect(classifyTier('mcp__gmail__gmail_list_labels')).toBe(1 as Tier);
+    expect(classifyTier('mcp__echo-ai__list_overdue_todos')).toBe(1 as Tier);
+  });
+
+  it('keeps send-ish MCP tools off the Tier 1 read path even when they mention draft', () => {
+    expect(classifyTier('mcp__gmail__gmail_send_draft')).toBe(3 as Tier);
+    expect(classifyTier('mcp__claude_ai_Slack__slack_send_message_draft')).toBe(3 as Tier);
+    // A pure draft read/prepare stays Tier 1.
+    expect(classifyTier('mcp__gmail__gmail_list_drafts')).toBe(1 as Tier);
   });
 
   it('defaults UNKNOWN/unclassified tools to Tier 3 (D-03 safe side, never Tier 1/2)', () => {
@@ -145,6 +194,55 @@ describe('background queue deny', () => {
     const result = await canUseTool('mcp__gmail__send-email', { to: 'x@y.com' }, OPTS);
     expect(result).toMatchObject({ behavior: 'deny' });
     expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('still denies (never throws) when the enqueue itself fails', async () => {
+    const enqueue = vi.fn().mockImplementation(() => {
+      throw new Error('database is locked');
+    });
+    const canUseTool = makeCanUseTool({ attended: false, mode: 'balanced', overrides: {}, enqueue });
+    const result = await canUseTool('mcp__gmail__send-email', { to: 'x@y.com' }, OPTS);
+    // A dead store loses the queued row, not the whole turn.
+    expect(result).toMatchObject({ behavior: 'deny' });
+    expect(typeof (result as { message?: unknown }).message).toBe('string');
+  });
+});
+
+// The SDK validates our reply against a zod schema stricter than its .d.ts:
+// the allow variant REQUIRES `updatedInput`. A bare `{behavior:'allow'}`
+// type-checks but fails that parse, and the SDK turns the parse error into
+// `deny` with "Tool permission request failed" — silently breaking every
+// allowed tool call while the audit log still reads 'allow'.
+describe('SDK PermissionResult runtime contract', () => {
+  it('returns updatedInput alongside behavior:allow on the auto-allow path', async () => {
+    const input = { file_path: '/tmp/x' };
+    const canUseTool = makeCanUseTool({ attended: false, mode: 'autonomous', overrides: {} });
+    const result = await canUseTool('Read', input, OPTS);
+    expect(result).toEqual({ behavior: 'allow', updatedInput: input });
+  });
+
+  it('returns updatedInput alongside behavior:allow on the inline-approval path', async () => {
+    const input = { to: 'a@b.com', subject: 'hi' };
+    const canUseTool = makeCanUseTool({
+      attended: true,
+      mode: 'cautious',
+      overrides: {},
+      requestInline: vi.fn().mockResolvedValue(true),
+    });
+    const result = await canUseTool('mcp__gmail__send-email', input, OPTS);
+    expect(result).toEqual({ behavior: 'allow', updatedInput: input });
+  });
+
+  it('always carries a message on a deny so the deny variant parses too', async () => {
+    const canUseTool = makeCanUseTool({
+      attended: true,
+      mode: 'cautious',
+      overrides: {},
+      requestInline: vi.fn().mockResolvedValue(false),
+    });
+    const result = await canUseTool('mcp__gmail__send-email', { to: 'a@b.com' }, OPTS);
+    expect(result).toMatchObject({ behavior: 'deny' });
+    expect((result as { message: string }).message.length).toBeGreaterThan(0);
   });
 });
 

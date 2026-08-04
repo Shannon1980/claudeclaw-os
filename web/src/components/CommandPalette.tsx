@@ -8,6 +8,7 @@ import {
   type PaletteAction,
 } from '@/lib/command-palette';
 import { matchesModKey } from '@/lib/personalization';
+import { Logo } from './Logo';
 
 export function CommandPalette() {
   const open = commandPaletteOpen.value;
@@ -101,8 +102,9 @@ export function CommandPalette() {
 
         <div class="flex-1 min-h-0 overflow-y-auto py-1">
           {visible.length === 0 && (
-            <div class="px-4 py-6 text-center text-[var(--color-text-faint)] text-[13px]">
-              No matches.
+            <div class="flex flex-col items-center gap-2.5 px-4 py-6 text-center text-[var(--color-text-faint)] text-[13px]">
+              <Logo size={24} class="opacity-50" />
+              <span>No matches.</span>
             </div>
           )}
           {grouped.map((g) => (
@@ -139,6 +141,7 @@ export function CommandPalette() {
         </div>
 
         <div class="flex items-center gap-3 px-4 py-2 border-t border-[var(--color-border)] text-[10px] text-[var(--color-text-faint)] uppercase tracking-wider shrink-0">
+          <Logo size={11} class="shrink-0" />
           <span>↑↓ Navigate</span>
           <span>↵ Select</span>
           <span>Esc Close</span>
