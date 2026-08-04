@@ -41,8 +41,10 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 22px;
+        color: #dfe3ff;
+        background: linear-gradient(135deg, #2c3358 0%, #171b2c 45%, #0a0c13 100%);
       }
+      .mark svg { width: 26px; height: 26px; }
       h1 {
         font-size: 17px;
         font-weight: 500;
@@ -95,7 +97,15 @@
   </head>
   <body>
     <div class="wrap">
-      <div class="mark">🐾</div>
+      <div class="mark">
+        <svg viewBox="222 147 740 740" fill="currentColor" aria-hidden="true">
+          <g transform="translate(512 512) rotate(28)">
+            <path opacity="0.72" transform="translate(-200 -14) rotate(-6)" d="M -62 -230 C -44 -92, 6 74, 56 248 C 24 68, 40 -88, 62 -228 Q 0 -266, -62 -230 Z"/>
+            <path opacity="0.88" transform="translate(6 24) scale(1.13)" d="M -62 -230 C -44 -92, 6 74, 56 248 C 24 68, 40 -88, 62 -228 Q 0 -266, -62 -230 Z"/>
+            <path transform="translate(210 8) rotate(6) scale(1.05)" d="M -62 -230 C -44 -92, 6 74, 56 248 C 24 68, 40 -88, 62 -228 Q 0 -266, -62 -230 Z"/>
+          </g>
+        </svg>
+      </div>
       <h1 id="title">Starting ClaudeClaw</h1>
       <p id="detail">Bringing your assistant online…</p>
       <div class="bar" id="bar"><span></span></div>

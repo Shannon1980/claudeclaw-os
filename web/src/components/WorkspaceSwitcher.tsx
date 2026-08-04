@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 import { ChevronDown, Check } from 'lucide-preact';
 import { theme, themeMeta, setTheme, type ThemeName } from '@/lib/theme';
 import { workspaceName } from '@/lib/personalization';
+import { LogoTile } from './Logo';
 
 const THEME_ORDER: ThemeName[] = ['graphite', 'midnight', 'crimson'];
 
@@ -35,13 +36,7 @@ export function WorkspaceSwitcher() {
         onClick={() => setOpen((v) => !v)}
         class="w-full flex items-center gap-2 px-2 py-2 rounded-md hover:bg-[var(--color-elevated)] transition-colors"
       >
-        <div
-          class="w-6 h-6 rounded shrink-0"
-          style={{
-            background: `linear-gradient(135deg, ${current.swatch} 0%, var(--color-elevated) 100%)`,
-            border: '1px solid var(--color-border)',
-          }}
-        />
+        <LogoTile size={24} tint={current.swatch} />
         <span class="text-[14px] font-semibold text-[var(--color-text)] truncate">{name}</span>
         <ChevronDown size={15} class="ml-auto text-[var(--color-text-faint)]" />
       </button>

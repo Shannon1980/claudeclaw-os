@@ -1,43 +1,42 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- ClaudeClaw app icon. Three claw rakes across a dark tile.
+       Mark fills ~69% of the tile height, optically centred on the macOS icon grid. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#262c3e"/>
-      <stop offset="0.55" stop-color="#141826"/>
-      <stop offset="1" stop-color="#0b0d12"/>
+    <linearGradient id="tile" x1="0.15" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#2c3358"/>
+      <stop offset="0.45" stop-color="#171b2c"/>
+      <stop offset="1" stop-color="#0a0c13"/>
     </linearGradient>
-    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
-      <stop offset="0.4" stop-color="#ffffff" stop-opacity="0"/>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.09"/>
     </linearGradient>
-    <linearGradient id="claw" x1="0" y1="0" x2="0.2" y2="1">
-      <stop offset="0" stop-color="#cdd5ff"/>
-      <stop offset="0.45" stop-color="#7c8cff"/>
-      <stop offset="1" stop-color="#4a57c8"/>
+    <linearGradient id="claw" x1="0.15" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.34" stop-color="#dfe3ff"/>
+      <stop offset="0.72" stop-color="#a3adff"/>
+      <stop offset="1" stop-color="#7c88f6"/>
     </linearGradient>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="11" result="b"/>
-      <feMerge>
-        <feMergeNode in="b"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="13" result="b"/>
+      <feColorMatrix in="b" type="matrix"
+        values="0 0 0 0 0.42  0 0 0 0 0.48  0 0 0 0 1  0 0 0 0.8 0" result="c"/>
+      <feMerge><feMergeNode in="c"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
-    <!-- One talon: blunt rounded base at top, sharp curved tip at bottom -->
-    <path id="talon" d="M 482 350
-      Q 512 322 542 350
-      Q 560 540 518 712
-      L 512 728 L 506 712
-      Q 464 540 482 350 Z"/>
+    <!-- One rake: blunt where the claw enters, razor tip where it leaves. -->
+    <path id="rake" d="M -62 -230
+      C -44 -92, 6 74, 56 248
+      C 24 68, 40 -88, 62 -228
+      Q 0 -266, -62 -230 Z"/>
   </defs>
 
-  <!-- App tile -->
-  <rect x="96" y="96" width="832" height="832" rx="190" fill="url(#bg)"/>
-  <rect x="96" y="96" width="832" height="832" rx="190" fill="url(#sheen)"/>
-  <rect x="98.5" y="98.5" width="827" height="827" rx="187.5" fill="none" stroke="#7c8cff" stroke-opacity="0.18" stroke-width="3"/>
+  <rect x="96" y="96" width="832" height="832" rx="190" fill="url(#tile)"/>
+  <rect x="97.5" y="97.5" width="829" height="829" rx="189" fill="none" stroke="url(#rim)" stroke-width="3"/>
 
-  <!-- Claw swipe: three separated talons splayed outward -->
-  <g filter="url(#glow)" fill="url(#claw)">
-    <use href="#talon" transform="translate(-150 36) rotate(-17 512 540)"/>
-    <use href="#talon" transform="translate(0 -10)"/>
-    <use href="#talon" transform="translate(150 36) rotate(17 512 540)"/>
+  <g transform="translate(447 508) rotate(28) scale(0.82)" filter="url(#glow)" fill="url(#claw)">
+    <use href="#rake" transform="translate(-200 -14) rotate(-6)"/>
+    <use href="#rake" transform="translate(6 24) scale(1.13)"/>
+    <use href="#rake" transform="translate(210 8) rotate(6) scale(1.05)"/>
   </g>
 </svg>

@@ -308,6 +308,9 @@ function bootUrl(state, detail) {
 }
 
 function createWindow() {
+  // Packaged builds take the icon from the bundle; in dev point at the source
+  // PNG so the dock/taskbar shows the app mark instead of the Electron default.
+  const devIcon = path.join(__dirname, '..', 'build', 'icon.png');
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -315,6 +318,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#0b0d12',
     title: 'ClaudeClaw',
+    ...(!app.isPackaged && fs.existsSync(devIcon) ? { icon: devIcon } : {}),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

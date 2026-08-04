@@ -1,0 +1,27 @@
+<svg width="64" height="64" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tile" x1="0.15" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#2c3358"/>
+      <stop offset="0.45" stop-color="#171b2c"/>
+      <stop offset="1" stop-color="#0a0c13"/>
+    </linearGradient>
+    <linearGradient id="claw" x1="0.15" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.34" stop-color="#dfe3ff"/>
+      <stop offset="0.72" stop-color="#a3adff"/>
+      <stop offset="1" stop-color="#7c88f6"/>
+    </linearGradient>
+    <path id="rake" d="M -62 -230
+      C -44 -92, 6 74, 56 248
+      C 24 68, 40 -88, 62 -228
+      Q 0 -266, -62 -230 Z"/>
+  </defs>
+
+  <rect x="32" y="32" width="960" height="960" rx="220" fill="url(#tile)"/>
+
+  <g transform="translate(447 508) rotate(28) scale(0.9)" fill="url(#claw)">
+    <use href="#rake" transform="translate(-200 -14) rotate(-6)"/>
+    <use href="#rake" transform="translate(6 24) scale(1.13)"/>
+    <use href="#rake" transform="translate(210 8) rotate(6) scale(1.05)"/>
+  </g>
+</svg>
