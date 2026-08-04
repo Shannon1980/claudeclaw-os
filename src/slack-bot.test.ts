@@ -23,6 +23,27 @@ describe('createSlackSender (send-only Slack poster for sub-agents)', () => {
     expect(postMessage.mock.calls[0][0].text).toContain('hello from aos cron');
   });
 
+  it('posts the body as rich_text blocks, keeping mrkdwn as the preview text', async () => {
+    const { client, postMessage } = fakeClient();
+    const sender = createSlackSender(client, 'U123');
+    await sender.postToUser('Status: **green**\n\n- ship it');
+    const arg = postMessage.mock.calls[0][0];
+    expect(arg.blocks[0].type).toBe('rich_text');
+    expect(arg.blocks[0].elements.some((e: any) => e.type === 'rich_text_list')).toBe(true);
+    // text is the notification fallback only — still mrkdwn.
+    expect(arg.text).toContain('*green*');
+  });
+
+  it('falls back to a plain mrkdwn post when Slack rejects the blocks', async () => {
+    const { client, postMessage } = fakeClient();
+    postMessage.mockRejectedValueOnce(new Error('invalid_blocks'));
+    const sender = createSlackSender(client, 'U123');
+    await sender.postToUser('**important**');
+    expect(postMessage).toHaveBeenCalledTimes(2);
+    expect(postMessage.mock.calls[1][0].blocks).toBeUndefined();
+    expect(postMessage.mock.calls[1][0].text).toBe('*important*');
+  });
+
   it('caches the resolved DM channel across calls (opens once)', async () => {
     const { client, open, postMessage } = fakeClient();
     const sender = createSlackSender(client, 'U123');
@@ -116,7 +137,7 @@ describe('classifyFile', () => {
 });
 
 describe('buildTaskResultBlocks (rich task output)', () => {
-  it('renders a header (status + title), a body section, and a reply-in-thread footer', () => {
+  it('renders a header (status + title), a rich_text body, and a reply-in-thread footer', () => {
     const { blocks, overflow } = buildTaskResultBlocks({
       title: 'Draft the Q3 board update',
       body: 'Here is the **draft** with three sections.',
@@ -127,9 +148,10 @@ describe('buildTaskResultBlocks (rich task output)', () => {
     expect(blocks[0]).toMatchObject({ type: 'header' });
     expect(blocks[0].text.text).toContain('✅');
     expect(blocks[0].text.text).toContain('Draft the Q3 board update');
-    // Body becomes a mrkdwn section, markdown converted to Slack mrkdwn (*bold*).
-    const section = blocks.find((b: any) => b.type === 'section');
-    expect(section.text.text).toContain('*draft*');
+    // Body becomes a rich_text block: emphasis is a style flag, not markup.
+    const body = blocks.find((b: any) => b.type === 'rich_text');
+    const bold = body.elements[0].elements.find((e: any) => e.style?.bold);
+    expect(bold.text).toBe('draft');
     // Footer is a context block telling the operator how to send feedback.
     const context = blocks[blocks.length - 1];
     expect(context.type).toBe('context');
@@ -157,9 +179,9 @@ describe('buildTaskResultBlocks (rich task output)', () => {
       status: 'completed',
       taskId: 'm-big',
     });
-    // header + up to 8 sections + context, never exceeding Slack's 50-block cap.
+    // header + up to 8 body blocks + context, never exceeding Slack's 50-block cap.
     expect(blocks.length).toBeLessThanOrEqual(50);
-    const sections = blocks.filter((b: any) => b.type === 'section');
+    const sections = blocks.filter((b: any) => b.type === 'rich_text');
     expect(sections.length).toBe(8);
     expect(overflow.length).toBeGreaterThan(0);
   });

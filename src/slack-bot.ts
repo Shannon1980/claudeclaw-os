@@ -25,6 +25,7 @@ import { messageQueue } from './message-queue.js';
 import { processUserMessage, clearSessionBaseline, type TransportCallbacks, type ProcessOptions } from './message-core.js';
 import { getAvailableAgents } from './orchestrator.js';
 import { getSecurityStatus, audit } from './security.js';
+import { markdownToBlocks } from './slack-rich-text.js';
 import { abortActiveQuery } from './state.js';
 import { transcribeAudio, voiceCapabilities } from './voice.js';
 
@@ -194,6 +195,38 @@ export function isAuthorisedSlack(userId: string | undefined): boolean {
   return userId === ALLOWED_SLACK_USER_ID;
 }
 
+/** The Web API surface the rich-text poster needs (narrow, so it's mockable). */
+type PostingClient = Pick<WebClient, 'chat'>;
+
+/**
+ * Post Markdown to Slack as Block Kit rich_text.
+ *
+ * The `text` field still carries the mrkdwn rendering: with `blocks` present
+ * Slack only uses it for the notification/preview line, and it doubles as the
+ * fallback body if Slack ever rejects the blocks (never drop output).
+ */
+async function postRichText(
+  client: PostingClient,
+  channel: string,
+  markdown: string,
+  extra: Record<string, unknown> = {},
+): Promise<{ ts?: string }> {
+  const fallback = formatForSlack(markdown);
+  const blocks = markdownToBlocks(markdown);
+  if (!blocks.length) {
+    const res = await client.chat.postMessage({ channel, text: fallback || markdown, ...extra });
+    return { ts: res.ts as string | undefined };
+  }
+  try {
+    const res = await client.chat.postMessage({ channel, text: fallback, blocks, ...extra });
+    return { ts: res.ts as string | undefined };
+  } catch (err) {
+    logger.warn({ err }, 'Slack rejected rich_text blocks — falling back to mrkdwn');
+    const res = await client.chat.postMessage({ channel, text: fallback, ...extra });
+    return { ts: res.ts as string | undefined };
+  }
+}
+
 /**
  * Build the transport callbacks that bind the shared message core to a single
  * Slack conversation (a DM channel, or a channel thread for @mentions).
@@ -210,11 +243,14 @@ function buildSlackCallbacks(
     chatId,
     agentId,
     source: 'slack',
-    format: formatForSlack,
+    // Identity: the agent's raw Markdown is what sendFormatted turns into
+    // rich_text blocks. Pre-converting to mrkdwn here would throw away the
+    // structure (lists, code, tables) the blocks are built from.
+    format: (text) => text,
     maxLen: SLACK_MAX_LEN,
-    sendFormatted: async (text) => {
-      const res = await client.chat.postMessage({ channel, text, ...thread });
-      return { messageId: res.ts };
+    sendFormatted: async (markdown) => {
+      const { ts } = await postRichText(client, channel, markdown, thread);
+      return { messageId: ts };
     },
     sendPlain: async (text) => {
       const res = await client.chat.postMessage({ channel, text, mrkdwn: false, ...thread });
@@ -540,29 +576,36 @@ export interface TaskResultPost {
 
 // Slack Block Kit hard limits we build within.
 const HEADER_MAX = 150; // header block plain_text
-const SECTION_MAX = 2900; // section mrkdwn (Slack's ceiling is 3000; leave slack)
-const MAX_SECTIONS = 8; // body sections in the anchor message; the rest thread below
+const SECTION_MAX = 2900; // body chunk size (well inside Slack's per-element ceiling)
+const MAX_SECTIONS = 8; // body blocks in the anchor message; the rest thread below
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Render a mission-task result as Block Kit: a header (status + title), the
- * body as one or more mrkdwn sections, and a context footer telling the
+ * body as one or more rich_text blocks, and a context footer telling the
  * operator they can reply in-thread to request changes. Long bodies overflow
- * into plain threaded follow-ups (returned separately) so the anchor message
- * stays within Slack's 50-block ceiling.
+ * into threaded follow-ups (returned separately, still Markdown) so the anchor
+ * message stays within Slack's 50-block ceiling.
  */
 export function buildTaskResultBlocks(post: TaskResultPost): { blocks: any[]; overflow: string[] } {
   const emoji = post.status === 'needs_you' ? '⏳' : '✅';
   const via = post.agentId ? `via ${post.agentId} · ` : '';
   const header = `${emoji} ${post.title}`.slice(0, HEADER_MAX);
 
-  const chunks = splitMessage(formatForSlack(post.body) || '_(no output)_', SECTION_MAX);
-  const shown = chunks.slice(0, MAX_SECTIONS);
-  const overflow = chunks.slice(MAX_SECTIONS);
+  const chunks = splitMessage(post.body?.trim() || '_(no output)_', SECTION_MAX);
+  const body: any[] = [];
+  const overflow: string[] = [];
+  for (const chunk of chunks) {
+    if (body.length >= MAX_SECTIONS) {
+      overflow.push(chunk);
+      continue;
+    }
+    body.push(...markdownToBlocks(chunk));
+  }
 
   const blocks: any[] = [
     { type: 'header', text: { type: 'plain_text', text: header, emoji: true } },
-    ...shown.map((c) => ({ type: 'section', text: { type: 'mrkdwn', text: c } })),
+    ...body,
     {
       type: 'context',
       elements: [
@@ -789,8 +832,8 @@ export function createSlackBot(): SlackBot {
         logger.warn('Cannot post to Slack user: ALLOWED_SLACK_USER_ID not set');
         return;
       }
-      for (const chunk of splitMessage(formatForSlack(text), SLACK_MAX_LEN)) {
-        await app.client.chat.postMessage({ channel, text: chunk }).catch((err) =>
+      for (const chunk of splitMessage(text, SLACK_MAX_LEN)) {
+        await postRichText(app.client, channel, chunk).catch((err) =>
           logger.error({ err }, 'Slack postToUser failed'),
         );
       }
@@ -812,9 +855,9 @@ export function createSlackBot(): SlackBot {
         // existing root on a re-run (so the whole loop stays in one thread).
         const rootTs = post.threadTs ?? (res.ts as string | undefined);
         for (const extra of overflow) {
-          await app.client.chat
-            .postMessage({ channel, text: extra, ...(rootTs ? { thread_ts: rootTs } : {}) })
-            .catch((err) => logger.error({ err }, 'Slack postTaskResult overflow failed'));
+          await postRichText(app.client, channel, extra, rootTs ? { thread_ts: rootTs } : {}).catch(
+            (err) => logger.error({ err }, 'Slack postTaskResult overflow failed'),
+          );
         }
         // On a re-run we already have the anchor stored — signal "don't overwrite".
         return post.threadTs ? undefined : (res.ts as string | undefined);
@@ -862,8 +905,8 @@ export function createSlackSender(
         logger.warn('Cannot post to Slack user: ALLOWED_SLACK_USER_ID not set');
         return;
       }
-      for (const chunk of splitMessage(formatForSlack(text), SLACK_MAX_LEN)) {
-        await client.chat.postMessage({ channel, text: chunk }).catch((err) =>
+      for (const chunk of splitMessage(text, SLACK_MAX_LEN)) {
+        await postRichText(client, channel, chunk).catch((err) =>
           logger.error({ err }, 'Slack sender postToUser failed'),
         );
       }
