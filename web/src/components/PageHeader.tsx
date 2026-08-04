@@ -1,4 +1,5 @@
 import type { ComponentChildren } from 'preact';
+import { Logo } from './Logo';
 
 export interface PageHeaderProps {
   title: string;
@@ -11,6 +12,9 @@ export function PageHeader({ title, breadcrumb, actions, tabs }: PageHeaderProps
   return (
     <div class="border-b border-[var(--color-border)]">
       <div class="flex items-center gap-3 px-6 py-3">
+        {/* Brand mark sits at the head of the row as a watermark, not a second
+         *  logo competing with the sidebar tile — hence text-faint. */}
+        <Logo size={14} class="shrink-0 text-[var(--color-text-faint)]" />
         {breadcrumb && (
           <div class="flex items-center gap-2 text-[12px] text-[var(--color-text-muted)]">
             <span>{breadcrumb}</span>

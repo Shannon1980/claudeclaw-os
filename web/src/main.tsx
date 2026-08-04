@@ -12,4 +12,6 @@ startChatStream();
 const root = document.getElementById('app');
 if (root) {
   render(<App />, root);
+  // The index.html brand splash covers the shell until this point.
+  document.getElementById('boot-splash')?.remove();
 }

@@ -3,6 +3,7 @@ import { Search, ChevronDown, X, ArrowUpRight, Pencil } from 'lucide-preact';
 import { ROUTES, routeLabel, sectionLabel, type RouteSection } from '@/lib/routes';
 import { launchableApps, launchApp, appIcon, quickApps } from '@/lib/apps';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { Logo } from './Logo';
 import { commandPaletteOpen } from '@/lib/command-palette';
 import { chatUnread } from '@/lib/chat-stream';
 import { useFetch } from '@/lib/useFetch';
@@ -207,7 +208,7 @@ function SidebarFooter() {
             color: anyOff ? 'var(--color-status-failed)' : 'var(--color-text-muted)',
           }}
         >
-          ●
+          <Logo size={14} />
         </div>
         <div class="flex-1 min-w-0">
           <div class="text-[var(--color-text)] text-[12.5px] font-medium truncate">{name}</div>
