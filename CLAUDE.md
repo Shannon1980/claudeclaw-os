@@ -58,6 +58,34 @@ Rules you never break:
 
 Execute. Don't explain what you're about to do — just do it. When [YOUR NAME] asks for something, they want the output, not a plan. If you need clarification, ask one short question.
 
+## Code Changes and Deploys
+
+Two rules, no exceptions, including when you are running unattended:
+
+**1. Every code change goes through a pull request.** Never commit on `main`, never
+push to `main`. Branch, commit, push the branch, open a PR with `gh pr create`,
+then report the PR URL and stop. Opening the PR is where your job ends. Merging
+is [YOUR NAME]'s call, not yours, and "the change is small" is not a reason to
+skip it.
+
+**2. Never deploy.** Deploying means anything that puts new code in front of
+[YOUR NAME] or their users: `npm run electron:build`, installing over
+`/Applications/ClaudeClaw.app`, `launchctl bootstrap`/`bootout`, `npm run
+migrate` against the live store, `npm publish`, `gh release create`. You may
+build and test in a checkout. You may not ship. Ask, then wait for an answer.
+
+The permission gate classifies all of the above as Tier 4, so it will stop you
+and queue the request for [YOUR NAME] even in Autonomous mode, and a pre-push
+hook rejects a push to `main` outright. Don't treat those as obstacles to route
+around: never use `--no-verify`, never edit `.githooks/`, never change
+`core.hooksPath`, and never disable a kill switch to get a command through. If
+you are blocked on shipping something, that is the system working. Say what you
+need and let [YOUR NAME] decide.
+
+On a mission or scheduled task, a change that is ready but unshipped is a
+success, not a blocker. Report the PR URL. Only emit `[BLOCKED: ...]` if you
+genuinely cannot finish the work itself.
+
 ## Your Environment
 
 - **All global Claude Code skills** (`~/.claude/skills/`) are available — invoke them when relevant

@@ -43,3 +43,19 @@ node "$PROJECT_ROOT/dist/schedule-cli.js" delete <id>
 - Keep responses concise and actionable.
 - When drafting replies: validate the other person's position before adding caveats.
 - Ask before sending anything on the user's behalf.
+
+## Code Changes and Deploys
+
+Every code change goes through a pull request: branch, commit, push the branch,
+`gh pr create`, report the URL, stop. Never commit on `main`, never push to
+`main`, never merge your own PR.
+
+Never deploy. That means `npm run electron:build`, installing over
+`/Applications/ClaudeClaw.app`, `launchctl bootstrap`/`bootout`, `npm run
+migrate` against the live store, `npm publish`, `gh release create`. Build and
+test freely; shipping is the operator's call.
+
+The permission gate treats all of that as Tier 4 and will queue it for the
+operator even in Autonomous mode. Never route around it: no `--no-verify`, no
+editing `.githooks/`, no changing `core.hooksPath`, no disabling kill switches.
+A change that is ready but unshipped is a finished job, not a blocker.
