@@ -102,7 +102,8 @@ import {
 } from './db.js';
 import { computeNextRun, projectCronRuns, triggerRoutineRun } from './scheduler.js';
 import { assembleRoutineDraft } from './routine-draft.js';
-import { generateContent, parseJsonResponse } from './gemini.js';
+import { parseJsonResponse } from './gemini.js';
+import { classifyTaskAgent } from './task-router.js';
 import { getSecurityStatus } from './security.js';
 import { AGENT_ID_RE, SLACK_CHANNEL_RE, agentExists, listAgentIds, loadAgentConfig, refreshWarRoomRoster, resolveAgentDir, setAgentModel, setAgentProfile, setAgentSlackChannel } from './agent-config.js';
 import {
@@ -231,48 +232,6 @@ export function toJsonEnvelope(rows: Array<Record<string, unknown>>): {
   rows: Array<Record<string, unknown>>;
 } {
   return { exported_at: new Date().toISOString(), count: rows.length, rows };
-}
-
-async function classifyTaskAgent(prompt: string): Promise<string | null> {
-  const agentIds = listAgentIds();
-  const validAgents = ['main', ...agentIds];
-  const agentDescriptions = agentIds.map((id) => {
-    try {
-      const config = loadAgentConfig(id);
-      return `- ${id}: ${config.description}`;
-    } catch { return `- ${id}: (no description)`; }
-  });
-
-  const classificationPrompt = `Given these agents and their roles:
-- main: Primary assistant, general tasks, anything that doesn't clearly fit another agent
-${agentDescriptions.join('\n')}
-
-Which ONE agent is best suited for this task?
-Task: "${prompt.slice(0, 500)}"
-
-Reply with JSON: {"agent": "agent_id"}`;
-
-  // Primary path: Claude Haiku via OAuth — same auth the agents use, no
-  // free-tier quota wall. Gemini classification used to 429 here and
-  // surface a 500 to the dashboard, blocking the auto-assign UI.
-  try {
-    const raw = await extractViaClaude(classificationPrompt);
-    const parsed = parseJsonResponse<{ agent: string }>(raw);
-    if (parsed?.agent && validAgents.includes(parsed.agent)) return parsed.agent;
-  } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : err }, 'Haiku classify failed, falling back to Gemini');
-  }
-
-  // Fallback: Gemini. Wrapped so a 429 doesn't bubble up — we'd rather
-  // assign to 'main' than fail the request.
-  try {
-    const response = await generateContent(classificationPrompt);
-    const parsed = parseJsonResponse<{ agent: string }>(response);
-    if (parsed?.agent && validAgents.includes(parsed.agent)) return parsed.agent;
-  } catch (err) {
-    logger.warn({ err: err instanceof Error ? err.message : err }, 'Gemini classify failed, defaulting to main');
-  }
-  return 'main';
 }
 
 // Meeting id format: wr_<timestampBase36>_<6-hex-random>. Regex also allows
@@ -2135,6 +2094,9 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
   // Auto-assign all unassigned tasks. MUST register before /:id/auto-assign
   // so the static path is not captured by the parameterized route.
   app.post('/api/mission/tasks/auto-assign-all', async (c) => {
+    if (!killSwitches.isEnabled('MISSION_AUTO_ASSIGN_ENABLED')) {
+      return c.json({ error: 'Auto-assign is disabled (MISSION_AUTO_ASSIGN_ENABLED)' }, 503);
+    }
     const tasks = getUnassignedMissionTasks();
     if (tasks.length === 0) return c.json({ assigned: 0, results: [] });
 
@@ -2154,8 +2116,11 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return c.json({ assigned: results.length, results });
   });
 
-  // Auto-assign a single task via Gemini classification
+  // Auto-assign a single task via the shared task router (Haiku → Gemini → main)
   app.post('/api/mission/tasks/:id/auto-assign', async (c) => {
+    if (!killSwitches.isEnabled('MISSION_AUTO_ASSIGN_ENABLED')) {
+      return c.json({ error: 'Auto-assign is disabled (MISSION_AUTO_ASSIGN_ENABLED)' }, 503);
+    }
     const id = c.req.param('id');
     const task = getMissionTask(id);
     if (!task) return c.json({ error: 'Not found' }, 404);
@@ -2190,7 +2155,10 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const validAgents = ['main', ...listAgentIds()];
     if (!validAgents.includes(newAgent)) return c.json({ error: 'Unknown agent' }, 400);
     const ok = reassignMissionTask(id, newAgent);
-    return c.json({ ok });
+    // A silent {ok:false} 200 here used to make the UI toast "Assigned" while
+    // nothing moved. Fail loudly instead so the client can say why.
+    if (!ok) return c.json({ error: 'Task not reassignable in its current status' }, 409);
+    return c.json({ ok, task: getMissionTask(id) });
   });
 
   app.delete('/api/mission/tasks/:id', (c) => {

@@ -3436,11 +3436,28 @@ export function cleanupOldMissionTasks(olderThanDays = 7): number {
   return txn();
 }
 
+/**
+ * Move a task to a different teammate. A queued task moves as-is. A task the
+ * previous teammate kicked back or crashed on (needs_you / failed) is the
+ * other case an operator actually reroutes — that one goes back to the queue
+ * on the new agent so it runs again, with the prior outcome preserved as a
+ * run version (completeMissionTask already recorded it) and the task thread
+ * intact for the new agent's prompt.
+ */
 export function reassignMissionTask(id: string, newAgent: string): boolean {
-  const result = db.prepare(
+  const queued = db.prepare(
     `UPDATE mission_tasks SET assigned_agent = ? WHERE id = ? AND status = 'queued'`,
   ).run(newAgent, id);
-  return result.changes > 0;
+  if (queued.changes > 0) return true;
+
+  const rerouted = db.prepare(
+    `UPDATE mission_tasks
+       SET assigned_agent = ?, status = 'queued', result = NULL, error = NULL,
+           completed_at = NULL, started_at = NULL,
+           blocked_on = NULL, blocked_since = NULL
+     WHERE id = ? AND status IN ('needs_you', 'failed')`,
+  ).run(newAgent, id);
+  return rerouted.changes > 0;
 }
 
 export function assignMissionTask(id: string, agent: string): boolean {

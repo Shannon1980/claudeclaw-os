@@ -38,6 +38,7 @@ import {
   deleteMissionTask,
   setMissionTaskBlocked,
   requeueMissionTask,
+  reassignMissionTask,
   addTaskMessage,
   getTaskMessages,
   getMissionTaskRuns,
@@ -669,6 +670,53 @@ describe('database', () => {
       completeMissionTask('nb-3', 'blocked', 'needs_you', 'why');
       expect(deleteMissionTask('nb-3')).toBe(true);
       expect(getHomeSummary().needsYou.some((t) => t.id === 'nb-3')).toBe(false);
+    });
+  });
+
+  describe('reassignMissionTask (move work between teammates)', () => {
+    it('moves a queued task without touching its status', () => {
+      createMissionTask('ra-1', 'Queued work', 'p', 'research');
+      expect(reassignMissionTask('ra-1', 'comms')).toBe(true);
+      const task = getMissionTask('ra-1');
+      expect(task?.assigned_agent).toBe('comms');
+      expect(task?.status).toBe('queued');
+    });
+
+    it('requeues a needs_you task on the new teammate with the outcome cleared', () => {
+      createMissionTask('ra-2', 'Kicked back', 'p', 'research');
+      claimNextMissionTask('research');
+      completeMissionTask('ra-2', 'stuck, need a path', 'needs_you', 'path truncated');
+
+      expect(reassignMissionTask('ra-2', 'ops')).toBe(true);
+      const task = getMissionTask('ra-2');
+      expect(task?.assigned_agent).toBe('ops');
+      expect(task?.status).toBe('queued');
+      expect(task?.result).toBeNull();
+      expect(task?.error).toBeNull();
+      expect(task?.completed_at).toBeNull();
+      expect(task?.started_at).toBeNull();
+    });
+
+    it('requeues a failed task on the new teammate', () => {
+      createMissionTask('ra-3', 'Crashed', 'p', 'research');
+      claimNextMissionTask('research');
+      completeMissionTask('ra-3', null, 'failed', 'timed out');
+
+      expect(reassignMissionTask('ra-3', 'comms')).toBe(true);
+      const task = getMissionTask('ra-3');
+      expect(task?.assigned_agent).toBe('comms');
+      expect(task?.status).toBe('queued');
+    });
+
+    it('refuses to move a running or completed task', () => {
+      createMissionTask('ra-4', 'In flight', 'p', 'research');
+      claimNextMissionTask('research');
+      expect(reassignMissionTask('ra-4', 'comms')).toBe(false);
+      expect(getMissionTask('ra-4')?.assigned_agent).toBe('research');
+
+      completeMissionTask('ra-4', 'done', 'completed');
+      expect(reassignMissionTask('ra-4', 'comms')).toBe(false);
+      expect(getMissionTask('ra-4')?.status).toBe('completed');
     });
   });
 
