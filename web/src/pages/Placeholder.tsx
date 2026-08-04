@@ -1,4 +1,5 @@
 import { PageHeader } from '@/components/PageHeader';
+import { Logo } from '@/components/Logo';
 
 interface Props {
   title: string;
@@ -18,6 +19,7 @@ export function Placeholder({ title, description, hideRoadmapNote }: Props) {
       <PageHeader title={title} />
       <div class="flex-1 flex items-center justify-center px-6 py-12">
         <div class="max-w-md text-center">
+          <Logo size={34} class="mx-auto mb-4 text-[var(--color-text-faint)] opacity-60" />
           <div class="text-[var(--color-text)] text-[15px] font-medium mb-1.5">{title}</div>
           <div class="text-[var(--color-text-muted)] text-[13px] leading-relaxed">{description}</div>
           {!hideRoadmapNote && (
