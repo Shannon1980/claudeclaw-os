@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { readEnvFile } from './env.js';
+import { readEnvFile, resolveEnvFile } from './env.js';
 
 const envConfig = readEnvFile([
   'TELEGRAM_BOT_TOKEN',
@@ -157,6 +157,17 @@ const dataDir = process.env.CLAUDECLAW_DATA_DIR;
 export const STORE_DIR = dataDir
   ? path.join(dataDir, 'store')
   : path.resolve(PROJECT_ROOT, 'store');
+
+/**
+ * Root for operator-created writable state that is NOT the db/store — e.g. the
+ * War Room Python venv. Equals PROJECT_ROOT in dev/terminal, so the repo layout
+ * is unchanged; in a packaged .app it is the per-user data dir, the only place
+ * the operator can actually create anything.
+ */
+export const DATA_DIR = dataDir ?? PROJECT_ROOT;
+
+/** Absolute path of the .env this process read. See env.ts:resolveEnvFile. */
+export const ENV_FILE = resolveEnvFile();
 
 // ── External config directory ────────────────────────────────────────
 // Personal config files (CLAUDE.md, agent.yaml, agent CLAUDE.md) can live

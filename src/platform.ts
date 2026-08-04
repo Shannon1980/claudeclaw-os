@@ -5,6 +5,7 @@
  * os.platform() checks everywhere, route through these helpers.
  */
 
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execSync, spawn } from 'child_process';
@@ -124,6 +125,31 @@ export function getVenvPython(venvDir: string): string {
   return IS_WINDOWS
     ? path.join(venvDir, 'Scripts', 'python.exe')
     : path.join(venvDir, 'bin', 'python');
+}
+
+/**
+ * Pick a `<root>/<subdir>/.venv` interpreter from an ordered list of roots.
+ *
+ * A packaged .app keeps code in a read-only bundle, so a venv can only exist
+ * under the writable data dir; a dev checkout has it next to the code. Passing
+ * both roots (data dir first) resolves either layout with one call.
+ *
+ * `found` is false when no candidate exists — `python` then points at the
+ * preferred (first) candidate so error messages name where to create it.
+ * Duplicate roots collapse, so dev (where the roots are equal) reports one path.
+ */
+export function resolveVenvPython(
+  roots: string[],
+  subdir: string,
+): { python: string; venvDir: string; found: boolean; candidates: string[] } {
+  const candidates = [...new Set(roots)].map((root) => path.join(root, subdir, '.venv'));
+  const venvDir = candidates.find((dir) => fs.existsSync(getVenvPython(dir)));
+  return {
+    python: getVenvPython(venvDir ?? candidates[0]),
+    venvDir: venvDir ?? candidates[0],
+    found: venvDir !== undefined,
+    candidates,
+  };
 }
 
 /**

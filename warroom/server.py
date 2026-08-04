@@ -112,7 +112,16 @@ def load_env():
     # there first: relying on a bundle-side .env means a missing symlink takes
     # the whole voice server down with "Missing required API keys" (exit 1),
     # which then burns all three crash respawns.
+    #
+    # CLAUDECLAW_ENV_FILE wins when present: the Node service passes the exact
+    # file its own readEnvFile read, so the two cannot drift (it resolves to
+    # cwd/.env when no data dir is set, which is not PROJECT_ROOT/.env when the
+    # service was started from elsewhere). The data-dir guess stays as the
+    # fallback for a hand-run server.py that has no parent to ask.
     candidates = []
+    override = os.environ.get("CLAUDECLAW_ENV_FILE")
+    if override:
+        candidates.append(Path(override))
     data_dir = os.environ.get("CLAUDECLAW_DATA_DIR")
     if data_dir:
         candidates.append(Path(data_dir) / ".env")

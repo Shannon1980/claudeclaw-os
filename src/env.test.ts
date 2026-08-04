@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { readEnvFile } from './env.js';
+import { readEnvFile, resolveEnvFile } from './env.js';
 
 const TMP_DIR = '/tmp/claudeclaw-env-test';
 const TMP_ENV = path.join(TMP_DIR, '.env');
@@ -177,5 +177,18 @@ describe('readEnvFile honors CLAUDECLAW_DATA_DIR', () => {
     vi.spyOn(process, 'cwd').mockReturnValue(DATA_DIR);
     const result = readEnvFile(['KEY']);
     expect(result).toEqual({ KEY: 'from-cwd' });
+  });
+
+  // warroom/server.py loads the .env itself (readEnvFile keeps secrets out of
+  // process.env, so the Python child can't inherit them). It is handed this
+  // path via CLAUDECLAW_ENV_FILE, so it must be the file readEnvFile read —
+  // existence is irrelevant, it is a path computation.
+  it('resolveEnvFile returns the same file readEnvFile reads', () => {
+    process.env.CLAUDECLAW_DATA_DIR = DATA_DIR;
+    expect(resolveEnvFile()).toBe(DATA_ENV);
+
+    delete process.env.CLAUDECLAW_DATA_DIR;
+    vi.spyOn(process, 'cwd').mockReturnValue('/tmp/some-cwd');
+    expect(resolveEnvFile()).toBe('/tmp/some-cwd/.env');
   });
 });
