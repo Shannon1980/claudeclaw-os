@@ -16,7 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
-import { _initTestDatabase, createMissionTask, claimNextMissionTask, completeMissionTask } from './db.js';
+import { _initTestDatabase, createMissionTask, claimNextMissionTask, completeMissionTask, createScheduledTask } from './db.js';
 import { buildDashboardApp } from './dashboard.js';
 import { resolveAgentDir } from './agent-config.js';
 import type { Hono } from 'hono';
@@ -279,6 +279,78 @@ describe('GET /api/tasks (scheduled)', () => {
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body).toMatchObject({ tasks: expect.any(Array) });
+  });
+});
+
+describe('PATCH /api/tasks/:id next_run (move to a date)', () => {
+  it('moves next_run to the requested epoch without touching the cron', async () => {
+    const target = Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60;
+    createScheduledTask('move-me', 'daily brief', '0 9 * * *', Math.floor(Date.now() / 1000) + 60);
+
+    const res = await app.request('/api/tasks/move-me' + Q, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ next_run: target }),
+    });
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.task).toMatchObject({ id: 'move-me', next_run: target, schedule: '0 9 * * *' });
+  });
+
+  it('rejects a non-numeric next_run (400)', async () => {
+    createScheduledTask('bad-move', 'p', '0 9 * * *', Math.floor(Date.now() / 1000) + 60);
+    const res = await app.request('/api/tasks/bad-move' + Q, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ next_run: 'tomorrow' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/schedule/calendar', () => {
+  it('rejects a missing or inverted range (400)', async () => {
+    expect((await get('/api/schedule/calendar')).status).toBe(400);
+    expect((await get('/api/schedule/calendar?from=200&to=100')).status).toBe(400);
+  });
+
+  it('returns occurrences in range: stored next_run plus projected cron fires', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    // Overdue task: next_run a day ago, cron far in the future so projections
+    // don't muddy the assertion window.
+    createScheduledTask('cal-overdue', 'audit SignMeUp coverage', '0 9 1 1 *', now - 24 * 60 * 60);
+    // Recurring daily task: next_run in an hour, projects more fires in-range.
+    createScheduledTask('cal-daily', 'daily email briefing', '0 */6 * * *', now + 60 * 60);
+
+    const from = now - 2 * 24 * 60 * 60;
+    const to = now + 3 * 24 * 60 * 60;
+    const res = await get(`/api/schedule/calendar?from=${from}&to=${to}`);
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+
+    const overdue = body.items.filter((i: any) => i.id === 'cal-overdue' && !i.projected);
+    expect(overdue).toHaveLength(1);
+    expect(overdue[0]).toMatchObject({ overdue: true, occurs_at: now - 24 * 60 * 60 });
+
+    const daily = body.items.filter((i: any) => i.id === 'cal-daily');
+    expect(daily.length).toBeGreaterThan(1);
+    expect(daily[0]).toMatchObject({ projected: false, overdue: false });
+    expect(daily.slice(1).every((i: any) => i.projected)).toBe(true);
+    // Sorted ascending, all inside [from, to)
+    const times = body.items.map((i: any) => i.occurs_at);
+    expect([...times].sort((a, b) => a - b)).toEqual(times);
+    expect(times.every((t: number) => t >= from && t < to)).toBe(true);
+  });
+
+  it('surfaces a paused task only via its stored next_run (no projections)', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    createScheduledTask('cal-paused', 'paused hourly', '0 * * * *', now + 60 * 60);
+    await app.request('/api/tasks/cal-paused/pause' + Q, { method: 'POST' });
+
+    const body = await jsonOf(await get(`/api/schedule/calendar?from=${now}&to=${now + 24 * 60 * 60}`));
+    const rows = body.items.filter((i: any) => i.id === 'cal-paused');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'paused', projected: false, overdue: false });
   });
 });
 

@@ -100,7 +100,7 @@ import {
   markAgentSuggestionActed,
   getRecentlySuggestedSplits,
 } from './db.js';
-import { computeNextRun, triggerRoutineRun } from './scheduler.js';
+import { computeNextRun, projectCronRuns, triggerRoutineRun } from './scheduler.js';
 import { assembleRoutineDraft } from './routine-draft.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { getSecurityStatus } from './security.js';
@@ -1619,15 +1619,18 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return c.json({ ok: true });
   });
 
-  // Edit a scheduled task: prompt, schedule (cron), and/or agent_id.
+  // Edit a scheduled task: prompt, schedule (cron), agent_id, and/or next_run.
   // Returns the updated next_run so the UI can reflect the new firing time
-  // without waiting for the 30s poll.
+  // without waiting for the 30s poll. `next_run` (epoch seconds) moves a single
+  // upcoming fire to a specific date without touching the cron — the schedule
+  // resumes normally after that run.
   app.patch('/api/tasks/:id', async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json().catch(() => ({})) as {
       prompt?: string;
       schedule?: string;
       agent_id?: string;
+      next_run?: number;
     };
     const all = getAllScheduledTasks();
     const existing = all.find((t) => t.id === id);
@@ -1653,6 +1656,14 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       if (!agentId) return c.json({ ok: false, error: 'agent_id cannot be empty' }, 400);
       patch.agentId = agentId;
     }
+    // Explicit next_run wins over the schedule-derived one (checked last).
+    if (body.next_run !== undefined) {
+      const at = body.next_run;
+      if (typeof at !== 'number' || !Number.isFinite(at) || at <= 0) {
+        return c.json({ ok: false, error: 'next_run must be a positive epoch-seconds number' }, 400);
+      }
+      patch.nextRun = Math.floor(at);
+    }
 
     updateScheduledTask(id, patch);
     const updated = getAllScheduledTasks().find((t) => t.id === id);
@@ -1671,6 +1682,60 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const id = c.req.param('id');
     resumeScheduledTask(id);
     return c.json({ ok: true });
+  });
+
+  // Calendar feed: every scheduled item that lands inside [from, to), one row
+  // per occurrence. The persisted next_run is the source of truth for the FIRST
+  // occurrence (it may sit in the past — an overdue task shows on the day it was
+  // due, flagged `overdue`); later occurrences are projected from the cron.
+  // Paused tasks surface their stored next_run only (they won't actually fire),
+  // flagged by status so the UI can grey them out.
+  app.get('/api/schedule/calendar', (c) => {
+    const from = Number(c.req.query('from'));
+    const to = Number(c.req.query('to'));
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+      return c.json({ error: 'from/to must be epoch seconds with to > from' }, 400);
+    }
+    if (to - from > 92 * 24 * 60 * 60) {
+      return c.json({ error: 'range too large (max 92 days)' }, 400);
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const items: Array<{
+      id: string;
+      occurs_at: number;
+      title: string;
+      agent_id: string;
+      source: string;
+      status: string;
+      schedule: string;
+      overdue: boolean;
+      projected: boolean;
+    }> = [];
+
+    for (const t of getAllScheduledTasks()) {
+      const title = t.prompt.length > 140 ? t.prompt.slice(0, 137) + '…' : t.prompt;
+      const base = {
+        id: t.id, title, agent_id: t.agent_id, source: t.source,
+        status: t.status, schedule: t.schedule,
+      };
+      if (t.next_run >= from && t.next_run < to) {
+        items.push({ ...base, occurs_at: t.next_run, overdue: t.status === 'active' && t.next_run < now, projected: false });
+      }
+      if (t.status !== 'active') continue;
+      // Project recurrences after next_run; skip crons the parser rejects
+      // (legacy rows) rather than failing the whole feed.
+      try {
+        const projectFrom = Math.max(from, t.next_run);
+        for (const at of projectCronRuns(t.schedule, projectFrom, to, 50)) {
+          if (at === t.next_run) continue;
+          items.push({ ...base, occurs_at: at, overdue: false, projected: true });
+        }
+      } catch { /* unparseable cron — surface next_run only */ }
+    }
+
+    items.sort((a, b) => a.occurs_at - b.occurs_at);
+    return c.json({ from, to, items });
   });
 
   // ── Routines (Phase 2, RTN-01/02/04) ─────────────────────────────────

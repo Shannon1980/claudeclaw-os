@@ -630,3 +630,26 @@ export function computeNextRun(cronExpression: string): number {
   const interval = CronExpressionParser.parse(cronExpression);
   return Math.floor(interval.next().getTime() / 1000);
 }
+
+/**
+ * Project a cron's firing times inside [fromSec, toSec), soonest first.
+ * Feeds the dashboard calendar view; `limit` bounds pathological crons
+ * (e.g. every-minute) so one task can't flood the payload.
+ */
+export function projectCronRuns(
+  cronExpression: string,
+  fromSec: number,
+  toSec: number,
+  limit = 50,
+): number[] {
+  const interval = CronExpressionParser.parse(cronExpression, {
+    currentDate: new Date(fromSec * 1000),
+  });
+  const runs: number[] = [];
+  while (runs.length < limit) {
+    const at = Math.floor(interval.next().getTime() / 1000);
+    if (at >= toSec) break;
+    runs.push(at);
+  }
+  return runs;
+}

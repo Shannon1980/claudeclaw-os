@@ -3,6 +3,7 @@ import {
   Network, Activity, ListChecks, BookOpen,
   Swords,
   Settings,
+  CalendarDays,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
 import { term, type TermKey } from './vocabulary';
@@ -28,6 +29,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/mission',    label: 'Mission Control', vocabKey: 'nav.home',      section: 'workspace',    icon: LayoutGrid,    shortcut: 'g m' },
   { path: '/projects',   label: 'Projects',        vocabKey: 'nav.projects',  section: 'workspace',    icon: FolderKanban,  shortcut: 'g p' },
   { path: '/routines',   label: 'Routines',        vocabKey: 'nav.routines',  section: 'workspace',    icon: Repeat,        shortcut: 'g s' },
+  { path: '/calendar',   label: 'Calendar',        vocabKey: 'nav.calendar',  section: 'workspace',    icon: CalendarDays,  shortcut: 'g l' },
   { path: '/agents',     label: 'Agents',          vocabKey: 'nav.team',      section: 'workspace',    icon: Users,         shortcut: 'g a' },
   { path: '/chat',       label: 'Chat',            vocabKey: 'nav.chat',      section: 'workspace',    icon: MessageSquare, shortcut: 'g c' },
 

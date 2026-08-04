@@ -8,7 +8,9 @@ import { useState } from 'preact/hooks';
 import {
   Inbox, Hourglass, CheckCircle2, X, Wand2, Sparkles, Trash2, ArrowRight,
   Clock, Undo2, PauseCircle, RotateCcw, ChevronLeft, ChevronRight, History,
+  CalendarDays,
 } from 'lucide-preact';
+import { Link } from 'wouter-preact';
 import { Pill, StatusDot } from '@/components/Pill';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { ApprovalItem, type Approval } from '@/components/ApprovalItem';
@@ -79,6 +81,15 @@ export function NeedsYouCard({ needsYou, approvals, today, starters, agents, age
         <span class="text-[13px] font-semibold text-[var(--color-text)]">{title}</span>
         {hasNeeds && <span class="text-[11px] text-[var(--color-text-muted)] tabular-nums">{needsCount}</span>}
         <span class="ml-auto text-[11px] text-[var(--color-text-faint)]">{subtitle}</span>
+        {variant === 'home' && (
+          <Link
+            href="/calendar"
+            class="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
+            title="Calendar view"
+          >
+            <CalendarDays size={12} /> Calendar
+          </Link>
+        )}
       </div>
       <div class="p-2.5 space-y-1.5">
         {hasNeeds ? (
@@ -98,16 +109,7 @@ export function NeedsYouCard({ needsYou, approvals, today, starters, agents, age
         ) : (
           <>
             {todayItems.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => onSuggest?.(`Help me get ready for: ${s.text}`)}
-                class="w-full text-left flex items-center gap-2 px-3 py-2 rounded-md bg-[var(--color-elevated)] border border-[var(--color-border)] text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] transition-colors"
-              >
-                <Clock size={12} class="text-[var(--color-accent)] shrink-0" />
-                <span class="flex-1 truncate">Coming up — {s.text}</span>
-                {s.when && <span class="text-[10px] text-[var(--color-text-faint)] tabular-nums shrink-0">{formatRelativeTime(s.when)}</span>}
-              </button>
+              <TodayItem key={s.id} item={s} onSuggest={onSuggest} onChange={onChange} />
             ))}
             {starterItems.map((s) => (
               <button
@@ -127,6 +129,114 @@ export function NeedsYouCard({ needsYou, approvals, today, starters, agents, age
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Default the move-to picker to tomorrow 9am local — the most common "not
+ *  today" answer — formatted for <input type="datetime-local">. */
+function defaultMoveTarget(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** One "Coming up" row. The Today list is scheduled work (routines + cron
+ *  tasks), so each row can be moved to a specific date (rewrites next_run,
+ *  the cron resumes after) or deleted outright. */
+function TodayItem({ item, onSuggest, onChange }: {
+  item: TodaySuggestion; onSuggest?: (text: string) => void; onChange: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [moveTo, setMoveTo] = useState(defaultMoveTarget);
+
+  async function move() {
+    const at = Math.floor(new Date(moveTo).getTime() / 1000);
+    if (!Number.isFinite(at)) return;
+    setBusy(true);
+    try {
+      await apiPatch(`/api/tasks/${item.id}`, { next_run: at });
+      setPicking(false);
+      onChange();
+      pushToast({ tone: 'success', title: 'Moved', description: `Next run ${new Date(at * 1000).toLocaleString()}.` });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Could not move', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setBusy(false); }
+  }
+
+  async function remove() {
+    if (!confirm('Delete this scheduled item? Its schedule and history go with it.')) return;
+    setBusy(true);
+    try {
+      await apiDelete(`/api/tasks/${item.id}`);
+      onChange();
+      pushToast({ tone: 'success', title: 'Deleted', description: 'Removed from the schedule.' });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Delete failed', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div class="rounded-md bg-[var(--color-elevated)] border border-[var(--color-border)]">
+      <div class="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => onSuggest?.(`Help me get ready for: ${item.text}`)}
+          class="flex-1 min-w-0 text-left flex items-center gap-2 text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
+        >
+          <Clock size={12} class="text-[var(--color-accent)] shrink-0" />
+          <span class="flex-1 truncate">Coming up — {item.text}</span>
+          {item.when && <span class="text-[10px] text-[var(--color-text-faint)] tabular-nums shrink-0">{formatRelativeTime(item.when)}</span>}
+        </button>
+        <button
+          type="button"
+          onClick={() => setPicking(!picking)}
+          disabled={busy}
+          class="p-1 rounded text-[var(--color-text-faint)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-40 shrink-0"
+          title="Move to a date"
+        >
+          <CalendarDays size={13} />
+        </button>
+        <button
+          type="button"
+          onClick={remove}
+          disabled={busy}
+          class="p-1 rounded text-[var(--color-text-faint)] hover:text-[var(--color-status-failed)] transition-colors disabled:opacity-40 shrink-0"
+          title="Delete"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+      {picking && (
+        <div class="flex items-center gap-2 px-3 pb-2">
+          <input
+            type="datetime-local"
+            value={moveTo}
+            onInput={(e) => setMoveTo((e.target as HTMLInputElement).value)}
+            disabled={busy}
+            class="bg-[var(--color-card)] border border-[var(--color-border)] rounded text-[11px] text-[var(--color-text)] px-2 py-1 outline-none focus:border-[var(--color-accent)] disabled:opacity-40"
+          />
+          <button
+            type="button"
+            onClick={move}
+            disabled={busy || !moveTo}
+            class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium bg-[var(--color-accent-soft)] text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white transition-colors disabled:opacity-40"
+          >
+            <ArrowRight size={11} /> {busy ? '…' : 'Move'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPicking(false)}
+            disabled={busy}
+            class="px-2 py-1 rounded text-[10.5px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors disabled:opacity-40"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }
