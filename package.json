@@ -12,7 +12,7 @@
     "build:server": "tsc",
     "start": "node dist/index.js",
     "electron": "node scripts/run-electron.mjs .",
-    "electron:dev": "vite build && node scripts/run-electron.mjs .",
+    "electron:dev": "npm run build && node scripts/run-electron.mjs .",
     "electron:build": "npm run build && electron-builder install-app-deps && electron-builder",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit",
