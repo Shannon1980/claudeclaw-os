@@ -1,6 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
-import { markdownToBlocks, markdownToRichTextElements, parseInline } from './slack-rich-text.js';
+import {
+  markdownToBlocks,
+  markdownToRichTextElements,
+  parseInline,
+  postRichText,
+} from './slack-rich-text.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const els = (md: string): any[] => markdownToRichTextElements(md);
@@ -163,5 +168,42 @@ describe('markdownToBlocks', () => {
   it('returns nothing for empty input so callers can post plain instead', () => {
     expect(markdownToBlocks('')).toEqual([]);
     expect(markdownToBlocks('   \n\n  ')).toEqual([]);
+  });
+});
+
+describe('postRichText', () => {
+  const poster = (postMessage: any) => ({ chat: { postMessage } }) as any;
+
+  it('posts blocks with mrkdwn as the notification text', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ts: '1.1' });
+    const res = await postRichText(poster(postMessage), 'C1', '- one\n- two', { thread_ts: '9.9' });
+
+    const args = postMessage.mock.calls[0][0];
+    expect(args.channel).toBe('C1');
+    expect(args.thread_ts).toBe('9.9');
+    expect(args.blocks[0].type).toBe('rich_text');
+    expect(args.text).toBeTruthy();
+    expect(res.ts).toBe('1.1');
+  });
+
+  it('falls back to mrkdwn when Slack rejects the blocks', async () => {
+    const postMessage = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('invalid_blocks'))
+      .mockResolvedValueOnce({ ts: '2.2' });
+    const res = await postRichText(poster(postMessage), 'C1', 'hello **world**');
+
+    expect(postMessage).toHaveBeenCalledTimes(2);
+    expect(postMessage.mock.calls[1][0].blocks).toBeUndefined();
+    expect(postMessage.mock.calls[1][0].text).toContain('*world*');
+    expect(res.ts).toBe('2.2');
+  });
+
+  it('posts plain text when there is nothing to render as blocks', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ ts: '3.3' });
+    await postRichText(poster(postMessage), 'C1', '   ');
+
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(postMessage.mock.calls[0][0].blocks).toBeUndefined();
   });
 });
