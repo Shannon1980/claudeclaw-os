@@ -107,12 +107,26 @@ logger = logging.getLogger("warroom.server")
 # ─── Shared helpers ────────────────────────────────────────────────────────
 
 def load_env():
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
-        logger.info("Loaded env from %s", env_path)
-    else:
-        logger.warning("No .env found at %s, relying on shell environment", env_path)
+    # The Node service passes CLAUDECLAW_ENV_FILE so we read the same .env it
+    # did. That matters in a packaged .app, where PROJECT_ROOT is the read-only
+    # bundle and the real .env lives in the per-user data dir. The service keeps
+    # secrets out of its own environment, so inheriting them is not an option.
+    candidates = []
+    override = os.environ.get("CLAUDECLAW_ENV_FILE")
+    if override:
+        candidates.append(Path(override))
+    candidates.append(PROJECT_ROOT / ".env")
+
+    for env_path in candidates:
+        if env_path.exists():
+            load_dotenv(env_path)
+            logger.info("Loaded env from %s", env_path)
+            return
+
+    logger.warning(
+        "No .env found (looked in: %s), relying on shell environment",
+        ", ".join(str(p) for p in candidates),
+    )
 
 
 def check_required_keys(required: dict):

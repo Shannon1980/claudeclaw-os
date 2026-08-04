@@ -6,7 +6,7 @@ import { createBot } from './bot.js';
 import { createSlackBot, createSlackSender, type SlackBot, type SlackSender } from './slack-bot.js';
 import { splitMessage } from './format.js';
 import { checkPendingMigrations } from './migrations.js';
-import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
+import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, DATA_DIR, ENV_FILE, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
 import { startDashboard } from './dashboard.js';
 import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
 import { initSecurity, setAuditCallback } from './security.js';
@@ -20,7 +20,7 @@ import { initOrchestrator } from './orchestrator.js';
 import { initScheduler } from './scheduler.js';
 import { syncAosCronJobs } from './aos-cron.js';
 import { setTelegramConnected, setSlackConnected, setBotInfo } from './state.js';
-import { getVenvPython, killProcess } from './platform.js';
+import { killProcess, resolveVenvPython } from './platform.js';
 
 // Parse --agent flag
 const agentFlagIndex = process.argv.indexOf('--agent');
@@ -265,21 +265,26 @@ async function main(): Promise<void> {
     // War Room voice server (auto-start if enabled, with auto-respawn)
     if (WARROOM_ENABLED) {
       const { spawn } = await import('child_process');
-      const venvPython = getVenvPython(path.join(PROJECT_ROOT, 'warroom', '.venv'));
+      // The venv is operator-created state, so in a packaged .app it lives under
+      // the writable data dir, not the read-only bundle PROJECT_ROOT points at.
+      // Check the data dir first, then the repo layout (dev: both are equal).
+      const venv = resolveVenvPython([DATA_DIR, PROJECT_ROOT], 'warroom');
+      const venvPython = venv.python;
+      // server.py ships with the code, so it is always under PROJECT_ROOT.
       const serverScript = path.join(PROJECT_ROOT, 'warroom', 'server.py');
+      const requirements = path.join(PROJECT_ROOT, 'warroom', 'requirements.txt');
 
       // Write agent roster so the Python voice stack can discover agents.
       // Shared helper so agent-create can call it too on new/delete.
       refreshWarRoomRoster();
 
-      if (fs.existsSync(venvPython) && fs.existsSync(serverScript)) {
+      if (venv.found && fs.existsSync(serverScript)) {
         // Pre-flight: verify Python dependencies are actually installed
         const { spawnSync } = await import('child_process');
         const depCheck = spawnSync(venvPython, ['-c', 'import pipecat'], { stdio: 'pipe', timeout: 10000 });
         if (depCheck.status !== 0) {
           const msg = 'War Room Python dependencies not installed. Run:\n\n'
-            + 'source warroom/.venv/bin/activate\n'
-            + 'pip install -r warroom/requirements.txt\n\n'
+            + `"${venvPython}" -m pip install -r "${requirements}"\n\n`
             + 'Then restart the bot.';
           logger.error(msg);
           void notifyUser(`War Room could not start.\n\n${msg}`).catch(() => {});
@@ -308,7 +313,15 @@ async function main(): Promise<void> {
           if (shuttingDown) return;
           const proc = spawn(venvPython, [serverScript], {
             cwd: PROJECT_ROOT,
-            env: { ...process.env, WARROOM_PORT: String(WARROOM_PORT) },
+            // readEnvFile deliberately keeps secrets out of process.env, so the
+            // Python child cannot inherit its API keys — hand it the .env path
+            // instead. Without this it looks for PROJECT_ROOT/.env, which does
+            // not exist in a packaged .app, and exits on missing keys.
+            env: {
+              ...process.env,
+              WARROOM_PORT: String(WARROOM_PORT),
+              CLAUDECLAW_ENV_FILE: ENV_FILE,
+            },
             stdio: ['ignore', 'pipe', 'pipe'],
           });
           currentProc = proc;
@@ -372,11 +385,15 @@ async function main(): Promise<void> {
         process.on('SIGINT', shutdownWarroom);
         } // end dep check else
       } else {
-        const missingVenv = !fs.existsSync(venvPython);
-        const missingScript = !fs.existsSync(serverScript);
-        const hint = missingVenv
-          ? 'Python venv not found. Run:\n\npython3 -m venv warroom/.venv\nsource warroom/.venv/bin/activate\npip install -r warroom/requirements.txt'
-          : 'warroom/server.py not found. Make sure the warroom/ directory exists.';
+        // Name the resolved paths: in a packaged .app the venv belongs under the
+        // data dir, so a repo-relative recipe would be created in the wrong place.
+        const hint = !venv.found
+          ? 'Python venv not found. Looked in:\n'
+            + venv.candidates.map((dir) => `  ${dir}`).join('\n')
+            + '\n\nRun:\n\n'
+            + `python3 -m venv "${venv.venvDir}"\n`
+            + `"${venvPython}" -m pip install -r "${requirements}"`
+          : `${serverScript} not found. Make sure the warroom/ directory exists.`;
         logger.warn('War Room enabled but cannot start: %s', hint);
         void notifyUser(`War Room is enabled but could not start.\n\n${hint}`).catch(() => {});
       }
