@@ -2,6 +2,7 @@ import { signal } from '@preact/signals';
 import { ROUTES, routeLabel } from './routes';
 import { setTheme } from './theme';
 import { term } from './vocabulary';
+import { launchableApps, launchApp } from './apps';
 
 export const commandPaletteOpen = signal(false);
 
@@ -9,7 +10,7 @@ export interface PaletteAction {
   id: string;
   label: string;
   hint?: string;
-  group: 'Navigation' | 'Actions' | 'Theme';
+  group: 'Navigation' | 'Apps' | 'Actions' | 'Theme';
   // When invoked, the palette closes itself after running.
   run: (ctx: { navigate: (path: string) => void }) => void;
 }
@@ -31,6 +32,16 @@ export function buildActions(): PaletteAction[] {
     { id: 'theme:crimson',  label: 'Theme: Crimson',  group: 'Theme', run: () => setTheme('crimson')  },
   ];
 
+  // Quick-launch apps ("Open GitHub", "Open Railway", …). Launch happens
+  // outside the SPA, so `run` ignores the navigate ctx.
+  const apps: PaletteAction[] = launchableApps().map((a) => ({
+    id: 'app:' + a.id,
+    label: 'Open ' + a.name,
+    hint: a.kind === 'app' ? 'app' : '↗',
+    group: 'Apps',
+    run: () => { void launchApp(a); },
+  }));
+
   const actions: PaletteAction[] = [
     {
       id: 'action:new-task',
@@ -47,7 +58,7 @@ export function buildActions(): PaletteAction[] {
     },
   ];
 
-  return [...nav, ...actions, ...themes];
+  return [...nav, ...apps, ...actions, ...themes];
 }
 
 // Token-aware match: every whitespace-separated token in the query must

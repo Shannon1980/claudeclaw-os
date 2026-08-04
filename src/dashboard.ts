@@ -3540,6 +3540,11 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     // their order, and the cap. Read by pickSlashRoster() in
     // src/warroom-text-orchestrator.ts. UI: web/src/pages/StandupConfig.tsx.
     'standup_config',
+    // JSON array of {id, name, kind: 'url'|'app', target}. Quick-launch
+    // apps shown in the sidebar and command palette. URL kinds open
+    // client-side; 'app' kinds launch via POST /api/apps/launch below.
+    // UI: web/src/pages/Settings.tsx, store: web/src/lib/apps.ts.
+    'quick_apps',
   ]);
   const SETTING_VALUE_MAX_BYTES = 4 * 1024;
 
@@ -3578,6 +3583,37 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     return null;
   }
 
+  // Structural check only. Target content is validated at use time: the
+  // client refuses non-http(s) URLs before window.open, and the launch
+  // endpoint below re-validates app names. Partial values (a URL mid-typing)
+  // are allowed so the Settings editor's debounced saves don't bounce.
+  function validateQuickAppsJson(value: string): string | null {
+    let parsed: unknown;
+    try { parsed = JSON.parse(value); }
+    catch { return 'quick_apps: value must be valid JSON'; }
+    if (!Array.isArray(parsed)) return 'quick_apps: value must be a JSON array';
+    if (parsed.length > 24) return 'quick_apps: max 24 apps';
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return 'quick_apps: each entry must be an object';
+      }
+      const a = entry as Record<string, unknown>;
+      if (typeof a.id !== 'string' || !a.id || a.id.length > 64) {
+        return 'quick_apps: id must be a non-empty string (max 64 chars)';
+      }
+      if (typeof a.name !== 'string' || a.name.length > 40) {
+        return 'quick_apps: name must be a string (max 40 chars)';
+      }
+      if (a.kind !== 'url' && a.kind !== 'app') {
+        return "quick_apps: kind must be 'url' or 'app'";
+      }
+      if (typeof a.target !== 'string' || a.target.length > 512) {
+        return 'quick_apps: target must be a string (max 512 chars)';
+      }
+    }
+    return null;
+  }
+
   app.patch('/api/dashboard/settings', async (c) => {
     const body = await c.req.json().catch(() => null) as { key?: string; value?: string } | null;
     if (!body || typeof body.key !== 'string' || typeof body.value !== 'string') {
@@ -3593,6 +3629,10 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       const err = validateStandupConfigJson(body.value);
       if (err) return c.json({ error: err }, 400);
     }
+    if (body.key === 'quick_apps') {
+      const err = validateQuickAppsJson(body.value);
+      if (err) return c.json({ error: err }, 400);
+    }
     // Workspace name has its own length cap so the sidebar layout stays
     // sane. Strip control chars + zero-width joiners; trim whitespace.
     let value = body.value;
@@ -3603,6 +3643,31 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     setDashboardSetting(body.key, value);
     insertAuditLog({ agentId: 'main', chatId: '', action: 'dashboard_setting_change', detail: `${body.key}=${value.slice(0, 80)}`, blocked: false });
     return c.json({ ok: true, key: body.key, value });
+  });
+
+  // ── App launcher ─────────────────────────────────────────────────────
+  // Launches a local desktop application via macOS `open -a <name>`.
+  // Only the 'app' kind of quick-launch apps hits this — URL kinds open
+  // client-side (Electron's setWindowOpenHandler routes window.open to
+  // shell.openExternal). execFile with a fixed binary and an args array
+  // means the name is never shell-interpreted; the leading-dash check
+  // stops flag injection into `open` itself.
+  app.post('/api/apps/launch', async (c) => {
+    const body = await c.req.json().catch(() => null) as { name?: string } | null;
+    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+    if (!name || name.length > 128 || name.startsWith('-')) {
+      return c.json({ error: 'expected { name: string } — an app name without a leading dash' }, 400);
+    }
+    if (process.platform !== 'darwin') {
+      return c.json({ error: 'app launching is only supported on macOS' }, 501);
+    }
+    const { execFile } = await import('child_process');
+    const ok = await new Promise<boolean>((resolve) => {
+      execFile('open', ['-a', name], { timeout: 10_000 }, (err) => resolve(!err));
+    });
+    insertAuditLog({ agentId: 'main', chatId: '', action: 'launch_app', detail: name, blocked: !ok });
+    if (!ok) return c.json({ error: `could not open "${name}" — is it installed on this Mac?` }, 404);
+    return c.json({ ok: true });
   });
 
   // ── Security & Audit ─────────────────────────────────────────────────

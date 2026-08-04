@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'wouter-preact';
-import { Search, ChevronDown, X } from 'lucide-preact';
+import { Search, ChevronDown, X, ArrowUpRight, Pencil } from 'lucide-preact';
 import { ROUTES, routeLabel, sectionLabel, type RouteSection } from '@/lib/routes';
+import { launchableApps, launchApp, appIcon, quickApps } from '@/lib/apps';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { commandPaletteOpen } from '@/lib/command-palette';
 import { chatUnread } from '@/lib/chat-stream';
@@ -107,10 +108,79 @@ export function Sidebar() {
             </div>
           );
         })}
+
+        <AppsSection collapsed={collapsed.has('apps')} />
       </nav>
 
       <SidebarFooter />
     </aside>
+  );
+}
+
+// Quick-launch apps (GitHub, Railway, Jenkins, local Mac apps, …).
+// Reads the shared quickApps signal; the list is edited in Settings.
+// Unconfigured entries (empty target) stay hidden here so the section
+// only ever shows launchable rows.
+function AppsSection({ collapsed }: { collapsed: boolean }) {
+  // Touch the signal so the section re-renders when Settings edits it.
+  void quickApps.value;
+  const apps = launchableApps();
+
+  return (
+    <div class="mt-3">
+      <div class="w-full flex items-center px-2.5 py-1.5 group">
+        <button
+          type="button"
+          onClick={() => toggleSectionCollapsed('apps')}
+          class="flex items-center gap-1.5 section-label hover:text-[var(--color-text-muted)] transition-colors"
+          aria-expanded={!collapsed}
+        >
+          <ChevronDown
+            size={11}
+            class="text-[var(--color-text-faint)] transition-transform"
+            style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+          />
+          <span>Apps</span>
+        </button>
+        <Link
+          href="/settings"
+          onClick={closeSidebar}
+          class="ml-auto p-1 rounded text-[var(--color-text-faint)] opacity-0 group-hover:opacity-100 hover:text-[var(--color-text)] transition-all"
+          aria-label="Edit apps"
+          title="Edit apps in Settings"
+        >
+          <Pencil size={11} />
+        </Link>
+      </div>
+      {!collapsed && apps.map((a) => {
+        const Icon = appIcon(a);
+        return (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => { void launchApp(a); closeSidebar(); }}
+            class="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[14px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-elevated)] transition-colors group/app"
+            title={a.kind === 'url' ? a.target : 'Open ' + a.target}
+          >
+            <Icon size={16} />
+            <span class="flex-1 text-left truncate">{a.name}</span>
+            <ArrowUpRight
+              size={13}
+              class="text-[var(--color-text-faint)] opacity-0 group-hover/app:opacity-100 transition-opacity"
+            />
+          </button>
+        );
+      })}
+      {!collapsed && apps.length === 0 && (
+        <Link
+          href="/settings"
+          onClick={closeSidebar}
+          class="block px-3 py-2 text-[12.5px] text-[var(--color-text-faint)] hover:text-[var(--color-text-muted)] transition-colors"
+        >
+          Add quick-launch apps in Settings
+        </Link>
+      )}
+    </div>
   );
 }
 

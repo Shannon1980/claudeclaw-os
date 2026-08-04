@@ -1050,6 +1050,88 @@ describe('PATCH /api/dashboard/settings standup_config', () => {
   });
 });
 
+describe('PATCH /api/dashboard/settings quick_apps', () => {
+  async function patchQuickApps(value: string) {
+    return app.request('/api/dashboard/settings' + Q, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'quick_apps', value }),
+    });
+  }
+
+  it('accepts a well-formed payload', async () => {
+    const res = await patchQuickApps(JSON.stringify([
+      { id: 'github', name: 'GitHub', kind: 'url', target: 'https://github.com' },
+      { id: 'rc', name: 'Repo Commander', kind: 'app', target: 'Repo Commander' },
+      { id: 'jenkins', name: 'Jenkins', kind: 'url', target: '' },
+    ]));
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects non-array value with 400', async () => {
+    const res = await patchQuickApps(JSON.stringify({ nope: true }));
+    expect(res.status).toBe(400);
+    expect((await jsonOf(res)).error).toMatch(/quick_apps/);
+  });
+
+  it('rejects an unknown kind with 400', async () => {
+    const res = await patchQuickApps(JSON.stringify([
+      { id: 'x', name: 'X', kind: 'script', target: 'rm -rf /' },
+    ]));
+    expect(res.status).toBe(400);
+    expect((await jsonOf(res)).error).toMatch(/kind/);
+  });
+
+  it('rejects an entry without an id with 400', async () => {
+    const res = await patchQuickApps(JSON.stringify([
+      { name: 'X', kind: 'url', target: 'https://x.com' },
+    ]));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects more than 24 apps with 400', async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      id: 'a' + i, name: 'A' + i, kind: 'url', target: 'https://a.com',
+    }));
+    const res = await patchQuickApps(JSON.stringify(many));
+    expect(res.status).toBe(400);
+    expect((await jsonOf(res)).error).toMatch(/max 24/);
+  });
+});
+
+describe('POST /api/apps/launch', () => {
+  async function launch(body: unknown) {
+    return app.request('/api/apps/launch' + Q, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('rejects a missing name with 400', async () => {
+    const res = await launch({});
+    expect(res.status).toBe(400);
+    expect(await jsonOf(res)).toMatchObject({ error: expect.any(String) });
+  });
+
+  it('rejects a leading-dash name with 400 (open flag injection)', async () => {
+    const res = await launch({ name: '-W' });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an over-long name with 400', async () => {
+    const res = await launch({ name: 'x'.repeat(200) });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 for an app that does not exist (darwin only)', async () => {
+    if (process.platform !== 'darwin') return;
+    const res = await launch({ name: 'Definitely Not An Installed App 8f3a1' });
+    expect(res.status).toBe(404);
+    expect((await jsonOf(res)).error).toMatch(/could not open/);
+  });
+});
+
 describe('GET /api/warroom/agents', () => {
   it('returns { agents: [...] } with main present', async () => {
     const res = await get('/api/warroom/agents');

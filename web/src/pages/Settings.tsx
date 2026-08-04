@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { useLocation } from 'wouter-preact';
-import { Check, Pipette, RotateCcw, ChevronDown, ChevronRight, Lock, ScrollText } from 'lucide-preact';
+import { Check, Pipette, RotateCcw, ChevronDown, ChevronRight, Lock, ScrollText, Plus, Trash2, ArrowUpRight } from 'lucide-preact';
 import { PageHeader } from '@/components/PageHeader';
 import { PageState } from '@/components/PageState';
 import { Toggle } from '@/components/Toggle';
@@ -25,6 +25,14 @@ import {
   setHotkeyMod,
   type HotkeyMod,
 } from '@/lib/personalization';
+import {
+  quickApps,
+  setQuickApps,
+  launchApp,
+  appIcon,
+  type QuickApp,
+  type QuickAppKind,
+} from '@/lib/apps';
 
 interface Health {
   killSwitches: Record<string, boolean>;
@@ -139,6 +147,13 @@ export function Settings() {
                 <HotkeyPicker />
               </Row>
             </Card>
+          </Section>
+
+          <Section
+            title="Quick-launch apps"
+            subtitle="Pinned tools shown in the sidebar and command palette. Websites open in your browser; Mac apps launch on this machine. Rows without a target stay hidden until you fill them in."
+          >
+            <QuickAppsEditor />
           </Section>
 
           <Section
@@ -368,6 +383,116 @@ function HotkeyPicker() {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ── Quick-launch apps editor ─────────────────────────────────────────
+// Edits the shared quickApps signal; every mutation persists through
+// setQuickApps (PATCH /api/dashboard/settings, key `quick_apps`). The
+// sidebar and command palette read the same signal, so edits show up
+// there immediately.
+
+const MAX_QUICK_APPS = 24;
+
+function QuickAppsEditor() {
+  const apps = quickApps.value;
+
+  function update(id: string, patch: Partial<QuickApp>) {
+    setQuickApps(apps.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  }
+  function remove(id: string) {
+    setQuickApps(apps.filter((a) => a.id !== id));
+  }
+  function add() {
+    if (apps.length >= MAX_QUICK_APPS) return;
+    const id = 'app-' + Math.random().toString(36).slice(2, 9);
+    setQuickApps([...apps, { id, name: '', kind: 'url', target: '' }]);
+  }
+
+  return (
+    <Card>
+      <div class="space-y-2">
+        {apps.map((a) => <QuickAppRow key={a.id} app={a} onChange={(p) => update(a.id, p)} onRemove={() => remove(a.id)} />)}
+        {apps.length === 0 && (
+          <div class="text-[12.5px] text-[var(--color-text-faint)] py-1">No apps yet.</div>
+        )}
+        <button
+          type="button"
+          onClick={add}
+          disabled={apps.length >= MAX_QUICK_APPS}
+          class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12.5px] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-50"
+        >
+          <Plus size={13} />
+          Add app
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function QuickAppRow({ app, onChange, onRemove }: { app: QuickApp; onChange: (p: Partial<QuickApp>) => void; onRemove: () => void }) {
+  const Icon = appIcon(app);
+  const kinds: { v: QuickAppKind; label: string }[] = [
+    { v: 'url', label: 'Website' },
+    { v: 'app', label: 'Mac app' },
+  ];
+  const needsTarget = !app.target.trim();
+  return (
+    <div class="flex flex-wrap items-center gap-2 py-1">
+      <Icon size={15} class="text-[var(--color-text-muted)] shrink-0" />
+      <input
+        type="text"
+        value={app.name}
+        onInput={(e) => onChange({ name: (e.target as HTMLInputElement).value })}
+        placeholder="Name"
+        maxLength={40}
+        class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)] w-[140px]"
+      />
+      <div class="flex items-center rounded-md border border-[var(--color-border)] overflow-hidden">
+        {kinds.map((k) => (
+          <button
+            key={k.v}
+            type="button"
+            onClick={() => onChange({ kind: k.v })}
+            class={[
+              'px-2 py-1.5 text-[11.5px] transition-colors',
+              app.kind === k.v
+                ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]',
+            ].join(' ')}
+          >
+            {k.label}
+          </button>
+        ))}
+      </div>
+      <input
+        type="text"
+        value={app.target}
+        onInput={(e) => onChange({ target: (e.target as HTMLInputElement).value })}
+        placeholder={app.kind === 'url' ? 'https://…' : 'App name, e.g. Repo Commander'}
+        class={[
+          'flex-1 min-w-[180px] bg-[var(--color-elevated)] border rounded px-2.5 py-1.5 text-[12.5px] font-mono text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]',
+          needsTarget ? 'border-[var(--color-status-failed)]/50' : 'border-[var(--color-border)]',
+        ].join(' ')}
+      />
+      <button
+        type="button"
+        onClick={() => { void launchApp(app); }}
+        disabled={needsTarget}
+        class="p-1.5 rounded text-[var(--color-text-faint)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-40"
+        title="Test launch"
+      >
+        <ArrowUpRight size={14} />
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        class="p-1.5 rounded text-[var(--color-text-faint)] hover:text-[var(--color-status-failed)] transition-colors"
+        title="Remove"
+      >
+        <Trash2 size={14} />
+      </button>
     </div>
   );
 }
