@@ -128,6 +128,54 @@ export function extractBlockedMarker(text: string): BlockedMarker {
   return { blocked, reason, text: cleaned };
 }
 
+export interface HeartbeatMarker {
+  /** True when this run is a silent beat: marker present with nothing substantial besides it. */
+  silent: boolean;
+  /** The result text with the marker stripped (what to post when not silent). */
+  text: string;
+}
+
+/**
+ * Max chars of non-marker text a [HEARTBEAT_OK] result may carry and still be
+ * suppressed. Heartbeat prompts say "output the marker and nothing else", but
+ * agents pad ("Checked everything, all quiet. [HEARTBEAT_OK]"). Above this,
+ * assume the agent found something and appended the marker by mistake — post
+ * the text rather than swallow a real finding.
+ */
+const HEARTBEAT_SILENT_MAX = 200;
+
+/**
+ * Detect a [HEARTBEAT_OK] marker in a finished scheduled task's output.
+ *
+ * Inverse of extractBlockedMarker: where [BLOCKED] escalates a normal-looking
+ * reply, [HEARTBEAT_OK] silences one. Heartbeat tasks fire every N minutes
+ * with an open-ended checklist; most beats find nothing, and posting "all
+ * clear" 30 times a day trains the operator to ignore the channel. The runner
+ * suppresses any result that is just this marker (plus incidental padding).
+ */
+export function extractHeartbeatMarker(text: string): HeartbeatMarker {
+  let found = false;
+  const cleaned = text
+    .replace(/\[HEARTBEAT[_-]?OK\]/gi, () => {
+      found = true;
+      return '';
+    })
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { silent: found && cleaned.length <= HEARTBEAT_SILENT_MAX, text: cleaned };
+}
+
+/**
+ * A heartbeat task's start/timeout/failure chatter must also stay quiet — a
+ * "Scheduled task running…" post every 30 minutes defeats the silence rule
+ * before the agent even answers. The output marker can't help there (it only
+ * exists after the run), so quietness is keyed off the prompt: heartbeat
+ * prompts always reference their HEARTBEAT.md checklist by name.
+ */
+export function isHeartbeatPrompt(prompt: string): boolean {
+  return /heartbeat/i.test(prompt);
+}
+
 /**
  * Convert Markdown to Slack mrkdwn.
  *

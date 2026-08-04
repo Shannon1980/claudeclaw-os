@@ -32,7 +32,7 @@ import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import type { GateContext } from './gate.js';
 import { formatForTelegram, splitMessage } from './bot.js';
-import { extractBlockedMarker } from './format.js';
+import { extractBlockedMarker, extractHeartbeatMarker, isHeartbeatPrompt } from './format.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { isAgentRunning } from './agent-create.js';
 import { AOS_CRON_SOURCE, parseJobFile } from './aos-cron.js';
@@ -327,12 +327,16 @@ async function runDueTasks(): Promise<void> {
     // in-flight user message to finish before running. This prevents
     // two Claude processes from hitting the same session simultaneously.
     const chatId = ALLOWED_CHAT_ID || 'scheduler';
+    // Heartbeat tasks run on a silence rule: no start announcement, and
+    // timeout/failure chatter goes to the log + dashboard only. The result
+    // itself is suppressed below when it carries [HEARTBEAT_OK].
+    const quiet = isHeartbeatPrompt(task.prompt);
     messageQueue.enqueue(chatId, async () => {
       const abortController = new AbortController();
       const timeout = setTimeout(() => abortController.abort(), TASK_TIMEOUT_MS);
 
       try {
-        await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
+        if (!quiet) await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
 
         // Run as a fresh agent call (no session — scheduled tasks are autonomous).
         // Background gate context (P-5): unattended user-scheduled task → ask/queue.
@@ -347,12 +351,24 @@ async function runDueTasks(): Promise<void> {
 
         if (result.aborted) {
           updateTaskAfterRun(task.id, nextRun, 'Timed out after 10 minutes', 'timeout');
-          await sender(`⏱ Task timed out after 10m: "${task.prompt.slice(0, 60)}..." — killed.`);
+          if (!quiet) await sender(`⏱ Task timed out after 10m: "${task.prompt.slice(0, 60)}..." — killed.`);
           logger.warn({ taskId: task.id }, 'Task timed out');
           return;
         }
 
-        const text = result.text?.trim() || 'Task completed with no output.';
+        const raw = result.text?.trim() || 'Task completed with no output.';
+        const hb = extractHeartbeatMarker(raw);
+        if (hb.silent) {
+          // Silent beat: record the run for the dashboard, skip the chat post
+          // AND the session injection — a 30-min cadence would otherwise bloat
+          // the active session with all-clear noise.
+          updateTaskAfterRun(task.id, nextRun, raw, 'success');
+          logger.info({ taskId: task.id, nextRun }, 'Heartbeat OK — suppressed');
+          return;
+        }
+
+        // Marker + substantial text = a real finding; post it marker-stripped.
+        const text = hb.text || raw;
         for (const chunk of splitMessage(formatForTelegram(text))) {
           await sender(chunk);
         }
@@ -374,7 +390,7 @@ async function runDueTasks(): Promise<void> {
 
         logger.error({ err, taskId: task.id }, 'Scheduled task failed');
         try {
-          await sender(`❌ Task failed: "${task.prompt.slice(0, 60)}..." — ${errMsg.slice(0, 200)}`);
+          if (!quiet) await sender(`❌ Task failed: "${task.prompt.slice(0, 60)}..." — ${errMsg.slice(0, 200)}`);
         } catch {
           // ignore send failure
         }

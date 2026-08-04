@@ -98,6 +98,19 @@ Other commands: `list`, `delete <id>`, `pause <id>`, `resume <id>`
 
 ---
 
+## Heartbeat (Proactive Mode)
+
+A heartbeat is a scheduled task that wakes you with the open-ended checklist in `HEARTBEAT.md` at the project root, instead of a fixed job. (Setup: copy `HEARTBEAT.md.example` to `HEARTBEAT.md` and personalize — `HEARTBEAT.md` is gitignored so real names, workspaces, and channels stay local.)
+
+```bash
+PROJECT_ROOT=$(git rev-parse --show-toplevel)
+node "$PROJECT_ROOT/dist/schedule-cli.js" create "Read HEARTBEAT.md at the project root and execute the checklist. Follow its silence rule exactly." "*/30 8-19 * * 1-5"
+```
+
+The scheduler enforces a silence rule: a result that is just `[HEARTBEAT_OK]` is suppressed (no chat post, no session injection — dashboard only), and any task whose prompt mentions "heartbeat" skips the start/timeout/failure chatter. When you are the heartbeat run, silence is the default outcome — only message [YOUR NAME] when something clears the interrupt-a-colleague bar.
+
+---
+
 ## Delegating to Other Agents
 
 When [YOUR NAME] says things like "have research look into X" or "get comms to handle Y":

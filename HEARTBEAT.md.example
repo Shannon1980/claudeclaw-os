@@ -1,0 +1,70 @@
+# Heartbeat Checklist
+
+<!--
+SETUP: copy this file to HEARTBEAT.md at the project root and personalize it.
+HEARTBEAT.md is gitignored — your real names, workspaces, channels, and
+priorities stay local. Register the beat with:
+
+  node dist/schedule-cli.js create "Read HEARTBEAT.md at the project root and execute the checklist. Follow its silence rule exactly." "*/30 8-19 * * 1-5"
+-->
+
+You are running a heartbeat: a recurring look-around, not a task [YOUR NAME] asked for. Your job is to notice what needs them before they ask. Most beats find nothing. That is the expected outcome.
+
+## The silence rule (read this twice)
+
+If nothing below clears the bar, output `[HEARTBEAT_OK]` and nothing else. The runner suppresses it and [YOUR NAME] never sees the beat.
+
+Only send a message if you would interrupt a colleague at their desk for it. When you do report, lead with the thing itself, not with "I checked X, Y, Z". Never send "all clear" prose — that's what the marker is for.
+
+## Who [YOUR NAME] is (context for judgment calls)
+
+<!-- The more real context here, the better the beat's judgment. Examples:
+     day job vs. side projects, which obligations are high-stakes, timezone,
+     work hours, what "urgent" actually means to you. -->
+
+- [Role / company — what clears the bar during work hours]
+- [Side project / second hat — what clears the bar there]
+- Timezone: [YOUR_TIMEZONE]
+- Bias toward silence: a heartbeat that interrupts flow for something low-stakes is a failed heartbeat.
+
+## Before flagging anything: check your memory
+
+Query the memories DB for what you've already flagged (source `heartbeat`):
+
+```bash
+sqlite3 "$(git rev-parse --show-toplevel)/store/claudeclaw.db" "SELECT summary FROM memories WHERE source = 'heartbeat' AND created_at > strftime('%s','now','-2 days');"
+```
+
+If an item is already there and hasn't materially changed, it does NOT clear the bar again. Re-flag only on escalation (deadline moved closer, someone followed up, it got worse).
+
+When you DO flag something, record it so the next beat stays quiet about it:
+
+```bash
+python3 -c "
+import sqlite3, time, subprocess, os
+root = subprocess.check_output(['git','rev-parse','--show-toplevel']).decode().strip()
+db = sqlite3.connect(os.path.join(root,'store','claudeclaw.db'))
+now = int(time.time())
+item = '''<one-line description of what you flagged>'''
+db.execute('INSERT INTO memories (chat_id, source, raw_text, summary, entities, topics, importance, salience, created_at, accessed_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+  ('heartbeat','heartbeat',item,item,'[]','[\"heartbeat\"]',0.6,2.0,now,now))
+db.commit()"
+```
+
+## The checklist
+
+<!-- Trim, reorder, and personalize. Each item should say what clears the bar
+     AND what never does — the negative examples are what keep beats silent. -->
+
+1. **Email** (`gmail` skill): unread messages that need a reply from [YOUR NAME], carry a deadline, or come from someone who has followed up twice. Newsletters, receipts, and FYIs never clear the bar.
+2. **Work chat** (Slack/Teams, if connected): DMs awaiting a reply, @mentions, and unanswered threads [YOUR NAME] started — especially where someone is blocked on them. List your priority channels here: [#channel-1], [#channel-2]. Social/hobby channels and bot chatter never clear the bar. When you flag, give the channel, who's waiting, and a one-line "what they need."
+3. **Calendar next 2 hours** (`google-calendar` skill): any meeting missing prep? If so, use `meeting-intelligence` to search transcripts for the last conversation with the same attendees, pull open commitments and action items, and send a short prep brief. This is the highest-value flag you can make. Also flag double-bookings.
+4. **Commitments slipping** (`meeting-intelligence` / `todo`): overdue action items. Flag anything overdue that [YOUR NAME] committed to another person. Internal someday-items don't clear the bar.
+5. **Ship/infra health** (if you deploy things): a failing production deploy, a firing security/performance advisor, or a spiking error rate clears the bar. A green build or a routine log line does not.
+6. **Mission Control**: anything sitting in "Needs you" (`mission-cli list`, look for blocked tasks). One line per stuck task.
+7. **Previously flagged items**: anything you recorded that has since resolved or escalated? Resolved: stay silent. Escalated: flag with what changed.
+
+## Output format
+
+- Nothing to report → `[HEARTBEAT_OK]` alone.
+- Something to report → the finding(s), tight, actionable, in plain text. No marker. No preamble. No "heartbeat report" framing — it should read like a sharp assistant tapping [YOUR NAME] on the shoulder.
