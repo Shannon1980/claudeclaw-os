@@ -16,7 +16,9 @@ export function CommandPalette() {
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const allActions = useMemo(() => buildActions(), []);
+  // Rebuilt on every open so late-hydrating sources (quick-launch apps)
+  // show up without a reload.
+  const allActions = useMemo(() => buildActions(), [open]);
   const visible = useMemo(() => filterActions(query, allActions), [query, allActions]);
 
   useEffect(() => {

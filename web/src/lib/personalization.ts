@@ -14,6 +14,7 @@
 
 import { signal } from '@preact/signals';
 import { apiGet, apiPatch } from './api';
+import { hydrateQuickApps } from './apps';
 
 // ── Defaults ────────────────────────────────────────────────────────────
 
@@ -59,6 +60,9 @@ export async function hydratePersonalization(): Promise<void> {
     if (typeof data?.mission_column_widths === 'string') {
       const parsed = safeParseObject(data.mission_column_widths);
       if (parsed) missionColumnWidths.value = parsed as Record<string, number>;
+    }
+    if (typeof data?.quick_apps === 'string') {
+      hydrateQuickApps(data.quick_apps);
     }
   } catch (err) {
     // Best-effort: dashboard works without personalization on a fresh
