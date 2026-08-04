@@ -52,7 +52,10 @@ export function Calendar() {
   const from = Math.floor(monthStart.getTime() / 1000);
   const to = Math.floor(nextMonthStart.getTime() / 1000);
 
-  const feed = useFetch<{ items: CalendarItem[] }>(`/api/schedule/calendar?from=${from}&to=${to}`, 30_000);
+  const feed = useFetch<{ items: CalendarItem[]; truncated?: boolean }>(
+    `/api/schedule/calendar?from=${from}&to=${to}`,
+    30_000,
+  );
   const items = feed.data?.items ?? [];
 
   // Bucket occurrences by local day for the grid and the selected-day panel.
@@ -66,10 +69,17 @@ export function Calendar() {
     return map;
   }, [items]);
 
+  // Moving months also moves the selection into the new month, otherwise the
+  // detail panel keeps describing a day that isn't on screen ("Tuesday, August
+  // 4" while you're looking at June). Land on today when it's in view, else the
+  // 1st.
   function shiftMonth(delta: number) {
     const d = new Date(year, month + delta, 1);
     setYear(d.getFullYear());
     setMonth(d.getMonth());
+    const today = new Date();
+    const sameMonth = today.getFullYear() === d.getFullYear() && today.getMonth() === d.getMonth();
+    setSelected(ymd(sameMonth ? today : d));
   }
 
   function goToday() {
@@ -88,6 +98,11 @@ export function Calendar() {
   const selectedItems = byDay.get(selected) ?? [];
   const selectedLabel = new Date(selected + 'T00:00:00')
     .toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+  // An all-blank grid reads as a page that failed to load. It usually means the
+  // schedule is real but every task is paused (paused tasks never project) or
+  // its next_run sits in another month, so say which of those it is.
+  const monthEmpty = items.length === 0;
 
   return (
     <div class="flex flex-col h-full">
@@ -129,6 +144,21 @@ export function Calendar() {
       {feed.data && (
         <div class="flex-1 min-h-0 overflow-y-auto">
           <div class="max-w-[1100px] mx-auto px-6 py-5 space-y-4">
+            {monthEmpty && (
+              <div class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg px-4 py-3 text-[11.5px] text-[var(--color-text-muted)]">
+                Nothing scheduled anywhere in {monthLabel}. Paused items only ever
+                show on their last scheduled date, so check{' '}
+                <a href="/routines" class="text-[var(--color-accent)] hover:underline">Routines</a>{' '}
+                if you expected something here.
+              </div>
+            )}
+            {feed.data.truncated && (
+              <div class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg px-4 py-3 text-[11.5px] text-[var(--color-text-muted)]">
+                This month has more occurrences than the calendar will draw, so
+                later days are incomplete. Narrow the schedule or check Routines
+                for the full picture.
+              </div>
+            )}
             <div class="bg-[var(--color-card)] border border-[var(--color-border)] rounded-lg overflow-hidden">
               <div class="grid grid-cols-7 border-b border-[var(--color-border)]">
                 {WEEKDAYS.map((d) => (

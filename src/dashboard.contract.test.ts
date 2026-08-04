@@ -342,6 +342,34 @@ describe('GET /api/schedule/calendar', () => {
     expect(times.every((t: number) => t >= from && t < to)).toBe(true);
   });
 
+  it('covers a whole month of a dense cron instead of stopping partway', async () => {
+    // */30 8-19 * * 1-5 is ~500 fires a month. The old 50-per-task cap made the
+    // back half of the month render blank with nothing saying why.
+    const monthStart = Math.floor(new Date(2026, 7, 1).getTime() / 1000);
+    const monthEnd = Math.floor(new Date(2026, 8, 1).getTime() / 1000);
+    createScheduledTask('cal-dense', 'every 30m on weekdays', '*/30 8-19 * * 1-5', monthStart + 8 * 60 * 60);
+
+    const body = await jsonOf(await get(`/api/schedule/calendar?from=${monthStart}&to=${monthEnd}`));
+    const rows = body.items.filter((i: any) => i.id === 'cal-dense');
+    expect(rows.length).toBeGreaterThan(400);
+    expect(body.truncated).toBe(false);
+    // Coverage reaches the last weekday of the month, not just the first days.
+    const lastDay = new Date(Math.max(...rows.map((r: any) => r.occurs_at)) * 1000).getDate();
+    expect(lastDay).toBeGreaterThan(27);
+  });
+
+  it('flags truncation instead of silently dropping occurrences', async () => {
+    // Every minute for a month is ~44k fires — well past the per-task bound.
+    const monthStart = Math.floor(new Date(2026, 7, 1).getTime() / 1000);
+    const monthEnd = Math.floor(new Date(2026, 8, 1).getTime() / 1000);
+    createScheduledTask('cal-flood', 'every minute', '* * * * *', monthStart + 60);
+
+    const body = await jsonOf(await get(`/api/schedule/calendar?from=${monthStart}&to=${monthEnd}`));
+    expect(body.truncated).toBe(true);
+    expect(body.truncated_tasks).toContain('cal-flood');
+    expect(body.items.length).toBeLessThanOrEqual(3000);
+  });
+
   it('surfaces a paused task only via its stored next_run (no projections)', async () => {
     const now = Math.floor(Date.now() / 1000);
     createScheduledTask('cal-paused', 'paused hourly', '0 * * * *', now + 60 * 60);

@@ -1677,6 +1677,14 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       projected: boolean;
     }> = [];
 
+    // A month of an every-30-minutes-on-weekdays cron is ~500 fires, so the old
+    // 50 cap blanked the back half of the month with nothing saying why. Bound
+    // per task high enough to cover a dense month, bound the payload overall,
+    // and tell the UI when either bound actually bit.
+    const PER_TASK_LIMIT = 750;
+    const TOTAL_LIMIT = 3000;
+    const truncatedTasks: string[] = [];
+
     for (const t of getAllScheduledTasks()) {
       const title = t.prompt.length > 140 ? t.prompt.slice(0, 137) + '…' : t.prompt;
       const base = {
@@ -1691,7 +1699,9 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
       // (legacy rows) rather than failing the whole feed.
       try {
         const projectFrom = Math.max(from, t.next_run);
-        for (const at of projectCronRuns(t.schedule, projectFrom, to, 50)) {
+        const runs = projectCronRuns(t.schedule, projectFrom, to, PER_TASK_LIMIT);
+        if (runs.length === PER_TASK_LIMIT) truncatedTasks.push(t.id);
+        for (const at of runs) {
           if (at === t.next_run) continue;
           items.push({ ...base, occurs_at: at, overdue: false, projected: true });
         }
@@ -1699,7 +1709,14 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     }
 
     items.sort((a, b) => a.occurs_at - b.occurs_at);
-    return c.json({ from, to, items });
+    const overTotal = items.length > TOTAL_LIMIT;
+    return c.json({
+      from,
+      to,
+      items: overTotal ? items.slice(0, TOTAL_LIMIT) : items,
+      truncated: overTotal || truncatedTasks.length > 0,
+      truncated_tasks: truncatedTasks,
+    });
   });
 
   // ── Routines (Phase 2, RTN-01/02/04) ─────────────────────────────────
