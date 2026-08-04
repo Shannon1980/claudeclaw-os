@@ -3,6 +3,7 @@ import { WebClient } from '@slack/web-api';
 import { SLACK_USER_TOKEN } from './config.js';
 import { saveSlackMessage } from './db.js';
 import { logger } from './logger.js';
+import { postRichText } from './slack-rich-text.js';
 
 let client: WebClient | null = null;
 
@@ -164,6 +165,13 @@ export async function getSlackMessages(channelId: string, limit = 15): Promise<S
   return messages;
 }
 
+/**
+ * Send a message to a Slack conversation as Block Kit rich_text.
+ *
+ * `text` is the agent's raw Markdown — the same input the DM transport gets —
+ * so bullets, code and emphasis render as real structure instead of literal
+ * `- ` / `**` characters. The stored copy stays Markdown.
+ */
 export async function sendSlackMessage(
   channelId: string,
   text: string,
@@ -172,11 +180,7 @@ export async function sendSlackMessage(
 ): Promise<void> {
   const web = getClient();
 
-  await web.chat.postMessage({
-    channel: channelId,
-    text,
-    ...(threadTs ? { thread_ts: threadTs } : {}),
-  });
+  await postRichText(web, channelId, text, threadTs ? { thread_ts: threadTs } : {});
 
   saveSlackMessage(channelId, channelName, 'You', text, String(Date.now() / 1000), true);
   logger.info({ channel: channelId }, 'Slack message sent');
