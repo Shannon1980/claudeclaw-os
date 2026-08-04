@@ -46,7 +46,23 @@ const TIER4_PATTERNS: RegExp[] = [
 
 // Tier 1 — read & prepare (read-only built-ins + read-only MCP).
 const TIER1_BUILTINS = new Set(['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'NotebookRead']);
-const TIER1_MCP: RegExp[] = [/(^|__)(get|list|read|search|find|fetch|summar)/i, /draft/i];
+
+// Read verbs that make an MCP tool Tier 1. Matched against the TOOL segment of
+// `mcp__<server>__<tool>` at a word boundary, not against the whole name:
+// connector tool names routinely repeat the server name first
+// (mcp__claude_ai_Slack__slack_search_public_and_private), so anchoring on
+// `(^|__)` alone missed the verb and dropped plain reads to the Tier 3 default.
+const TIER1_MCP_VERBS = /(^|[_-])(get|list|read|search|find|fetch|summar|draft)/i;
+
+// Send-ish verbs beat the Tier 1 read fast path: `gmail_send_draft` contains
+// "draft" but SENDS, so it must not classify as read-only.
+const MCP_SEND_VERBS = /(^|[_-])(send|post|publish|repl(y|ies))/i;
+
+/** The `<tool>` part of `mcp__<server>__<tool>`; the whole name if unsplittable. */
+function mcpToolSegment(toolName: string): string {
+  const parts = toolName.split('__');
+  return parts.length >= 3 ? parts.slice(2).join('__') : toolName;
+}
 
 // Tier 3 — consequential external send/post/reply/book-with-external.
 const TIER3_PATTERNS: RegExp[] = [
@@ -81,7 +97,10 @@ export function classifyTier(toolName: string, input: Record<string, unknown> = 
   if (TIER1_BUILTINS.has(toolName)) return 1;
   if (toolName === 'Write' || toolName === 'Edit' || toolName === 'NotebookEdit') return 2;
   if (toolName === 'Bash') return classifyBash(input);
-  if (TIER1_MCP.some((r) => r.test(toolName))) return 1;
+  if (toolName.startsWith('mcp__')) {
+    const tool = mcpToolSegment(toolName);
+    if (!MCP_SEND_VERBS.test(tool) && TIER1_MCP_VERBS.test(tool)) return 1;
+  }
   if (TIER3_PATTERNS.some((r) => r.test(toolName))) return 3;
   if (TIER2_PATTERNS.some((r) => r.test(toolName))) return 2;
   return 3; // D-03 safe default — never silent auto-run an unclassified tool

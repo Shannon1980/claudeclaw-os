@@ -67,6 +67,22 @@ describe('classify', () => {
     expect(classifyTier('mcp__slack__post-message')).toBe(3 as Tier);
   });
 
+  it('maps read-only MCP tools to Tier 1 even when the tool name repeats the server name', () => {
+    // Connector-style names: the read verb is mid-segment, not right after `__`.
+    expect(classifyTier('mcp__claude_ai_Slack__slack_search_public_and_private')).toBe(1 as Tier);
+    expect(classifyTier('mcp__claude_ai_Slack__slack_read_channel')).toBe(1 as Tier);
+    expect(classifyTier('mcp__claude_ai_Gmail__search_threads')).toBe(1 as Tier);
+    expect(classifyTier('mcp__gmail__gmail_list_labels')).toBe(1 as Tier);
+    expect(classifyTier('mcp__echo-ai__list_overdue_todos')).toBe(1 as Tier);
+  });
+
+  it('keeps send-ish MCP tools off the Tier 1 read path even when they mention draft', () => {
+    expect(classifyTier('mcp__gmail__gmail_send_draft')).toBe(3 as Tier);
+    expect(classifyTier('mcp__claude_ai_Slack__slack_send_message_draft')).toBe(3 as Tier);
+    // A pure draft read/prepare stays Tier 1.
+    expect(classifyTier('mcp__gmail__gmail_list_drafts')).toBe(1 as Tier);
+  });
+
   it('defaults UNKNOWN/unclassified tools to Tier 3 (D-03 safe side, never Tier 1/2)', () => {
     const t = classifyTier('mcp__mystery__do-something-unknown');
     expect(t).toBe(3 as Tier);
