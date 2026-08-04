@@ -1,3 +1,4 @@
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -21,6 +22,7 @@ const envConfig = readEnvFile([
   'DASHBOARD_TOKEN',
   'DASHBOARD_URL',
   'CLAUDECLAW_CONFIG',
+  'CLAUDECLAW_WORKSPACE',
   'DB_ENCRYPTION_KEY',
   'GOOGLE_API_KEY',
   'AGENT_TIMEOUT_MS',
@@ -177,6 +179,37 @@ const rawConfigDir =
  * Defaults to ~/.claudeclaw. Set CLAUDECLAW_CONFIG in .env or environment to override.
  */
 export const CLAUDECLAW_CONFIG = expandHome(rawConfigDir);
+
+// ── Agent workspace root (SDK cwd) ───────────────────────────────────
+// PROJECT_ROOT is where the CODE lives. In the packaged .app that is
+// /Applications/ClaudeClaw.app/Contents/Resources/app — a read-only,
+// Gatekeeper-quarantined bundle with none of the user's files in it. Using it
+// as the SDK cwd means every turn runs blind: no HEARTBEAT.md, no repo, no
+// writable scratch, and file reads outside the bundle look like permission
+// errors to the agent.
+//
+// CLAUDECLAW_WORKSPACE points at the directory the agent should actually work
+// in (normally the claudeclaw git checkout). Unset => PROJECT_ROOT, which is
+// correct for the dev/terminal path where code and workspace are the same dir.
+const rawWorkspace =
+  process.env.CLAUDECLAW_WORKSPACE || envConfig.CLAUDECLAW_WORKSPACE || '';
+
+/**
+ * Absolute path the main agent uses as its SDK cwd (CLAUDE.md, relative-path
+ * writes, project settings). Falls back to PROJECT_ROOT when unset or when the
+ * configured path does not exist.
+ */
+export const WORKSPACE_ROOT = (() => {
+  if (!rawWorkspace) return PROJECT_ROOT;
+  const resolved = expandHome(rawWorkspace);
+  if (!fs.existsSync(resolved)) {
+    console.warn(
+      `[config] CLAUDECLAW_WORKSPACE=${resolved} does not exist; falling back to ${PROJECT_ROOT}`,
+    );
+    return PROJECT_ROOT;
+  }
+  return resolved;
+})();
 
 // Telegram limits
 export const MAX_MESSAGE_LENGTH = 4096;
