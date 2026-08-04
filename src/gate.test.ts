@@ -195,6 +195,55 @@ describe('background queue deny', () => {
     expect(result).toMatchObject({ behavior: 'deny' });
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
+
+  it('still denies (never throws) when the enqueue itself fails', async () => {
+    const enqueue = vi.fn().mockImplementation(() => {
+      throw new Error('database is locked');
+    });
+    const canUseTool = makeCanUseTool({ attended: false, mode: 'balanced', overrides: {}, enqueue });
+    const result = await canUseTool('mcp__gmail__send-email', { to: 'x@y.com' }, OPTS);
+    // A dead store loses the queued row, not the whole turn.
+    expect(result).toMatchObject({ behavior: 'deny' });
+    expect(typeof (result as { message?: unknown }).message).toBe('string');
+  });
+});
+
+// The SDK validates our reply against a zod schema stricter than its .d.ts:
+// the allow variant REQUIRES `updatedInput`. A bare `{behavior:'allow'}`
+// type-checks but fails that parse, and the SDK turns the parse error into
+// `deny` with "Tool permission request failed" — silently breaking every
+// allowed tool call while the audit log still reads 'allow'.
+describe('SDK PermissionResult runtime contract', () => {
+  it('returns updatedInput alongside behavior:allow on the auto-allow path', async () => {
+    const input = { file_path: '/tmp/x' };
+    const canUseTool = makeCanUseTool({ attended: false, mode: 'autonomous', overrides: {} });
+    const result = await canUseTool('Read', input, OPTS);
+    expect(result).toEqual({ behavior: 'allow', updatedInput: input });
+  });
+
+  it('returns updatedInput alongside behavior:allow on the inline-approval path', async () => {
+    const input = { to: 'a@b.com', subject: 'hi' };
+    const canUseTool = makeCanUseTool({
+      attended: true,
+      mode: 'cautious',
+      overrides: {},
+      requestInline: vi.fn().mockResolvedValue(true),
+    });
+    const result = await canUseTool('mcp__gmail__send-email', input, OPTS);
+    expect(result).toEqual({ behavior: 'allow', updatedInput: input });
+  });
+
+  it('always carries a message on a deny so the deny variant parses too', async () => {
+    const canUseTool = makeCanUseTool({
+      attended: true,
+      mode: 'cautious',
+      overrides: {},
+      requestInline: vi.fn().mockResolvedValue(false),
+    });
+    const result = await canUseTool('mcp__gmail__send-email', { to: 'a@b.com' }, OPTS);
+    expect(result).toMatchObject({ behavior: 'deny' });
+    expect((result as { message: string }).message.length).toBeGreaterThan(0);
+  });
 });
 
 describe('audit recorded', () => {
