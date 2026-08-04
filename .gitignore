@@ -135,3 +135,9 @@ agents/*/.claude/claudex/
 
 # Electron icon build intermediate (generated from build/icon.svg)
 build/icon.iconset/
+
+# Personalized heartbeat checklists — real names, workspaces, channels.
+# Copy HEARTBEAT.md.example to HEARTBEAT.md and edit locally.
+HEARTBEAT.md
+HEARTBEAT.*.md
+!HEARTBEAT.md.example

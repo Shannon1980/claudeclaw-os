@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { formatForSlack, splitMessage, extractFileMarkers, extractBlockedMarker } from './format.js';
+import { formatForSlack, splitMessage, extractFileMarkers, extractBlockedMarker, extractHeartbeatMarker, isHeartbeatPrompt } from './format.js';
 
 describe('formatForSlack', () => {
   it('converts bold to single asterisks', () => {
@@ -145,5 +145,55 @@ describe('extractBlockedMarker', () => {
   it('does not false-positive on prose about removing a block', () => {
     const r = extractBlockedMarker('I unblocked the pipeline and shipped the fix.');
     expect(r.blocked).toBe(false);
+  });
+});
+
+describe('extractHeartbeatMarker', () => {
+  it('suppresses a bare [HEARTBEAT_OK]', () => {
+    const r = extractHeartbeatMarker('[HEARTBEAT_OK]');
+    expect(r.silent).toBe(true);
+    expect(r.text).toBe('');
+  });
+
+  it('suppresses the marker with short padding around it', () => {
+    const r = extractHeartbeatMarker('Checked email, calendar, and todos. All quiet.\n[HEARTBEAT_OK]');
+    expect(r.silent).toBe(true);
+  });
+
+  it('tolerates case and hyphen variants', () => {
+    expect(extractHeartbeatMarker('[heartbeat_ok]').silent).toBe(true);
+    expect(extractHeartbeatMarker('[HEARTBEAT-OK]').silent).toBe(true);
+  });
+
+  it('does NOT suppress a marker attached to substantial text', () => {
+    const finding = 'Your 2pm with the CMS team has no prep doc. Last transcript with them shows three open commitments: '
+      + 'the staffing plan revision, the Q3 spend forecast, and the ATO evidence package. Drafted notes below.\n\n'
+      + '1. Staffing plan: ...\n2. Spend forecast: ...\n3. ATO evidence: ...';
+    const r = extractHeartbeatMarker(`${finding}\n[HEARTBEAT_OK]`);
+    expect(r.silent).toBe(false);
+    expect(r.text).not.toContain('HEARTBEAT');
+    expect(r.text).toContain('no prep doc');
+  });
+
+  it('leaves unmarked output alone', () => {
+    const r = extractHeartbeatMarker('Here is the report you asked for.');
+    expect(r.silent).toBe(false);
+    expect(r.text).toBe('Here is the report you asked for.');
+  });
+
+  it('does not false-positive on prose mentioning a heartbeat', () => {
+    const r = extractHeartbeatMarker('The heartbeat is ok and running every 30 minutes.');
+    expect(r.silent).toBe(false);
+  });
+});
+
+describe('isHeartbeatPrompt', () => {
+  it('matches prompts referencing HEARTBEAT.md', () => {
+    expect(isHeartbeatPrompt('Read HEARTBEAT.md at the project root and execute the checklist.')).toBe(true);
+    expect(isHeartbeatPrompt('run the heartbeat checklist')).toBe(true);
+  });
+
+  it('does not match ordinary scheduled prompts', () => {
+    expect(isHeartbeatPrompt('Summarize my unread email every morning')).toBe(false);
   });
 });
