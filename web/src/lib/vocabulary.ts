@@ -48,6 +48,7 @@ export const TERMS = {
   'nav.home':      { operator: 'Home',        builder: 'Mission Control' },
   'nav.projects':  { operator: 'Projects',    builder: 'Projects' },
   'nav.routines':  { operator: 'Routines',    builder: 'Scheduled' },
+  'nav.calendar':  { operator: 'Calendar',    builder: 'Calendar' },
   'nav.team':      { operator: 'Team',        builder: 'Agents' },
   'nav.chat':      { operator: 'Chat',        builder: 'Chat' },
   'nav.knowledge': { operator: 'Knowledge',   builder: 'Memories' },

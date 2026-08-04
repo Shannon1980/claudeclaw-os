@@ -12,6 +12,7 @@ import { Memory } from '@/pages/Memory';
 import { HiveMind } from '@/pages/HiveMind';
 import { Team } from '@/pages/Team';
 import { Routines } from '@/pages/Routines';
+import { Calendar } from '@/pages/Calendar';
 import { Activity } from '@/pages/Activity';
 import { Audit } from '@/pages/Audit';
 import { Usage } from '@/pages/Usage';
@@ -52,6 +53,7 @@ export function App() {
           <Route path="/projects/:id"><Projects /></Route>
           <Route path="/projects"><Projects /></Route>
           <Route path="/routines"><Routines /></Route>
+          <Route path="/calendar"><Calendar /></Route>
           <Route path="/agents"><Team /></Route>
           <Route path="/agents/:id/files"><AgentFiles /></Route>
           <Route path="/chat"><Chat /></Route>
