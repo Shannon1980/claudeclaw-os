@@ -203,6 +203,25 @@ describe('classifyError', () => {
     expect(classified.recovery.userMessage).toContain('claude login');
   });
 
+  it('classifies an unresumable session id as stale_session, not auth', () => {
+    // Moving the SDK cwd (dev checkout -> packaged .app) orphans the stored
+    // session: `--resume` dies instantly at zero cost, which is byte-identical
+    // to a rejected credential unless the resume text is matched first.
+    const classified = classifyError(
+      new Error('Claude Code process exited with code 1'),
+      undefined,
+      { isError: true, resultText: 'No conversation found with session ID: d6ff3d06-57db-4bdf-805b-ab86104e68fc' },
+    );
+    expect(classified.category).toBe('stale_session');
+    expect(classified.recovery.shouldRetry).toBe(true);
+    expect(classified.recovery.userMessage).not.toContain('claude login');
+  });
+
+  it('classifies a raw no-conversation-found throw as stale_session', () => {
+    const classified = classifyError(new Error('No conversation found with session ID: abc-123'));
+    expect(classified.category).toBe('stale_session');
+  });
+
   // ── Session / usage caps (account-level, not credentials) ──────────
 
   it('classifies a claude.ai session limit message as session_limit', () => {

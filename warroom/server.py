@@ -107,12 +107,27 @@ logger = logging.getLogger("warroom.server")
 # ─── Shared helpers ────────────────────────────────────────────────────────
 
 def load_env():
-    env_path = PROJECT_ROOT / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
-        logger.info("Loaded env from %s", env_path)
-    else:
-        logger.warning("No .env found at %s, relying on shell environment", env_path)
+    # In the packaged .app, PROJECT_ROOT is the read-only bundle and the real
+    # .env lives in the writable data dir the Electron shell passes down. Look
+    # there first: relying on a bundle-side .env means a missing symlink takes
+    # the whole voice server down with "Missing required API keys" (exit 1),
+    # which then burns all three crash respawns.
+    candidates = []
+    data_dir = os.environ.get("CLAUDECLAW_DATA_DIR")
+    if data_dir:
+        candidates.append(Path(data_dir) / ".env")
+    candidates.append(PROJECT_ROOT / ".env")
+
+    for env_path in candidates:
+        if env_path.exists():
+            load_dotenv(env_path)
+            logger.info("Loaded env from %s", env_path)
+            return
+
+    logger.warning(
+        "No .env found at %s, relying on shell environment",
+        " or ".join(str(p) for p in candidates),
+    )
 
 
 def check_required_keys(required: dict):

@@ -13,6 +13,7 @@ vi.mock('./env.js', () => ({
 vi.mock('./config.js', () => ({
   AGENT_MAX_TURNS: 30,
   PROJECT_ROOT: '/tmp/test',
+  WORKSPACE_ROOT: '/tmp/test',
   agentCwd: undefined,
 }));
 
@@ -98,6 +99,38 @@ describe('runAgentWithRetry', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onRetry).toHaveBeenCalledWith(1, expect.objectContaining({ category: 'rate_limit' }));
   }, 15000);
+
+  it('drops an unresumable session id and retries as a new session', async () => {
+    // The stored transcript is gone (cwd changed), so `resume` must not be
+    // passed again — otherwise every turn in the chat fails forever.
+    let callCount = 0;
+    const resumeArgs: Array<string | undefined> = [];
+    mockQuery.mockImplementation((opts: { options: { resume?: string } }) => {
+      callCount++;
+      resumeArgs.push(opts.options.resume);
+      if (callCount === 1) {
+        return mockQueryEvents([
+          {
+            type: 'result',
+            subtype: 'error_during_execution',
+            is_error: true,
+            result: 'No conversation found with session ID: sess-gone',
+            total_cost_usd: 0,
+          },
+        ])();
+      }
+      return mockQueryEvents([
+        { type: 'system', subtype: 'init', session_id: 'sess-new' },
+        resultEvent('Fresh start'),
+      ])();
+    });
+
+    const result = await runAgentWithRetry('hi', 'sess-gone', noop);
+
+    expect(result.text).toBe('Fresh start');
+    expect(result.newSessionId).toBe('sess-new');
+    expect(resumeArgs).toEqual(['sess-gone', undefined]);
+  });
 
   it('does not retry non-retryable errors', async () => {
     const authError = new AgentError('auth', {

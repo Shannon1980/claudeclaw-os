@@ -3,7 +3,7 @@ import path from 'path';
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
-import { AGENT_MAX_TURNS, PROJECT_ROOT, agentCwd } from './config.js';
+import { AGENT_MAX_TURNS, WORKSPACE_ROOT, agentCwd } from './config.js';
 import { readEnvFile } from './env.js';
 import { classifyError, AgentError } from './errors.js';
 import { logger } from './logger.js';
@@ -37,7 +37,7 @@ export function loadMcpServers(allowlist?: string[], projectCwd?: string): Recor
   // Load from project settings (.claude/settings.json in cwd). `projectCwd`
   // lets callers (e.g. the voice bridge) target a specific sub-agent's
   // settings file without needing the module-level `agentCwd` to be set.
-  const projectSettings = path.join(projectCwd ?? agentCwd ?? PROJECT_ROOT, '.claude', 'settings.json');
+  const projectSettings = path.join(projectCwd ?? agentCwd ?? WORKSPACE_ROOT, '.claude', 'settings.json');
   // Load from user settings (~/.claude/settings.json)
   const userSettings = path.join(
     process.env.HOME ?? '/tmp',
@@ -176,7 +176,7 @@ async function* singleTurn(text: string): AsyncGenerator<{
  * @param cwd        Working directory for the SDK subprocess. Determines which
  *                   CLAUDE.md + .claude/settings.json get loaded. Defaults to
  *                   the process-global agentCwd (the running agent) or
- *                   PROJECT_ROOT. Pass a sub-agent's dir to run it in-process.
+ *                   WORKSPACE_ROOT. Pass a sub-agent's dir to run it in-process.
  */
 /**
  * The SAFE default gate context for any caller that omits one (P-5).
@@ -267,8 +267,8 @@ export async function runAgent(
 
   // Resolve the working directory once: explicit per-call cwd (sub-agent
   // routed to a Slack channel) wins, else the process-global agent cwd, else
-  // the project root.
-  const effectiveCwd = cwd ?? agentCwd ?? PROJECT_ROOT;
+  // the workspace root (CLAUDECLAW_WORKSPACE, or PROJECT_ROOT when unset).
+  const effectiveCwd = cwd ?? agentCwd ?? WORKSPACE_ROOT;
 
   try {
     // Load MCP servers from project + user settings files, filtered by agent
@@ -527,6 +527,9 @@ export async function runAgentWithRetry(
   gateCtx?: GateContext,
 ): Promise<AgentResult> {
   let lastError: AgentError | undefined;
+  // Dropped to undefined when the stored id turns out to be unresumable, so
+  // the retry starts a fresh session instead of failing the same way forever.
+  let currentSessionId = sessionId;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -537,13 +540,22 @@ export async function runAgentWithRetry(
           : model;
 
       return await runAgent(
-        message, sessionId, onTyping, onProgress,
+        message, currentSessionId, onTyping, onProgress,
         currentModel, abortController, onStreamText,
         mcpAllowlist, cwd, gateCtx,
       );
     } catch (err) {
       if (!(err instanceof AgentError)) throw err;
       lastError = err;
+
+      // The stored session id is unresumable in this cwd. Retry immediately as
+      // a new session — the turn itself was never sent, so nothing is lost but
+      // the old thread's context.
+      if (err.category === 'stale_session' && currentSessionId) {
+        logger.warn({ staleSessionId: currentSessionId }, 'Stale session id, retrying without resume');
+        currentSessionId = undefined;
+        continue;
+      }
 
       // Don't retry non-retryable errors or if aborted
       if (!err.recovery.shouldRetry || abortController?.signal.aborted) {
