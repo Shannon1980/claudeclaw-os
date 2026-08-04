@@ -2,22 +2,37 @@
 #
 # Point this clone at the tracked hooks in .githooks/.
 #
-# core.hooksPath is repo-level config, so one run covers the main checkout and
-# every worktree under .claude/worktrees/. Hooks are NOT installed by cloning —
-# git deliberately never runs code from a fresh clone — so this has to be run
-# once per machine.
+# Hooks are NOT installed by cloning — git deliberately never runs code from a
+# fresh clone — so this has to be run once per machine.
+#
+# Two things this gets right that `git config core.hooksPath .githooks` does not:
+#
+#   1. It sets an ABSOLUTE path into the main checkout. A relative hooksPath
+#      resolves against whatever tree is checked out, so the moment a branch
+#      lacks .githooks/ the hooks silently stop running — including on every
+#      branch cut before these hooks landed. Verified the hard way: with a
+#      relative path, `git commit` on main sailed straight through.
+#   2. It clears worktree-local overrides. A worktree-local core.hooksPath BEATS
+#      the repo-level one, and worktree tooling (Claude Code's included) points
+#      it at the empty .git/hooks, which disables every hook in exactly the
+#      checkouts where agents do their work.
 set -euo pipefail
 
-root=$(git rev-parse --show-toplevel)
-cd "$root"
+# The main checkout, not the current worktree: --git-common-dir is shared.
+common_git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+main_root=$(dirname "$common_git_dir")
+hooks_dir="$main_root/.githooks"
 
-chmod +x .githooks/*
-git config core.hooksPath .githooks
+if [ ! -d "$hooks_dir" ]; then
+  echo "error: $hooks_dir does not exist." >&2
+  echo "  The main checkout ($main_root) is on a branch without .githooks/." >&2
+  echo "  Check out a branch that has it (or merge this change to main), then re-run." >&2
+  exit 1
+fi
 
-# A worktree-local core.hooksPath BEATS the repo-level one, and worktree tooling
-# (Claude Code's included) sets it to the empty .git/hooks — which silently
-# disables every hook in the checkouts where agents actually work. Clear those
-# overrides so the guard is not bypassable by working in a worktree.
+chmod +x "$hooks_dir"/*
+git config core.hooksPath "$hooks_dir"
+
 if [ "$(git config --get extensions.worktreeConfig || true)" = "true" ]; then
   git worktree list --porcelain | awk '/^worktree /{print substr($0, 10)}' | while read -r wt; do
     [ -d "$wt" ] || continue
@@ -28,8 +43,18 @@ if [ "$(git config --get extensions.worktreeConfig || true)" = "true" ]; then
   done
 fi
 
-echo "hooks installed: core.hooksPath -> .githooks"
+# Copies in .git/hooks would be shadowed by hooksPath — drop them so there is
+# exactly one live source of truth and nobody debugs a stale copy.
+for stale in pre-commit pre-push; do
+  if [ -f "$common_git_dir/hooks/$stale" ]; then
+    rm -f "$common_git_dir/hooks/$stale"
+    echo "removed shadowed copy .git/hooks/$stale"
+  fi
+done
+
+echo "hooks installed: core.hooksPath -> $hooks_dir"
 echo "  pre-commit  refuses commits on main/master"
 echo "  pre-push    refuses pushes to main/master"
 echo
-echo "verify: git config --get core.hooksPath"
+echo "verify:  git config --show-origin --get-all core.hooksPath"
+echo "re-run this after any change to .githooks/ so every worktree picks it up."
