@@ -18,7 +18,7 @@ import {
   type TextBasedChannel,
 } from 'discord.js';
 
-import { AGENT_ID, DISCORD_MAX_LEN, STORE_DIR } from './config.js';
+import { AGENT_ID, ALLOWED_DISCORD_USER_ID, DISCORD_MAX_LEN, STORE_DIR } from './config.js';
 import { registerChannel } from './channel.js';
 import { clearSession, getSession } from './db.js';
 import { splitMessage } from './format.js';
@@ -147,9 +147,28 @@ async function replyChunks(channel: TextBasedChannel, text: string): Promise<voi
   }
 }
 
-function discordOperatorId(): string {
-  const approved = listPairings('approved').find((p) => p.channel === 'discord');
-  return approved?.sender_id ?? '';
+/** Pick the Discord operator for pairing alerts: env lock, else the oldest approved Discord pairing. */
+export function resolveDiscordOperatorId(
+  envOwnerId: string,
+  approved: Array<{ channel: string; sender_id: string; created_at: number; id: number }>,
+): string {
+  if (envOwnerId) return envOwnerId;
+  let oldest: (typeof approved)[number] | undefined;
+  for (const row of approved) {
+    if (row.channel !== 'discord') continue;
+    if (
+      !oldest ||
+      row.created_at < oldest.created_at ||
+      (row.created_at === oldest.created_at && row.id < oldest.id)
+    ) {
+      oldest = row;
+    }
+  }
+  return oldest?.sender_id ?? '';
+}
+
+export function discordOperatorId(): string {
+  return resolveDiscordOperatorId(ALLOWED_DISCORD_USER_ID, listPairings('approved'));
 }
 
 async function notifyDiscordOperator(
