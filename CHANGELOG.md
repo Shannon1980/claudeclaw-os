@@ -4,6 +4,12 @@ All notable changes to ClaudeClaw will be documented here.
 
 ## [unreleased] - 2026-08-13
 
+### Added — Discord channel
+- Optional Discord DM front-end when `DISCORD_BOT_TOKEN` is set. Starts next to Slack or Telegram (does not replace them). First Discord sender is the operator; later senders pair with `/pair CODE`.
+- Commands in DMs: `/whoami`, `/pair`, `/help`, `/newchat`, `/stop`. Requires the Message Content Intent.
+
+## [unreleased] - 2026-08-13
+
 ### Added — channel pairing + ChannelPlugin seam
 - Unknown Slack/Telegram senders get a short pairing code instead of a silent drop. The operator approves with `/pair CODE`, denies with `/pair deny CODE`, or lists with `/pair list`. Dashboard: `GET /api/pairings`, `POST /api/pairings/:id/approve|deny`.
 - First sender on an unowned channel is auto-approved and written to `.env` (`ALLOWED_SLACK_USER_ID` / `ALLOWED_CHAT_ID`) so the scheduler still has a destination after restart. Existing env locks are seeded into `channel_pairings` on boot.

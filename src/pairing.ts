@@ -15,7 +15,7 @@
 
 import crypto from 'crypto';
 
-import { ALLOWED_CHAT_ID, ALLOWED_SLACK_USER_ID, ENV_FILE } from './config.js';
+import { ALLOWED_CHAT_ID, ALLOWED_DISCORD_USER_ID, ALLOWED_SLACK_USER_ID, ENV_FILE } from './config.js';
 import { getDb } from './db.js';
 import { setEnvKey } from './env-write.js';
 import { logger } from './logger.js';
@@ -54,7 +54,7 @@ const CODE_LEN = 6;
 const ENV_KEY: Record<ChannelId, string | undefined> = {
   slack: 'ALLOWED_SLACK_USER_ID',
   telegram: 'ALLOWED_CHAT_ID',
-  discord: undefined,
+  discord: 'ALLOWED_DISCORD_USER_ID',
   whatsapp: undefined,
 };
 
@@ -69,6 +69,7 @@ function cap(value: string | undefined): string {
 function envOwnerId(channel: ChannelId): string {
   if (channel === 'slack') return ALLOWED_SLACK_USER_ID;
   if (channel === 'telegram') return ALLOWED_CHAT_ID;
+  if (channel === 'discord') return ALLOWED_DISCORD_USER_ID;
   return '';
 }
 
@@ -403,6 +404,12 @@ export function seedBootstrapPairings(): void {
   if (ALLOWED_CHAT_ID) {
     safeDb(
       () => upsertApproved('telegram', ALLOWED_CHAT_ID, 'env bootstrap'),
+      undefined,
+    );
+  }
+  if (ALLOWED_DISCORD_USER_ID) {
+    safeDb(
+      () => upsertApproved('discord', ALLOWED_DISCORD_USER_ID, 'env bootstrap'),
       undefined,
     );
   }

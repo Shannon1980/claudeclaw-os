@@ -67,6 +67,7 @@ These are powerful but require extra API keys or services. Each one has its own 
 | **Standup roster picker** | none extra | Drag-reorder, toggle, cap, and rotate `/standup` speakers from the dashboard |
 | **Live Meetings (Daily.co)** | `DAILY_API_KEY` | Send an agent into a Daily.co video room with a Pika avatar that speaks in real time |
 | **WhatsApp bridge** | Puppeteer + QR scan | Highly experimental. Read/send WhatsApp from your bot chat |
+| **Discord DMs** | `DISCORD_BOT_TOKEN` | Additive. Starts next to Slack or Telegram. Pairing via `/pair CODE` |
 
 ---
 
@@ -2336,6 +2337,20 @@ cd .. && rm -rf claudeclaw-os
 This stops all background services, removes `~/.claudeclaw`, clears the SQLite database and session data, and wipes temp files. The final `rm -rf` deletes the repo itself.
 
 ---
+
+## Discord (additive)
+
+Discord is an extra front-end, not a replacement for Slack or Telegram. Set `DISCORD_BOT_TOKEN` and the bot starts DMs on Discord alongside the primary transport.
+
+1. Create an application at [discord.com/developers/applications](https://discord.com/developers/applications)
+2. Bot → Add Bot → copy the token into `.env` as `DISCORD_BOT_TOKEN`
+3. Enable **Message Content Intent** (Bot → Privileged Gateway Intents)
+4. Invite the bot to your account/server if you want, then DM it
+5. First DM becomes the Discord operator. Later senders get a pairing code; approve with `/pair CODE`
+
+Optional: set `ALLOWED_DISCORD_USER_ID` before the first DM to lock the operator in advance.
+
+Commands in DMs: `/whoami`, `/pair`, `/help`, `/newchat`, `/stop`.
 
 ## Other channels
 

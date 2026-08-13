@@ -3,10 +3,11 @@ import path from 'path';
 
 import { loadAgentConfig, listAgentIds, resolveAgentDir, resolveAgentClaudeMd, refreshWarRoomRoster } from './agent-config.js';
 import { createBot } from './bot.js';
+import { createDiscordBot, type DiscordBot } from './discord-bot.js';
 import { createSlackBot, createSlackSender, type SlackBot, type SlackSender } from './slack-bot.js';
 import { splitMessage } from './format.js';
 import { checkPendingMigrations } from './migrations.js';
-import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, WORKSPACE_ROOT, DATA_DIR, ENV_FILE, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
+import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, WORKSPACE_ROOT, DATA_DIR, ENV_FILE, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, DISCORD_BOT_TOKEN, PRIMARY_CHAT_ID } from './config.js';
 import { startDashboard } from './dashboard.js';
 import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
 import { seedBootstrapPairings } from './pairing.js';
@@ -233,6 +234,8 @@ async function main(): Promise<void> {
   const bot = (useSlack || useSlackSender) ? undefined : createBot();
   const slack: SlackBot | undefined = useSlack ? createSlackBot() : undefined;
   const slackSender: SlackSender | undefined = useSlackSender ? createSlackSender() : undefined;
+  const discord: DiscordBot | undefined =
+    AGENT_ID === 'main' && DISCORD_BOT_TOKEN ? createDiscordBot(DISCORD_BOT_TOKEN) : undefined;
 
   // Unified proactive notifier — routes scheduler / OAuth-health / War Room
   // messages to whichever transport is active.
@@ -435,6 +438,7 @@ async function main(): Promise<void> {
     logger.info('Shutting down...');
     if (slack) setSlackConnected(false); else setTelegramConnected(false);
     releaseLock();
+    if (discord) await discord.stop();
     if (slack) await slack.stop();
     else if (bot) await bot.stop();
     process.exit(0);
@@ -442,7 +446,18 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown());
   process.on('SIGTERM', () => void shutdown());
 
-  logger.info({ agentId: AGENT_ID, transport: slack ? 'slack' : slackSender ? 'slack-send-only' : bot ? 'telegram' : 'none' }, 'Starting ClaudeClaw...');
+  logger.info({ agentId: AGENT_ID, transport: slack ? 'slack' : slackSender ? 'slack-send-only' : bot ? 'telegram' : 'none', discord: !!discord }, 'Starting ClaudeClaw...');
+
+  // Discord is additive and must start BEFORE Telegram's blocking poll.
+  if (discord) {
+    try {
+      const { botUserId, botName } = await discord.start();
+      logger.info({ botUserId, botName }, 'ClaudeClaw (Discord) is running');
+      console.log(`  Discord online${botName ? `: @${botName}` : ''}`);
+    } catch (err) {
+      logger.error({ err }, 'Discord failed to start. Other transports remain available.');
+    }
+  }
 
   if (slack) {
     try {
