@@ -9,6 +9,7 @@ import { checkPendingMigrations } from './migrations.js';
 import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, WORKSPACE_ROOT, DATA_DIR, ENV_FILE, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, TRANSPORT, SLACK_BOT_TOKEN, SLACK_APP_TOKEN, ALLOWED_SLACK_USER_ID, PRIMARY_CHAT_ID } from './config.js';
 import { startDashboard } from './dashboard.js';
 import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
+import { seedBootstrapPairings } from './pairing.js';
 import { initSecurity, setAuditCallback } from './security.js';
 import { logger } from './logger.js';
 import { cleanupOldUploads } from './media.js';
@@ -153,6 +154,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   logger.info('Database ready');
+  seedBootstrapPairings();
 
   // Initialize security (kill phrase, audit)
   initSecurity({
@@ -450,7 +452,7 @@ async function main(): Promise<void> {
       logger.info({ botUserId, botName }, 'ClaudeClaw (Slack) is running');
       console.log(`\n  ClaudeClaw online on Slack${botName ? `: @${botName}` : ''}`);
       if (!ALLOWED_SLACK_USER_ID) {
-        console.log(`  DM the bot /whoami to get your Slack user ID for ALLOWED_SLACK_USER_ID`);
+        console.log(`  First DM becomes the operator. Later senders get a pairing code (/pair CODE).`);
       }
       console.log();
     } catch (err) {
@@ -475,7 +477,7 @@ async function main(): Promise<void> {
           if (AGENT_ID === 'main') {
             console.log(`\n  ClaudeClaw online: @${botInfo.username}`);
             if (!ALLOWED_CHAT_ID) {
-              console.log(`  Send /chatid to get your chat ID for ALLOWED_CHAT_ID`);
+              console.log(`  First private chat becomes the operator. Later senders get a pairing code (/pair CODE).`);
             }
             console.log();
           } else {

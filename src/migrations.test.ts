@@ -344,7 +344,7 @@ describe('memory surface migration v1.2.6', () => {
     expect(versionJson.migrations['v1.2.6']).toHaveLength(1);
   });
 
-  it('v1.2.6 is the highest registered version (a clean increment over v1.2.5)', () => {
+  it('v1.2.6 sorts after v1.2.5 in the registry', () => {
     const versionJson = JSON.parse(
       fs.readFileSync(
         path.join(process.cwd(), 'migrations', 'version.json'),
@@ -352,8 +352,8 @@ describe('memory surface migration v1.2.6', () => {
       ),
     ) as { migrations: Record<string, string[]> };
 
-    const highest = Object.keys(versionJson.migrations).sort(compareSemver).pop();
-    expect(highest).toBe('v1.2.6');
+    const versions = Object.keys(versionJson.migrations).sort(compareSemver);
+    expect(versions.indexOf('v1.2.6')).toBeGreaterThan(versions.indexOf('v1.2.5'));
   });
 
   it('adds category (TEXT, nullable) + confirmed (INTEGER NOT NULL DEFAULT 0) to memories, idempotently', () => {
@@ -427,5 +427,31 @@ describe('memory surface migration v1.2.6', () => {
 
     expect(memCols).toContain('category');
     expect(memCols).toContain('confirmed');
+  });
+});
+
+describe('channel pairings migration v1.2.9', () => {
+  it('registers key "v1.2.9" mapping to ["create-channel-pairings"] in version.json', () => {
+    const versionJson = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'migrations', 'version.json'),
+        'utf-8',
+      ),
+    ) as { migrations: Record<string, string[]> };
+
+    expect(versionJson.migrations).toHaveProperty('v1.2.9');
+    expect(versionJson.migrations['v1.2.9']).toEqual(['create-channel-pairings']);
+  });
+
+  it('v1.2.9 is the highest registered version', () => {
+    const versionJson = JSON.parse(
+      fs.readFileSync(
+        path.join(process.cwd(), 'migrations', 'version.json'),
+        'utf-8',
+      ),
+    ) as { migrations: Record<string, string[]> };
+
+    const highest = Object.keys(versionJson.migrations).sort(compareSemver).pop();
+    expect(highest).toBe('v1.2.9');
   });
 });

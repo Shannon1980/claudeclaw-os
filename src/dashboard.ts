@@ -137,6 +137,7 @@ import {
   type OverrideValue,
 } from './permissions-config.js';
 import { listPending, approve, deny, claimUndo, finalizeUndo, getApprovalById, type ApprovalRow } from './approval-queue.js';
+import { listPairings, approvePairing, denyPairing, getPairingById } from './pairing.js';
 import { buildActivityFeed, isUndoableFamily } from './activity.js';
 import { summarizeDay, SUMMARIZE_DEGRADE } from './activity-summary.js';
 import { replayApproval } from './replay-executor.js';
@@ -3887,6 +3888,45 @@ export function buildDashboardApp(relayToUser?: (text: string) => Promise<void>)
     const id = parseInt(c.req.param('id'), 10);
     if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
     const changed = deny(id, 'Discarded by operator.');
+    if (!changed) return c.json({ ok: false, error: 'not pending (already decided or unknown)' });
+    return c.json({ ok: true });
+  });
+
+  app.get('/api/pairings', (c) => {
+    const status = c.req.query('status');
+    const rows =
+      status === 'pending' || status === 'approved' || status === 'denied'
+        ? listPairings(status)
+        : listPairings();
+    return c.json({
+      pairings: rows.map((r) => ({
+        id: r.id,
+        channel: r.channel,
+        sender_id: r.sender_id,
+        display_name: r.display_name,
+        status: r.status,
+        pairing_code: r.pairing_code,
+        created_at: r.created_at,
+        decided_at: r.decided_at,
+        last_seen_at: r.last_seen_at,
+      })),
+    });
+  });
+
+  app.post('/api/pairings/:id/approve', (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+    if (!getPairingById(id)) return c.json({ ok: false, error: 'not found' }, 404);
+    const changed = approvePairing(id);
+    if (!changed) return c.json({ ok: false, error: 'already decided' });
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/pairings/:id/deny', (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isInteger(id)) return c.json({ ok: false, error: 'invalid id' }, 400);
+    if (!getPairingById(id)) return c.json({ ok: false, error: 'not found' }, 404);
+    const changed = denyPairing(id);
     if (!changed) return c.json({ ok: false, error: 'not pending (already decided or unknown)' });
     return c.json({ ok: true });
   });

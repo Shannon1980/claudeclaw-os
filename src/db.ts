@@ -405,6 +405,27 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_approval_pending ON approval_queue(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_approval_agent ON approval_queue(agent_id, created_at DESC);
 
+    -- Channel pairing (sender admission). Env allowlists still bootstrap the
+    -- first operator; everyone after that gets a short code the operator
+    -- approves with /pair. Dual-written: this createSchema block builds it
+    -- for the in-memory test DB, and migrations/v1.2.9 builds it for the
+    -- live store (P-4 drift guard).
+    CREATE TABLE IF NOT EXISTS channel_pairings (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel       TEXT NOT NULL,                    -- slack | telegram | discord | whatsapp
+      sender_id     TEXT NOT NULL,
+      display_name  TEXT NOT NULL DEFAULT '',
+      status        TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | denied
+      pairing_code  TEXT NOT NULL,
+      created_at    INTEGER NOT NULL,
+      decided_at    INTEGER,
+      last_seen_at  INTEGER NOT NULL,
+      UNIQUE (channel, sender_id),
+      UNIQUE (pairing_code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pairings_status ON channel_pairings(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_pairings_channel ON channel_pairings(channel, status);
+
     -- Per-workspace personalization (workspace name, hotkey mod, mission
     -- column order/widths, etc). Simple key/value with last-write-wins;
     -- no auth scoping because the dashboard token is the auth boundary.

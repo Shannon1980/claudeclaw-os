@@ -23,7 +23,14 @@ import { logger } from './logger.js';
 import { buildPhotoMessage, buildDocumentMessage, buildVideoMessage, UPLOADS_DIR } from './media.js';
 import { messageQueue } from './message-queue.js';
 import { processUserMessage, clearSessionBaseline, type TransportCallbacks, type ProcessOptions } from './message-core.js';
+import { registerChannel } from './channel.js';
 import { getAvailableAgents } from './orchestrator.js';
+import {
+  admitSender,
+  handlePairCommand,
+  isApprovedSender,
+  persistChannelOwner,
+} from './pairing.js';
 import { getSecurityStatus, audit } from './security.js';
 import { markdownToBlocks, postRichText } from './slack-rich-text.js';
 import { abortActiveQuery } from './state.js';
@@ -189,10 +196,9 @@ export function resolveSlackCommandTarget(
     : { chatId: slackChatId(userId), agentId: mainAgentId };
 }
 
-/** Fail-closed access control: only the configured Slack user may drive the bot. */
+/** Fail-closed access control: env lock or an approved pairing row. */
 export function isAuthorisedSlack(userId: string | undefined): boolean {
-  if (!ALLOWED_SLACK_USER_ID) return false; // not configured → reject (see /whoami)
-  return userId === ALLOWED_SLACK_USER_ID;
+  return isApprovedSender('slack', userId);
 }
 
 /**
@@ -275,7 +281,8 @@ const SLACK_HELP_TEXT =
   '/agents — List available agents\n' +
   '/delegate — Delegate task to agent\n' +
   '/status — Security status\n' +
-  '/whoami — Show your Slack user ID\n\n' +
+  '/whoami — Show your Slack user ID\n' +
+  '/pair — Approve a pairing code (CODE, deny CODE, list)\n\n' +
   'Delegation: @agentId: prompt or /delegate agentId prompt\n\n' +
   'Agent channels: messages in a channel mapped to an agent (via slack_channel in agent.yaml) run that agent automatically.\n\n' +
   'You can also send voice notes, photos, files, and videos, and @mention me in channels.';
@@ -506,6 +513,11 @@ function registerSlackCommands(app: InstanceType<typeof App>, ctx: SlackCommandC
     messageQueue.enqueue(chatId, () => processUserMessage(`/delegate ${args}`, cb, coreOpts(chatId)));
   });
 
+  app.command('/pair', async ({ command, ack, respond }) => {
+    if (!(await ackAuth(command, ack, respond))) return;
+    await respond(eph(handlePairCommand(command.text || '')));
+  });
+
   app.command('/status', async ({ command, ack, respond }) => {
     if (!(await ackAuth(command, ack, respond))) return;
     const s = getSecurityStatus();
@@ -679,16 +691,43 @@ export function createSlackBot(): SlackBot {
     }
 
     // ── Direct message → main agent ────────────────────────────────
-    if (!ALLOWED_SLACK_USER_ID) {
-      await client.chat.postMessage({
-        channel: m.channel,
-        text: `Not configured yet. Send \`/whoami\` and add the result to .env as ALLOWED_SLACK_USER_ID, then restart.`,
-        mrkdwn: false,
-      });
+    const admit = admitSender({
+      channel: 'slack',
+      senderId: m.user || '',
+      displayName: m.user,
+    });
+    if (admit.decision === 'deny') {
+      logger.warn({ user: m.user }, 'Rejected Slack DM from unauthorised user');
       return;
     }
-    if (!isAuthorisedSlack(m.user)) {
-      logger.warn({ user: m.user }, 'Rejected Slack DM from unauthorised user');
+    if (admit.decision === 'pending') {
+      await client.chat.postMessage({
+        channel: m.channel,
+        text: admit.senderMessage,
+        mrkdwn: false,
+      });
+      if (admit.operatorMessage && ALLOWED_SLACK_USER_ID && m.user !== ALLOWED_SLACK_USER_ID) {
+        try {
+          const dm = await client.conversations.open({ users: ALLOWED_SLACK_USER_ID });
+          const dmId = (dm.channel as { id?: string } | undefined)?.id;
+          if (dmId) {
+            await client.chat.postMessage({ channel: dmId, text: admit.operatorMessage, mrkdwn: false });
+          }
+        } catch (err) {
+          logger.warn({ err }, 'Could not notify operator of pairing request');
+        }
+      }
+      return;
+    }
+    if (admit.decision === 'bootstrap') {
+      persistChannelOwner('slack', m.user || '');
+      await client.chat.postMessage({
+        channel: m.channel,
+        text: `${admit.senderMessage} Restarting so the lock takes effect.`,
+        mrkdwn: false,
+      });
+      logger.info({ user: m.user }, 'Bootstrapped Slack operator, restarting');
+      setTimeout(() => process.exit(0), 1000);
       return;
     }
 
@@ -754,13 +793,26 @@ export function createSlackBot(): SlackBot {
     messageQueue.enqueue(chatId, () => processUserMessage(text, cb, coreOpts(chatId)));
   });
 
-  // ── /whoami — discover your Slack user id for ALLOWED_SLACK_USER_ID ──
+  // ── /whoami — identity + pairing status (open to anyone) ──
   app.command('/whoami', async ({ command, ack, respond }) => {
     await ack();
-    await respond({
-      response_type: 'ephemeral',
-      text: `Your Slack user ID is \`${command.user_id}\`.\nAdd \`ALLOWED_SLACK_USER_ID=${command.user_id}\` to .env and restart.`,
+    const admit = admitSender({
+      channel: 'slack',
+      senderId: command.user_id,
+      displayName: command.user_name,
     });
+    let extra = `Your Slack user ID is \`${command.user_id}\`.`;
+    if (admit.decision === 'allow') {
+      extra += ' You are paired.';
+    } else if (admit.decision === 'bootstrap') {
+      persistChannelOwner('slack', command.user_id);
+      extra += ' You are the first operator. I saved the lock to .env — restart the service.';
+    } else if (admit.decision === 'pending' && admit.pairing) {
+      extra += ` Waiting on approval. Your pairing code is ${admit.pairing.pairing_code}. Ask the operator to send \`/pair ${admit.pairing.pairing_code}\`.`;
+    } else {
+      extra += ' You are not paired.';
+    }
+    await respond({ response_type: 'ephemeral', text: extra });
   });
 
   registerSlackCommands(app, cmdContext);
@@ -777,23 +829,41 @@ export function createSlackBot(): SlackBot {
     return dmChannelId;
   };
 
+  const start = async () => {
+    await app.start();
+    try {
+      const auth = await app.client.auth.test();
+      botUserId = (auth.user_id as string) ?? '';
+      const botName = (auth.user as string) ?? 'ClaudeClaw';
+      return { botUserId, botName };
+    } catch (err) {
+      logger.warn({ err }, 'Slack auth.test failed (continuing)');
+      return { botUserId: '', botName: 'ClaudeClaw' };
+    }
+  };
+  const stop = async () => {
+    await app.stop();
+  };
+
+  registerChannel({
+    id: 'slack',
+    capabilities: () => ({
+      threading: true,
+      reactions: true,
+      attachments: true,
+      voice: false,
+      groups: true,
+    }),
+    start: async () => {
+      await start();
+    },
+    stop,
+  });
+
   return {
     app,
-    start: async () => {
-      await app.start();
-      try {
-        const auth = await app.client.auth.test();
-        botUserId = (auth.user_id as string) ?? '';
-        const botName = (auth.user as string) ?? 'ClaudeClaw';
-        return { botUserId, botName };
-      } catch (err) {
-        logger.warn({ err }, 'Slack auth.test failed (continuing)');
-        return { botUserId: '', botName: 'ClaudeClaw' };
-      }
-    },
-    stop: async () => {
-      await app.stop();
-    },
+    start,
+    stop,
     postToUser: async (text) => {
       const channel = await resolveDmChannel();
       if (!channel) {

@@ -1538,6 +1538,41 @@ describe('approvals API contract', () => {
   });
 });
 
+describe('pairings API contract', () => {
+  it('GET /api/pairings returns { pairings: [...] } and is auth-gated', async () => {
+    const noTok = await getNoToken('/api/pairings');
+    expect(noTok.status).toBe(401);
+
+    const res = await get('/api/pairings');
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ pairings: expect.any(Array) });
+  });
+
+  it('POST /api/pairings/:id/approve is status-guarded', async () => {
+    const { admitSender } = await import('./pairing.js');
+    admitSender({ channel: 'discord', senderId: 'U-owner' });
+    const pending = admitSender({ channel: 'discord', senderId: 'U-guest' });
+    const id = pending.pairing!.id;
+
+    const first = await postAction(`/api/pairings/${id}/approve`);
+    expect(first.status).toBe(200);
+    expect(await jsonOf(first)).toMatchObject({ ok: true });
+
+    const second = await postAction(`/api/pairings/${id}/approve`);
+    expect(await jsonOf(second)).toMatchObject({ ok: false });
+  });
+
+  it('POST /api/pairings/:id/deny sets the item denied', async () => {
+    const { admitSender } = await import('./pairing.js');
+    admitSender({ channel: 'discord', senderId: 'U-owner' });
+    const pending = admitSender({ channel: 'discord', senderId: 'U-other' });
+    const res = await postAction(`/api/pairings/${pending.pairing!.id}/deny`);
+    expect(res.status).toBe(200);
+    expect(await jsonOf(res)).toMatchObject({ ok: true });
+  });
+});
+
 describe('activity API contract', () => {
   it('GET /api/activity is auth-gated (token gate inherited from app mount, T-04-auth)', async () => {
     const noTok = await getNoToken('/api/activity');
