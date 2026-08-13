@@ -108,8 +108,9 @@ describe('resolveSlackCommandTarget', () => {
 });
 
 describe('isAuthorisedSlack', () => {
-  it('fails closed when ALLOWED_SLACK_USER_ID is not configured', () => {
-    // The test env sets no ALLOWED_SLACK_USER_ID, so every user is rejected.
+  it('fails closed when no env lock and no approved pairing', () => {
+    // The test env sets no ALLOWED_SLACK_USER_ID and this file does not
+    // open a pairing DB, so every user is rejected.
     expect(isAuthorisedSlack('U12345')).toBe(false);
     expect(isAuthorisedSlack(undefined)).toBe(false);
   });

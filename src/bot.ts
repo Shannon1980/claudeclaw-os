@@ -32,7 +32,6 @@ import {
   PROTECTED_ENV_VARS,
   DAILY_COST_BUDGET,
   HOURLY_TOKEN_BUDGET,
-  PROJECT_ROOT,
 } from './config.js';
 import { clearSession, getRecentConversation, getRecentMemories, getRecentTaskOutputs, getSession, getSessionConversation, logToHiveMind, pinMemory, unpinMemory, setSession, lookupWaChatId, saveWaMessageMap, saveTokenUsage, saveCompactionEvent, getCompactionCount } from './db.js';
 import { logger } from './logger.js';
@@ -60,6 +59,14 @@ import {
   voiceCapabilities,
   UPLOADS_DIR,
 } from './voice.js';
+import { registerChannel } from './channel.js';
+import {
+  admitSender,
+  handlePairCommand,
+  isApprovedSender,
+  isChannelOwnerConfigured,
+  persistChannelOwner,
+} from './pairing.js';
 import { getSlackConversations, getSlackMessages, sendSlackMessage, SlackConversation } from './slack.js';
 import { getWaChats, getWaChatMessages, sendWhatsAppMessage, WaChat } from './whatsapp.js';
 
@@ -205,16 +212,13 @@ async function sendTyping(api: Api<RawApi>, chatId: number): Promise<void> {
 }
 
 /**
- * Authorise the incoming chat against ALLOWED_CHAT_ID.
- * If ALLOWED_CHAT_ID is not yet configured, guide the user to set it up.
- * Returns true if the message should be processed.
+ * Authorise the incoming chat against the env lock or an approved pairing.
+ * If no owner is configured yet, first-run stays open so /start and /chatid work.
  */
 function isAuthorised(chatId: number): boolean {
-  if (!ALLOWED_CHAT_ID) {
-    // Not yet configured — let every request through but warn in the reply handler
-    return true;
-  }
-  return chatId.toString() === ALLOWED_CHAT_ID;
+  const id = chatId.toString();
+  if (isApprovedSender('telegram', id)) return true;
+  return !isChannelOwnerConfigured('telegram');
 }
 
 /** Reject unauthorized chats. Returns true (and silently rejects) if blocked, false if OK. */
@@ -231,37 +235,27 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
   const chatId = ctx.chat!.id;
   const chatIdStr = chatId.toString();
 
-  // Security gate
-  if (!isAuthorised(chatId)) {
+  const admit = admitSender({
+    channel: 'telegram',
+    senderId: chatIdStr,
+    displayName: ctx.from?.first_name,
+  });
+  if (admit.decision === 'deny') {
     logger.warn({ chatId }, 'Rejected message from unauthorised chat');
     return;
   }
-
-  // First-run setup: auto-save the chat ID and restart
-  if (!ALLOWED_CHAT_ID) {
-    const envPath = path.join(PROJECT_ROOT, '.env');
-    try {
-      let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
-      if (envContent.includes('ALLOWED_CHAT_ID=')) {
-        // Replace existing empty value
-        envContent = envContent.replace(/ALLOWED_CHAT_ID=.*/, `ALLOWED_CHAT_ID=${chatId}`);
-      } else {
-        // Append
-        envContent += `\nALLOWED_CHAT_ID=${chatId}\n`;
-      }
-      fs.writeFileSync(envPath, envContent);
-      await ctx.reply(
-        `Setup complete! Your chat ID (${chatId}) has been saved.\n\nRestarting now...`,
-      );
-      logger.info({ chatId }, 'Auto-saved ALLOWED_CHAT_ID to .env, restarting');
-      // Give Telegram a moment to deliver the message, then restart
-      setTimeout(() => process.exit(0), 1000);
-    } catch (err) {
-      logger.error({ err }, 'Could not auto-save chat ID');
-      await ctx.reply(
-        `Your chat ID is ${chatId}.\n\nI couldn't save it automatically. Open the .env file in your claudeclaw-os folder and add this line:\n\nALLOWED_CHAT_ID=${chatId}\n\nThen restart with: npm start`,
-      );
+  if (admit.decision === 'pending') {
+    await ctx.reply(admit.senderMessage);
+    if (admit.operatorMessage && ALLOWED_CHAT_ID && ALLOWED_CHAT_ID !== chatIdStr) {
+      await ctx.api.sendMessage(parseInt(ALLOWED_CHAT_ID, 10), admit.operatorMessage).catch(() => {});
     }
+    return;
+  }
+  if (admit.decision === 'bootstrap') {
+    persistChannelOwner('telegram', chatIdStr);
+    await ctx.reply(`${admit.senderMessage}\n\nRestarting now...`);
+    logger.info({ chatId }, 'Bootstrapped Telegram operator, restarting');
+    setTimeout(() => process.exit(0), 1000);
     return;
   }
 
@@ -391,6 +385,7 @@ export function createBot(): Bot {
     { command: 'agents', description: 'List available agents' },
     { command: 'delegate', description: 'Delegate task to agent' },
     { command: 'status', description: 'Show security status' },
+    { command: 'pair', description: 'Approve a pairing code' },
   ];
   const skillCommands = discoverSkillCommands();
   const allCommands = [...builtInCommands, ...skillCommands].slice(0, 100); // Telegram limit: 100 commands
@@ -415,7 +410,8 @@ export function createBot(): Bot {
       '/stop — Stop current processing\n' +
       '/agents — List available agents\n' +
       '/delegate — Delegate task to agent\n' +
-      '/status — Security status\n\n' +
+      '/status — Security status\n' +
+      '/pair — Approve a pairing code (CODE, deny CODE, list)\n\n' +
       'Delegation: @agentId: prompt or /delegate agentId prompt\n\n' +
       'You can also send voice notes, photos, files, and videos.'
     );
@@ -425,8 +421,14 @@ export function createBot(): Bot {
   // Responds to anyone only when ALLOWED_CHAT_ID is not yet configured.
   // /chatid — only responds when ALLOWED_CHAT_ID is not yet configured (first-time setup)
   bot.command('chatid', (ctx) => {
-    if (ALLOWED_CHAT_ID) return; // Already configured — don't respond to anyone
+    if (isChannelOwnerConfigured('telegram') && !isAuthorised(ctx.chat!.id)) return;
     return ctx.reply(`Your chat ID: ${ctx.chat!.id}`);
+  });
+
+  bot.command('pair', async (ctx) => {
+    if (await replyIfLocked(ctx)) return;
+    const text = (ctx.message?.text || '').replace(/^\/pair(@\w+)?/i, '').trim();
+    return ctx.reply(handlePairCommand(text));
   });
 
   // /start — simple greeting (auth-gated after setup)
@@ -777,7 +779,7 @@ export function createBot(): Bot {
   });
 
   // Text messages — and any slash commands not owned by this bot (skills, e.g. /todo /gmail)
-  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/pin', '/unpin', '/chatid', '/wa', '/slack', '/dashboard', '/stop', '/agents', '/delegate', '/status']);
+  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/pin', '/unpin', '/chatid', '/wa', '/slack', '/dashboard', '/stop', '/agents', '/delegate', '/status', '/pair']);
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text;
     const chatIdStr = ctx.chat!.id.toString();
@@ -958,12 +960,6 @@ export function createBot(): Bot {
     }
     const chatId = ctx.chat!.id;
     if (!isAuthorised(chatId)) return;
-    if (!ALLOWED_CHAT_ID) {
-      await ctx.reply(
-        `Your chat ID is ${chatId}.\n\nAdd this to your .env:\n\nALLOWED_CHAT_ID=${chatId}\n\nThen restart ClaudeClaw OS.`,
-      );
-      return;
-    }
 
     try {
       const fileId = ctx.message.voice.file_id;
@@ -983,12 +979,6 @@ export function createBot(): Bot {
   bot.on('message:photo', async (ctx) => {
     const chatId = ctx.chat!.id;
     if (!isAuthorised(chatId)) return;
-    if (!ALLOWED_CHAT_ID) {
-      await ctx.reply(
-        `Your chat ID is ${chatId}.\n\nAdd this to your .env:\n\nALLOWED_CHAT_ID=${chatId}\n\nThen restart ClaudeClaw OS.`,
-      );
-      return;
-    }
 
     try {
       const photo = ctx.message.photo[ctx.message.photo.length - 1];
@@ -1006,12 +996,6 @@ export function createBot(): Bot {
   bot.on('message:document', async (ctx) => {
     const chatId = ctx.chat!.id;
     if (!isAuthorised(chatId)) return;
-    if (!ALLOWED_CHAT_ID) {
-      await ctx.reply(
-        `Your chat ID is ${chatId}.\n\nAdd this to your .env:\n\nALLOWED_CHAT_ID=${chatId}\n\nThen restart ClaudeClaw OS.`,
-      );
-      return;
-    }
 
     try {
       const doc = ctx.message.document;
@@ -1030,10 +1014,6 @@ export function createBot(): Bot {
   bot.on('message:video', async (ctx) => {
     const chatId = ctx.chat!.id;
     if (!isAuthorised(chatId)) return;
-    if (!ALLOWED_CHAT_ID) {
-      await ctx.reply(`Your chat ID is ${chatId}.\n\nAdd this to your .env:\n\nALLOWED_CHAT_ID=${chatId}\n\nThen restart ClaudeClaw OS.`);
-      return;
-    }
 
     try {
       const video = ctx.message.video;
@@ -1052,10 +1032,6 @@ export function createBot(): Bot {
   bot.on('message:video_note', async (ctx) => {
     const chatId = ctx.chat!.id;
     if (!isAuthorised(chatId)) return;
-    if (!ALLOWED_CHAT_ID) {
-      await ctx.reply(`Your chat ID is ${chatId}.\n\nAdd this to your .env:\n\nALLOWED_CHAT_ID=${chatId}\n\nThen restart ClaudeClaw OS.`);
-      return;
-    }
 
     try {
       const videoNote = ctx.message.video_note;
@@ -1073,6 +1049,23 @@ export function createBot(): Bot {
   // Graceful error handling — log but don't crash
   bot.catch((err) => {
     logger.error({ err: err.message }, 'Telegram bot error');
+  });
+
+  registerChannel({
+    id: 'telegram',
+    capabilities: () => ({
+      threading: false,
+      reactions: true,
+      attachments: true,
+      voice: true,
+      groups: false,
+    }),
+    start: async () => {
+      await bot.start();
+    },
+    stop: async () => {
+      await bot.stop();
+    },
   });
 
   return bot;

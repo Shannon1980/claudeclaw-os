@@ -165,7 +165,7 @@ The wizard walks you through everything interactively:
 
 ### Step 5: Lock the bot to you
 
-**Slack:** after the bot starts, DM it `/whoami`, copy the `U…` id, add `ALLOWED_SLACK_USER_ID=U…` to `.env`, and restart. The bot is fail-closed — until this is set it only answers `/whoami`.
+**Slack:** the first person who DMs the bot becomes the operator (saved to `.env` as `ALLOWED_SLACK_USER_ID`). Anyone after that gets a pairing code; approve them with `/pair CODE`. `/whoami` still prints your Slack user id.
 
 **Telegram:** the setup wizard detects your chat ID automatically. When it asks you to message your bot, just send any message and press Y. If you skipped this during setup, the bot auto-detects your chat ID the first time you message it and saves it to `.env` for you.
 
@@ -854,6 +854,7 @@ features:
   bot_user: { display_name: ClaudeClaw, always_online: true }
   slash_commands:
     - { command: /whoami,    description: Show your Slack user ID }
+    - { command: /pair,      description: "Approve a pairing code (CODE, deny CODE, list)" }
     - { command: /newchat,   description: Start a new Claude session }
     - { command: /respin,    description: Reload recent context }
     - { command: /voice,     description: Toggle voice replies }
@@ -901,7 +902,7 @@ Start the bot (`npm run dev` or `npm start`). When `TRANSPORT=slack`, Telegram d
 
 ### Step 4: Lock it to you
 
-DM the bot **`/whoami`**, copy the `U…` id, add `ALLOWED_SLACK_USER_ID=U…` to `.env`, and restart. The bot is **fail-closed** — until this is set it only answers `/whoami`.
+The first person who DMs the bot is auto-approved as the operator. Anyone else who DMs gets a pairing code; the operator sends **`/pair CODE`** (or `/pair deny CODE`, `/pair list`). `/whoami` still prints your Slack user id. You can still set `ALLOWED_SLACK_USER_ID` in `.env` by hand if you want the lock before the first DM.
 
 Then DM it, or invite it to a channel and `@ClaudeClaw …`. Send voice notes, photos, and files just like on Telegram.
 
@@ -1594,9 +1595,9 @@ Browse more: [github.com/anthropics/claude-code](https://github.com/anthropics/c
 | `TRANSPORT` | No | `slack` or `telegram`. Auto-detects Slack when both Slack tokens are set |
 | `SLACK_BOT_TOKEN` | Yes (Slack) | Bot User OAuth Token (`xoxb-…`) from your Slack app |
 | `SLACK_APP_TOKEN` | Yes (Slack) | App-Level Token (`xapp-…`, scope `connections:write`) for Socket Mode |
-| `ALLOWED_SLACK_USER_ID` | Yes (Slack) | Your Slack user ID. DM the bot `/whoami` to get it |
+| `ALLOWED_SLACK_USER_ID` | No (Slack) | Operator Slack user ID. First DM auto-saves this; later senders pair via `/pair` |
 | `TELEGRAM_BOT_TOKEN` | Yes (Telegram) | From [@BotFather](https://t.me/botfather) |
-| `ALLOWED_CHAT_ID` | Yes (Telegram) | Your chat ID. send `/chatid` to get it |
+| `ALLOWED_CHAT_ID` | No (Telegram) | Operator chat ID. First private chat auto-saves this; later senders pair via `/pair` |
 | `ANTHROPIC_API_KEY` | No | Pay-per-token instead of Max subscription |
 | `GROQ_API_KEY` | No | Voice input. [console.groq.com](https://console.groq.com) |
 | `ELEVENLABS_API_KEY` | No | Voice output. [elevenlabs.io](https://elevenlabs.io) |
@@ -1657,7 +1658,7 @@ These protections are active in every ClaudeClaw installation, no configuration 
 
 | Layer | What it does |
 |-------|-------------|
-| **User restriction** | `ALLOWED_SLACK_USER_ID` (Slack) or `ALLOWED_CHAT_ID` (Telegram) locks the bot to a single account. Messages from any other user are silently dropped. On Slack the bot is fail-closed: until the lock is set it only answers `/whoami`. |
+| **User restriction** | First sender on a channel is the operator. Later senders get a pairing code (`/pair CODE` to approve). `ALLOWED_SLACK_USER_ID` / `ALLOWED_CHAT_ID` still bootstrap that lock from `.env`. |
 | **Private chat only** | The bot rejects all group chats. Only private (1-on-1) conversations are accepted. |
 | **Audit logging** | Every action (messages, commands, delegations, lock/unlock, blocked attempts) is recorded to the `audit_log` table in SQLite with timestamps, agent ID, and chat ID. |
 | **DB file permissions** | The `store/` directory is set to `0700` and all database files to `0600` on startup (owner-only access). |

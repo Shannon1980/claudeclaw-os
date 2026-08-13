@@ -7,6 +7,7 @@
     "v1.2.5": ["add-routine-project-scope"],
     "v1.2.6": ["add-memory-surface-columns"],
     "v1.2.7": ["add-mission-task-chat-ref"],
-    "v1.2.8": ["add-mission-task-runs"]
+    "v1.2.8": ["add-mission-task-runs"],
+    "v1.2.9": ["create-channel-pairings"]
   }
 }
