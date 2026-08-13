@@ -16,6 +16,8 @@ const envConfig = readEnvFile([
   'SLACK_BOT_TOKEN',
   'SLACK_APP_TOKEN',
   'ALLOWED_SLACK_USER_ID',
+  'DISCORD_BOT_TOKEN',
+  'ALLOWED_DISCORD_USER_ID',
   'TRANSPORT',
   'CONTEXT_LIMIT',
   'DASHBOARD_PORT',
@@ -109,6 +111,13 @@ export const SLACK_APP_TOKEN =
 // DM the bot `/whoami` to discover yours.
 export const ALLOWED_SLACK_USER_ID =
   process.env.ALLOWED_SLACK_USER_ID || envConfig.ALLOWED_SLACK_USER_ID || '';
+
+// Additive Discord front-end. Starts next to Slack or Telegram when set.
+export const DISCORD_BOT_TOKEN =
+  process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
+export const ALLOWED_DISCORD_USER_ID =
+  process.env.ALLOWED_DISCORD_USER_ID || envConfig.ALLOWED_DISCORD_USER_ID || '';
+export const DISCORD_MAX_LEN = 2000;
 
 // Active front-end transport. Slack is primary: explicit TRANSPORT wins;
 // otherwise Slack whenever both Slack tokens are present, else Telegram.

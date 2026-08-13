@@ -39,7 +39,7 @@ export function setSlackConnected(v: boolean): void {
 // ── Chat event bus (SSE broadcasting) ────────────────────────────────
 
 /** Which front-end transport (or the dashboard) a chat event originated from. */
-export type ChatEventSource = 'telegram' | 'slack' | 'dashboard';
+export type ChatEventSource = 'telegram' | 'slack' | 'discord' | 'dashboard';
 
 export interface ChatEvent {
   type: 'user_message' | 'assistant_message' | 'assistant_photo' | 'processing' | 'progress' | 'error' | 'hive_mind';
