@@ -1,0 +1,50 @@
+/* ClaudeClaw graphite — matches web/src/styles/main.css */
+:root {
+  --color-bg: #0e0e10;
+  --color-sidebar: #141416;
+  --color-card: #1a1a1c;
+  --color-elevated: #222226;
+  --color-border: #26262a;
+  --color-border-strong: #3a3a40;
+  --color-text: #e8e8e6;
+  --color-text-muted: #9a9a98;
+  --color-text-faint: #6a6a68;
+  --color-accent: #8b8af0;
+  --color-accent-hover: #a4a3f5;
+  --color-accent-soft: rgba(139, 138, 240, 0.12);
+  --color-surface: var(--color-card);
+  --color-primary: var(--color-accent);
+  --color-primary-hover: var(--color-accent-hover);
+  --color-danger: #dc2626;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-status-queued: #9a9a98;
+  --color-status-running: #d97706;
+  --color-status-done: #16a34a;
+  --color-status-failed: #dc2626;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-base: 13px;
+  --text-lg: 14px;
+  --text-xl: 16px;
+  --text-2xl: 20px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 9999px;
+
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+}

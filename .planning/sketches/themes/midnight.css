@@ -1,0 +1,19 @@
+@import url("./default.css");
+
+:root {
+  --color-bg: #0a0e1a;
+  --color-sidebar: #0f1525;
+  --color-card: #141c30;
+  --color-elevated: #1a2540;
+  --color-border: #1f2a45;
+  --color-border-strong: #2d3d5e;
+  --color-text: #e0e6f0;
+  --color-text-muted: #8a96b0;
+  --color-text-faint: #5a6680;
+  --color-accent: #5eb6ff;
+  --color-accent-hover: #82c8ff;
+  --color-accent-soft: rgba(94, 182, 255, 0.12);
+  --color-surface: var(--color-card);
+  --color-primary: var(--color-accent);
+  --color-primary-hover: var(--color-accent-hover);
+}

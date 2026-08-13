@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>001 Daily shell — ClaudeClaw</title>
+  <link rel="stylesheet" href="../themes/default.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: #0a0a0c; color: var(--color-text); font-family: var(--font-sans); font-size: 13px; -webkit-font-smoothing: antialiased; }
+    button, input, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; border: 0; background: none; }
+    a { color: inherit; text-decoration: none; }
+
+    #variant-nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 14px; background: #111113; border-bottom: 1px solid #2a2a2e;
+    }
+    .variant-tab {
+      padding: 5px 10px; border-radius: 6px; font-size: 12px; color: #9a9a98;
+      transition: background .15s, color .15s;
+    }
+    .variant-tab:hover { color: #e8e8e6; background: #222226; }
+    .variant-tab.active { color: #e8e8e6; background: #2a2a30; }
+    .variant-tab .hint { display: block; font-size: 10px; color: #6a6a68; margin-top: 1px; }
+    .nav-note { margin-left: auto; font-size: 11px; color: #6a6a68; }
+
+    .variant { display: none; height: 100%; padding-top: 52px; }
+    .variant.active { display: block; }
+    #stage { height: 100%; margin: 0 auto; }
+
+    .app { display: flex; height: 100%; background: var(--color-bg); color: var(--color-text); overflow: hidden; }
+    .rail { display: flex; flex-direction: column; background: var(--color-sidebar); border-right: 1px solid var(--color-border); flex-shrink: 0; }
+    .rail-wide { width: 260px; }
+    .rail-slim { width: 196px; }
+    .rail-icon { width: 56px; align-items: center; }
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .page { flex: 1; min-height: 0; overflow: auto; }
+    .page-pad { padding: 20px 28px 28px; max-width: 1040px; margin: 0 auto; width: 100%; }
+
+    .ws { display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px; }
+    .mark { width: 22px; height: 22px; border-radius: 6px; background: var(--color-elevated); color: var(--color-text-muted); display: grid; place-items: center; flex-shrink: 0; }
+    .ws-name { font-size: 12.5px; font-weight: 600; }
+    .ws-sub { font-size: 11px; color: var(--color-text-faint); }
+    .search-fake {
+      margin: 0 10px 8px; padding: 7px 10px; border-radius: 6px;
+      background: transparent; color: var(--color-text-muted); font-size: 13px;
+      display: flex; align-items: center; gap: 8px; width: calc(100% - 20px);
+      transition: background .15s, color .15s;
+    }
+    .search-fake:hover { background: var(--color-elevated); color: var(--color-text); }
+    .search-fake kbd { margin-left: auto; font-size: 10.5px; color: var(--color-text-faint); font-family: inherit; }
+
+    .sec { padding: 10px 14px 4px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-text-faint); font-weight: 500; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      margin: 1px 8px; padding: 7px 10px; border-radius: 6px;
+      color: var(--color-text-muted); font-size: 14px; width: calc(100% - 16px); text-align: left;
+      transition: background .15s, color .15s;
+    }
+    .nav-item:hover { background: var(--color-elevated); color: var(--color-text); }
+    .nav-item.on { background: var(--color-accent-soft); color: var(--color-accent); }
+    .nav-item svg { flex-shrink: 0; opacity: .85; }
+    .icon-btn {
+      width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center;
+      color: var(--color-text-muted); margin: 2px 0; transition: background .15s, color .15s;
+    }
+    .icon-btn:hover { background: var(--color-elevated); color: var(--color-text); }
+    .icon-btn.on { background: var(--color-accent-soft); color: var(--color-accent); }
+    .rail-foot { margin-top: auto; padding: 12px; border-top: 1px solid var(--color-border); font-size: 12px; color: var(--color-text-faint); }
+
+    .hdr { display: flex; align-items: center; gap: 10px; padding: 12px 24px; border-bottom: 1px solid var(--color-border); }
+    .hdr h1 { margin: 0; font-size: 14px; font-weight: 600; }
+    .hdr .spacer { flex: 1; }
+    .ghost { padding: 5px 10px; border-radius: 6px; color: var(--color-text-muted); font-size: 12px; transition: background .15s, color .15s; }
+    .ghost:hover { background: var(--color-elevated); color: var(--color-text); }
+    .primary { padding: 6px 11px; border-radius: 6px; background: var(--color-accent); color: #fff; font-size: 12px; font-weight: 500; transition: background .15s; }
+    .primary:hover { background: var(--color-accent-hover); }
+    .primary:disabled { opacity: .4; cursor: not-allowed; }
+
+    .greet { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+    .greet h2 { margin: 0; font-size: 20px; font-weight: 600; }
+    .greet p { margin: 6px 0 0; color: var(--color-text-muted); }
+    .pill-run {
+      margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 500;
+      background: color-mix(in srgb, var(--color-status-running) 15%, transparent);
+      color: var(--color-status-running); flex-shrink: 0;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 99px; background: currentColor; }
+
+    .card { background: var(--color-card); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; }
+    .card-h { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--color-border); }
+    .card-h strong { font-size: 13px; font-weight: 600; }
+    .card-h .meta { margin-left: auto; font-size: 11px; color: var(--color-text-faint); }
+    .card-b { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .teach { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 16px; font-size: 12px; color: var(--color-text-muted); }
+    .teach a { color: var(--color-accent); }
+    .teach a:hover { text-decoration: underline; }
+
+    .item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 6px; background: var(--color-elevated); border: 1px solid var(--color-border); text-align: left; width: 100%; transition: border-color .15s; }
+    .item:hover { border-color: var(--color-border-strong); }
+    .item.sel { border-color: var(--color-accent); }
+    .item .who { font-size: 11px; color: var(--color-accent); }
+    .item .title { font-size: 12.5px; }
+    .item .when { margin-left: auto; font-size: 10px; color: var(--color-text-faint); flex-shrink: 0; }
+    .acts { display: flex; gap: 6px; margin-top: 8px; }
+    .mini { padding: 3px 8px; border-radius: 5px; font-size: 11px; background: var(--color-card); border: 1px solid var(--color-border); color: var(--color-text-muted); transition: color .15s, border-color .15s; }
+    .mini:hover { color: var(--color-text); border-color: var(--color-border-strong); }
+    .mini.ok { color: var(--color-status-done); }
+    .mini.warn { color: var(--color-accent); }
+
+    .zones { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 16px; }
+    .zone { min-height: 160px; }
+    .zone .hint { font-size: 10px; color: var(--color-text-faint); }
+    .empty { text-align: center; color: var(--color-text-faint); font-size: 11.5px; padding: 28px 8px; }
+
+    .composer {
+      border-top: 1px solid var(--color-border); padding: 12px 24px; background: var(--color-bg);
+      display: flex; gap: 8px; align-items: flex-end;
+    }
+    .composer textarea, .composer input[type="text"] {
+      flex: 1; resize: none; background: var(--color-elevated); border: 1px solid var(--color-border);
+      border-radius: 6px; padding: 8px 10px; outline: none; line-height: 1.45;
+    }
+    .composer textarea:focus, .composer input:focus { border-color: var(--color-accent); }
+
+    .chips { display: flex; gap: 6px; margin: 0 0 12px; }
+    .chip { padding: 4px 10px; border-radius: 999px; font-size: 12px; color: var(--color-text-muted); background: var(--color-elevated); border: 1px solid var(--color-border); transition: background .15s, color .15s, border-color .15s; }
+    .chip.on { color: var(--color-text); border-color: var(--color-accent); background: var(--color-accent-soft); }
+
+    .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-bottom: 16px; }
+    .day { padding: 8px 4px; border-radius: 8px; border: 1px solid var(--color-border); background: var(--color-card); text-align: center; transition: border-color .15s; }
+    .day:hover { border-color: var(--color-border-strong); }
+    .day.on { border-color: var(--color-accent); background: var(--color-accent-soft); }
+    .day .d { font-size: 10px; color: var(--color-text-faint); text-transform: uppercase; }
+    .day .n { font-size: 14px; font-weight: 600; margin: 2px 0; }
+    .day .marks { display: flex; justify-content: center; gap: 3px; height: 6px; }
+    .day .marks i { width: 4px; height: 4px; border-radius: 99px; background: var(--color-accent); display: block; }
+
+    .split { display: flex; flex: 1; min-height: 0; }
+    .split-l { width: 42%; min-width: 320px; border-right: 1px solid var(--color-border); overflow: auto; }
+    .split-r { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .chat-log { flex: 1; overflow: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+    .bubble { max-width: 78%; padding: 8px 11px; border-radius: 8px; font-size: 12.5px; line-height: 1.5; }
+    .bubble.me { align-self: flex-end; background: var(--color-accent-soft); }
+    .bubble.them { align-self: flex-start; background: var(--color-elevated); border: 1px solid var(--color-border); }
+    .bubble .src { font-size: 10px; color: var(--color-text-faint); margin-bottom: 3px; }
+
+    .topbar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; border-bottom: 1px solid var(--color-border); background: var(--color-sidebar); }
+    .cmd {
+      flex: 1; max-width: 520px; display: flex; align-items: center; gap: 8px;
+      background: var(--color-elevated); border: 1px solid var(--color-border); border-radius: 8px; padding: 7px 10px;
+    }
+    .cmd input { flex: 1; background: none; border: 0; outline: none; color: var(--color-text); }
+    .inbox { display: flex; flex: 1; min-height: 0; }
+    .inbox-list { width: 420px; border-right: 1px solid var(--color-border); overflow: auto; }
+    .inbox-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .detail-empty { flex: 1; display: grid; place-items: center; color: var(--color-text-faint); font-size: 13px; }
+    .top-links { display: flex; gap: 4px; }
+    .top-links button { padding: 5px 8px; border-radius: 6px; color: var(--color-text-muted); font-size: 12.5px; }
+    .top-links button:hover, .top-links button.on { color: var(--color-text); background: var(--color-elevated); }
+
+    .ph { flex: 1; display: grid; place-items: center; color: var(--color-text-faint); text-align: center; padding: 40px; }
+    .ph h3 { margin: 0 0 6px; color: var(--color-text); font-size: 16px; }
+
+    #toast {
+      position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%) translateY(12px);
+      background: var(--color-elevated); border: 1px solid var(--color-border); color: var(--color-text);
+      padding: 8px 14px; border-radius: 8px; font-size: 12.5px; opacity: 0; pointer-events: none;
+      transition: opacity .2s, transform .2s; z-index: 10000;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    .gone { display: none !important; }
+    .dayone-only { display: none; }
+    body.dayone .dayone-only { display: block; }
+    body.dayone .steady-only { display: none; }
+
+    #sketch-tools {
+      position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+      font-family: system-ui; font-size: 12px; background: rgba(0,0,0,.72); color: #fff;
+      padding: 8px 12px; border-radius: 8px; opacity: .4; transition: opacity .2s;
+      display: flex; align-items: center; gap: 8px;
+    }
+    #sketch-tools:hover { opacity: 1; }
+    #sketch-tools select, #sketch-tools button {
+      background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 2px 6px; font-size: 11px;
+    }
+    .ann-tip {
+      position: fixed; z-index: 10001; background: #111; color: #fff; font-size: 11px;
+      padding: 4px 6px; border-radius: 4px; pointer-events: none; display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="variant-nav">
+    <button class="variant-tab active" onclick="showVariant('now')">Now<span class="hint">Current app</span></button>
+    <button class="variant-tab" onclick="showVariant('a')">A: Today rail<span class="hint">6 items, one list</span></button>
+    <button class="variant-tab" onclick="showVariant('b')">B: Split<span class="hint">Today + Chat</span></button>
+    <button class="variant-tab" onclick="showVariant('c')">C: Inbox<span class="hint">Needs you is the page</span></button>
+    <span class="nav-note">Same look. Three workflows. Click around.</span>
+  </div>
+
+  <div id="stage">
+    <!-- NOW -->
+    <div id="variant-now" class="variant active">
+      <div class="app">
+        <aside class="rail rail-wide">
+          <div class="ws"><div class="mark">C</div><div><div class="ws-name">Northwind</div><div class="ws-sub">graphite</div></div></div>
+          <button class="search-fake" onclick="toast('Command palette')">Search <kbd>⌘K</kbd></button>
+          <div class="sec">Workspace</div>
+          <button class="nav-item on">Mission Control</button>
+          <button class="nav-item" onclick="toast('Opens Projects')">Projects</button>
+          <button class="nav-item" onclick="toast('Opens Routines')">Routines</button>
+          <button class="nav-item" onclick="toast('Opens Calendar')">Calendar</button>
+          <button class="nav-item" onclick="toast('Opens Team')">Agents</button>
+          <button class="nav-item" onclick="toast('Opens Chat')">Chat</button>
+          <div class="sec">Intelligence</div>
+          <button class="nav-item" onclick="toast('Opens Memory')">Memory</button>
+          <button class="nav-item" onclick="toast('Opens Hive Mind')">Hive Mind</button>
+          <button class="nav-item" onclick="toast('Opens Usage')">Usage</button>
+          <button class="nav-item" onclick="toast('Opens Activity')">Activity</button>
+          <div class="sec">Collaborate</div>
+          <button class="nav-item" onclick="toast('War Room picker, then Voice/Text/Meet')">War Room</button>
+          <div class="sec">Configure</div>
+          <button class="nav-item" onclick="toast('Opens Settings')">Settings</button>
+          <div class="sec">Apps</div>
+          <button class="nav-item" onclick="toast('Launches GitHub')">GitHub</button>
+          <div class="rail-foot">Northwind · All systems normal</div>
+        </aside>
+        <section class="main">
+          <div class="hdr"><h1>Northwind</h1><div class="spacer"></div><button class="ghost" onclick="toast('History drawer')">History</button><button class="primary" onclick="toast('New Task modal — third way to create work')">New task</button></div>
+          <div class="page"><div class="page-pad">
+            <div class="greet">
+              <div><h2>Good evening.</h2><p class="steady-only">2 things need you, 1 waiting on others, 2 shipped this week.</p><p class="dayone-only">I'm set up and running. I don't know much about your work yet.</p></div>
+              <span class="pill-run"><span class="dot"></span> Running</span>
+            </div>
+            <div class="card teach dayone-only">
+              <strong style="color:var(--color-text)">Two minutes to make me useful</strong>
+              <span>Tell me what you are working on · Finish connecting tools · Give me a brief</span>
+            </div>
+            <div class="card teach steady-only">Teach me more: <a href="#" onclick="toast('Jumps to Settings');return false">connect a tool</a> · <a href="#" onclick="toast('Prefills capture');return false">add a business brief</a></div>
+            <div class="card">
+              <div class="card-h"><strong>Needs you</strong><span class="meta">Decisions only you can make</span><button class="ghost" onclick="toast('Opens Calendar page')">Calendar</button></div>
+              <div class="card-b" id="now-needs"></div>
+            </div>
+            <button class="ghost" style="margin:10px 0 0" onclick="toast('Opens Activity')">What your team did →</button>
+            <div class="zones">
+              <div class="card zone"><div class="card-h"><strong>On my plate</strong><span class="meta">2</span></div><div class="card-b" id="now-plate"></div></div>
+              <div class="card zone"><div class="card-h"><strong>Waiting on others</strong><span class="meta">1</span></div><div class="card-b" id="now-wait"></div></div>
+              <div class="card zone"><div class="card-h"><strong>Shipped this week</strong><span class="meta">2</span></div><div class="card-b" id="now-ship"></div></div>
+            </div>
+          </div></div>
+          <div class="composer">
+            <textarea rows="1" placeholder="Tell me anything. Forward an email, drop a note, hand me a task. (⌘↵ to send)"></textarea>
+            <button class="primary" onclick="toast('Creates a mission task — and Chat is a different box')">Send</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- A -->
+    <div id="variant-a" class="variant">
+      <div class="app">
+        <aside class="rail rail-slim">
+          <div class="ws"><div class="mark">C</div><div><div class="ws-name">Northwind</div><div class="ws-sub">Today</div></div></div>
+          <button class="search-fake" onclick="toast('Jump: Hive, Audit, War Room, Usage')">Search <kbd>⌘K</kbd></button>
+          <button class="nav-item on" data-a-nav="today" onclick="aNav(this,'today')">Today</button>
+          <button class="nav-item" data-a-nav="chat" onclick="aNav(this,'chat')">Chat</button>
+          <button class="nav-item" data-a-nav="work" onclick="aNav(this,'work')">Work</button>
+          <button class="nav-item" data-a-nav="team" onclick="aNav(this,'team')">Team</button>
+          <button class="nav-item" data-a-nav="memory" onclick="aNav(this,'memory')">Memory</button>
+          <button class="nav-item" data-a-nav="settings" onclick="aNav(this,'settings')">Settings</button>
+          <div class="rail-foot">All systems normal</div>
+        </aside>
+        <section class="main">
+          <div id="a-today" class="page">
+            <div class="page-pad">
+              <div class="greet steady-only" style="margin-bottom:12px">
+                <div><h2 style="font-size:16px">2 need you</h2><p>CompX date, then the Acme send.</p></div>
+              </div>
+              <div class="card dayone-only" style="padding:16px;margin-bottom:16px">
+                <strong>Two minutes to make me useful</strong>
+                <p style="color:var(--color-text-muted);margin:6px 0 0">Tell me what you are working on. I will put it on Today.</p>
+              </div>
+              <div class="week" id="a-week"></div>
+              <div class="card" style="margin-bottom:14px">
+                <div class="card-h"><strong>Needs you</strong><span class="meta" id="a-needs-count"></span></div>
+                <div class="card-b" id="a-needs"></div>
+              </div>
+              <div class="chips" id="a-chips">
+                <button class="chip on" data-filter="all" onclick="aFilter('all')">All</button>
+                <button class="chip" data-filter="plate" onclick="aFilter('plate')">On plate</button>
+                <button class="chip" data-filter="waiting" onclick="aFilter('waiting')">Waiting</button>
+                <button class="chip" data-filter="shipped" onclick="aFilter('shipped')">Shipped</button>
+              </div>
+              <div id="a-work"></div>
+              <button class="ghost" style="margin-top:10px" onclick="document.getElementById('a-digest').classList.toggle('gone')">Comms sent the Northwind recap · Research queued CompX prep</button>
+              <div id="a-digest" class="card gone" style="margin-top:8px"><div class="card-b" style="color:var(--color-text-muted);font-size:12.5px">Full activity stays here. Hive Mind and Audit live in Settings / ⌘K.</div></div>
+            </div>
+          </div>
+          <div id="a-other" class="ph gone"><div><h3 id="a-other-title">Chat</h3><p>Same destination. Not a second inbox.</p></div></div>
+          <div class="composer">
+            <textarea id="a-input" rows="1" placeholder="Ask, forward, or hand off. Lands in Chat."></textarea>
+            <button class="primary" onclick="aSend()">Ask</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div id="variant-b" class="variant">
+      <div class="app">
+        <aside class="rail rail-icon">
+          <div class="ws" style="padding:14px 0 8px;justify-content:center"><div class="mark">C</div></div>
+          <button class="icon-btn on" title="Today" onclick="bRail(this)">T</button>
+          <button class="icon-btn" title="Work" onclick="bRail(this)">W</button>
+          <button class="icon-btn" title="Team" onclick="bRail(this)">P</button>
+          <button class="icon-btn" title="Memory" onclick="bRail(this)">M</button>
+          <button class="icon-btn" title="Settings" onclick="bRail(this)">S</button>
+          <div class="rail-foot" style="border:0;padding:8px;text-align:center">⌘K</div>
+        </aside>
+        <div class="split">
+          <div class="split-l">
+            <div class="hdr"><h1>Today</h1></div>
+            <div class="page-pad" style="padding:16px">
+              <div class="card" style="margin-bottom:12px">
+                <div class="card-h"><strong>Needs you</strong></div>
+                <div class="card-b" id="b-needs"></div>
+              </div>
+              <div class="chips" id="b-chips">
+                <button class="chip on" onclick="bFilter('all',this)">Motion</button>
+                <button class="chip" onclick="bFilter('waiting',this)">Waiting</button>
+                <button class="chip" onclick="bFilter('shipped',this)">Shipped</button>
+              </div>
+              <div id="b-work"></div>
+            </div>
+          </div>
+          <div class="split-r">
+            <div class="hdr">
+              <h1>Chat</h1>
+              <button class="ghost on" style="background:var(--color-elevated)">All</button>
+              <button class="ghost">Main</button>
+              <button class="ghost">Research</button>
+              <button class="ghost">Comms</button>
+            </div>
+            <div class="chat-log" id="b-log">
+              <div class="bubble them"><div class="src">Research</div>CompX intro is blocked on a date. Two windows still open this week.</div>
+              <div class="bubble me">Hold the send on Acme until I look at the last paragraph.</div>
+              <div class="bubble them"><div class="src">Comms</div>Proposal is ready. Waiting on your yes.</div>
+            </div>
+            <div class="composer">
+              <textarea id="b-input" rows="1" placeholder="Reply in the same thread. Approvals stay on the left."></textarea>
+              <button class="primary" onclick="bSend()">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div id="variant-c" class="variant">
+      <div class="app" style="flex-direction:column">
+        <div class="topbar">
+          <div class="mark">C</div>
+          <div class="top-links">
+            <button class="on">Today</button>
+            <button onclick="toast('Work is a command, not a rail item')">Work</button>
+            <button onclick="toast('Team')">Team</button>
+            <button onclick="toast('Memory')">Memory</button>
+          </div>
+          <div class="cmd">
+            <span style="color:var(--color-text-faint)">⌘K</span>
+            <input id="c-q" placeholder="Jump or filter needs you…" oninput="cFilter(this.value)" />
+          </div>
+          <button class="ghost" onclick="toast('Settings · Usage · Audit · War Room')">More</button>
+        </div>
+        <div class="inbox">
+          <div class="inbox-list">
+            <div class="hdr"><h1>Needs you</h1><span class="meta" style="font-size:11px;color:var(--color-text-faint)" id="c-count"></span></div>
+            <div id="c-list" style="padding:8px"></div>
+            <div style="padding:8px 12px 16px">
+              <div class="sec" style="padding:8px 4px">Also moving</div>
+              <div id="c-motion"></div>
+            </div>
+          </div>
+          <div class="inbox-detail" id="c-detail">
+            <div class="detail-empty">Pick a decision. Approve here. No extra page.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <div class="ann-tip" id="ann-tip"></div>
+  <div id="sketch-tools" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=.4">
+    <select onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'">
+      <option value="default">Graphite</option>
+      <option value="midnight">Midnight</option>
+      <option value="crimson">Crimson</option>
+    </select>
+    <button onclick="setView('100%')">Full</button>
+    <button onclick="setView('1280px')">Desk</button>
+    <button onclick="setView('768px')">Tablet</button>
+    <button onclick="toggleDayone()">Day one</button>
+    <button onclick="toggleAnn()">Annotate</button>
+  </div>
+
+  <script>
+    const needs = [
+      { id: 'n1', title: 'Send the Acme proposal to Sarah', who: 'Comms', when: '2m', kind: 'approval', body: 'Last paragraph still has the old pricing. Approve after you glance at it.' },
+      { id: 'n2', title: 'Pick a date for the CompX intro', who: 'Research', when: '1h', kind: 'blocked', body: 'Thu 2pm or Fri 10am. Both work on their side.' },
+    ];
+    const plate = [
+      { id: 'p1', title: 'Draft Q3 hiring brief', who: 'Comms', status: 'Working', bucket: 'plate' },
+      { id: 'p2', title: 'Prep Thursday CompX call', who: 'Research', status: 'Queued', bucket: 'plate' },
+    ];
+    const waiting = [{ id: 'w1', title: 'NDA from legal', who: 'Sarah', status: '2d', bucket: 'waiting' }];
+    const shipped = [
+      { id: 's1', title: 'Northwind weekly recap', who: 'Comms', status: 'Shipped', bucket: 'shipped' },
+      { id: 's2', title: 'Inbox triage', who: 'Main', status: 'Shipped', bucket: 'shipped' },
+    ];
+    const week = [
+      { d: 'Sun', n: 9, marks: 0 }, { d: 'Mon', n: 10, marks: 1 }, { d: 'Tue', n: 11, marks: 0 },
+      { d: 'Wed', n: 12, marks: 2 }, { d: 'Thu', n: 13, marks: 1 }, { d: 'Fri', n: 14, marks: 0 }, { d: 'Sat', n: 15, marks: 0 },
+    ];
+
+    function toast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => el.classList.remove('show'), 2200);
+    }
+
+    function showVariant(id) {
+      document.querySelectorAll('.variant').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.variant-tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('variant-' + id).classList.add('active');
+      event.target.closest('.variant-tab').classList.add('active');
+    }
+
+    function iconDot(color) {
+      return `<span class="dot" style="background:${color};margin-top:5px;flex-shrink:0"></span>`;
+    }
+
+    function needsRow(item, opts = {}) {
+      const actions = opts.inbox
+        ? ''
+        : `<div class="acts">
+            <button class="mini ok" onclick="event.stopPropagation(); approve('${item.id}')">Approve</button>
+            <button class="mini warn" onclick="event.stopPropagation(); askAbout('${item.id}')">Ask</button>
+          </div>`;
+      return `<button class="item ${opts.sel ? 'sel' : ''}" onclick="${opts.onClick || `approve('${item.id}')`}">
+        ${iconDot('var(--color-accent)')}
+        <div style="flex:1;min-width:0">
+          <div class="who">${item.who} · ${item.kind === 'approval' ? 'Needs approval' : 'Blocked on you'}</div>
+          <div class="title">${item.title}</div>
+          ${actions}
+        </div>
+        <span class="when">${item.when}</span>
+      </button>`;
+    }
+
+    function workRow(item) {
+      const tone = item.bucket === 'waiting' ? 'var(--color-status-running)' : item.bucket === 'shipped' ? 'var(--color-status-done)' : 'var(--color-text-faint)';
+      return `<div class="item" style="margin-bottom:6px">
+        ${iconDot(tone)}
+        <div style="flex:1"><div class="title">${item.title}</div><div class="who">${item.who}</div></div>
+        <span class="when">${item.status}</span>
+      </div>`;
+    }
+
+    function renderNow() {
+      document.getElementById('now-needs').innerHTML = needs.map(n => needsRow(n)).join('');
+      document.getElementById('now-plate').innerHTML = plate.map(workRow).join('');
+      document.getElementById('now-wait').innerHTML = waiting.map(workRow).join('');
+      document.getElementById('now-ship').innerHTML = shipped.map(workRow).join('');
+    }
+
+    let aFilterKey = 'all';
+    function aWeek() {
+      const today = 4;
+      document.getElementById('a-week').innerHTML = week.map((d, i) => `
+        <button class="day ${i === today ? 'on' : ''}" onclick="document.querySelectorAll('#a-week .day').forEach(x=>x.classList.remove('on'));this.classList.add('on');toast('${d.d} ${d.n}${d.marks ? ': ' + d.marks + ' on the calendar' : ': clear'}')">
+          <div class="d">${d.d}</div><div class="n">${d.n}</div>
+          <div class="marks">${'<i></i>'.repeat(d.marks)}</div>
+        </button>`).join('');
+    }
+    function aNeeds() {
+      const live = needs.filter(n => !n.done);
+      document.getElementById('a-needs').innerHTML = live.length ? live.map(n => needsRow(n)).join('') : '<div class="empty">Nothing needs you.</div>';
+      document.getElementById('a-needs-count').textContent = live.length ? live.length + ' open' : 'Clear';
+    }
+    function aWork() {
+      const all = [...plate, ...waiting, ...shipped];
+      const rows = aFilterKey === 'all' ? all : all.filter(x => x.bucket === aFilterKey);
+      document.getElementById('a-work').innerHTML = rows.map(workRow).join('');
+    }
+    function aFilter(key) {
+      aFilterKey = key;
+      document.querySelectorAll('#a-chips .chip').forEach(c => c.classList.toggle('on', c.dataset.filter === key));
+      aWork();
+    }
+    function aNav(btn, name) {
+      document.querySelectorAll('[data-a-nav]').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      const today = name === 'today';
+      document.getElementById('a-today').classList.toggle('gone', !today);
+      document.getElementById('a-other').classList.toggle('gone', today);
+      document.getElementById('a-other-title').textContent = name[0].toUpperCase() + name.slice(1);
+    }
+    function aSend() {
+      const el = document.getElementById('a-input');
+      if (!el.value.trim()) return;
+      toast('Routed to Chat · Research');
+      el.value = '';
+    }
+
+    function bNeeds() {
+      document.getElementById('b-needs').innerHTML = needs.filter(n => !n.done).map(n =>
+        needsRow(n, { onClick: `askAbout('${n.id}')` })
+      ).join('') || '<div class="empty">Inbox clear.</div>';
+    }
+    function bWork(filter) {
+      const all = [...plate, ...waiting, ...shipped];
+      const rows = !filter || filter === 'all' ? [...plate, ...waiting] : all.filter(x => x.bucket === filter);
+      document.getElementById('b-work').innerHTML = rows.map(workRow).join('');
+    }
+    function bFilter(key, btn) {
+      document.querySelectorAll('#b-chips .chip').forEach(c => c.classList.remove('on'));
+      btn.classList.add('on');
+      bWork(key === 'Motion' || key === 'all' ? 'all' : key);
+    }
+    function bRail(btn) {
+      document.querySelectorAll('.rail-icon .icon-btn').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      toast(btn.title);
+    }
+    function bSend() {
+      const el = document.getElementById('b-input');
+      const t = el.value.trim();
+      if (!t) return;
+      const log = document.getElementById('b-log');
+      log.insertAdjacentHTML('beforeend', `<div class="bubble me">${t}</div>`);
+      el.value = '';
+      log.scrollTop = log.scrollHeight;
+      setTimeout(() => {
+        log.insertAdjacentHTML('beforeend', `<div class="bubble them"><div class="src">Main</div>On it. I will park a note on Today if it needs a decision.</div>`);
+        log.scrollTop = log.scrollHeight;
+      }, 500);
+    }
+
+    let cSel = null;
+    function cList(q = '') {
+      const live = needs.filter(n => !n.done && n.title.toLowerCase().includes(q.toLowerCase()));
+      document.getElementById('c-list').innerHTML = live.map(n =>
+        needsRow(n, { inbox: true, sel: cSel === n.id, onClick: `cOpen('${n.id}')` })
+      ).join('') || '<div class="empty">Nothing matches.</div>';
+      document.getElementById('c-count').textContent = live.length + ' open';
+      document.getElementById('c-motion').innerHTML = plate.map(workRow).join('');
+    }
+    function cOpen(id) {
+      cSel = id;
+      cList(document.getElementById('c-q').value);
+      const n = needs.find(x => x.id === id);
+      document.getElementById('c-detail').innerHTML = `
+        <div class="hdr"><h1>${n.title}</h1></div>
+        <div class="page-pad">
+          <p style="color:var(--color-text-muted);margin:0 0 16px">${n.body}</p>
+          <p style="font-size:12px;color:var(--color-accent);margin:0 0 20px">${n.who} is waiting.</p>
+          <div class="acts">
+            <button class="primary" onclick="approve('${n.id}')">Approve</button>
+            <button class="ghost" onclick="askAbout('${n.id}')">Ask in Chat</button>
+          </div>
+        </div>
+        <div class="composer">
+          <input type="text" placeholder="Note to ${n.who}…" onkeydown="if(event.key==='Enter'){toast('Note sent');this.value=''}" />
+          <button class="primary" onclick="toast('Note sent')">Send</button>
+        </div>`;
+    }
+    function cFilter(q) { cList(q); }
+
+    function approve(id) {
+      const n = needs.find(x => x.id === id);
+      if (!n || n.done) return;
+      n.done = true;
+      toast('Approved · ' + n.who + ' will take it');
+      refresh();
+      if (cSel === id) {
+        document.getElementById('c-detail').innerHTML = '<div class="detail-empty">Done. Pick the next one.</div>';
+        cSel = null;
+      }
+    }
+    function askAbout(id) {
+      const n = needs.find(x => x.id === id);
+      toast('Opened Chat about: ' + n.title);
+      const a = document.getElementById('a-input');
+      const b = document.getElementById('b-input');
+      if (a) a.value = 'About this: ' + n.title;
+      if (b) { b.value = 'Hold on — ' + n.title; b.focus(); }
+    }
+
+    function refresh() {
+      renderNow(); aNeeds(); aWork(); bNeeds(); bWork('all'); cList(document.getElementById('c-q').value);
+    }
+
+    function setView(w) { document.getElementById('stage').style.maxWidth = w === '100%' ? 'none' : w; }
+    function toggleDayone() { document.body.classList.toggle('dayone'); }
+    let ann = false;
+    function toggleAnn() {
+      ann = !ann;
+      document.getElementById('ann-tip').style.display = ann ? 'block' : 'none';
+    }
+    document.addEventListener('mousemove', (e) => {
+      if (!ann) return;
+      const tip = document.getElementById('ann-tip');
+      const s = getComputedStyle(e.target);
+      tip.textContent = `${s.fontSize} · ${s.color} · ${s.padding}`;
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY + 12) + 'px';
+    });
+
+    aWeek();
+    refresh();
+  </script>
+</body>
+</html>
