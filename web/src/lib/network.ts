@@ -12,3 +12,15 @@ export function networkErrorMessage(err: unknown): string {
   }
   return raw;
 }
+
+/**
+ * Vite's proxy turns ECONNREFUSED into HTTP 500 text/plain (empty body).
+ * A live ClaudeClaw API 500 is JSON. Treat the proxy shape, plus gateway
+ * statuses, as "backend is not reachable" so Mission Control doesn't
+ * show "GET /api/home/summary failed: 500".
+ */
+export function isBackendUnreachable(status: number, contentType: string | null | undefined): boolean {
+  if (status === 0 || status === 502 || status === 503 || status === 504) return true;
+  if (status !== 500) return false;
+  return !String(contentType || '').toLowerCase().includes('application/json');
+}

@@ -51,8 +51,9 @@ export function startChatStream() {
     // proxy pointing at a dead port) that is a tight loop of
     // net::ERR_CONNECTION_REFUSED. Close and back off ourselves instead.
     es.onerror = () => {
+      if (!es) return;
       chatStreamConnected.value = false;
-      es?.close();
+      es.close();
       es = null;
       attempts += 1;
       const delay = nextReconnectDelay(attempts);

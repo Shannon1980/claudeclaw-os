@@ -4,7 +4,7 @@
 // We never use localStorage: dashboardToken is sensitive, and storing it
 // across browser sessions would enlarge its blast radius.
 
-import { networkErrorMessage } from './network';
+import { networkErrorMessage, isBackendUnreachable } from './network';
 
 const url = new URL(window.location.href);
 
@@ -37,11 +37,16 @@ export class ApiError extends Error {
 }
 
 async function send(path: string, init: RequestInit): Promise<Response> {
+  let res: Response;
   try {
-    return await fetch(withToken(path), init);
+    res = await fetch(withToken(path), init);
   } catch (err) {
     throw new ApiError(0, null, networkErrorMessage(err));
   }
+  if (isBackendUnreachable(res.status, res.headers.get('content-type'))) {
+    throw new ApiError(res.status, null, networkErrorMessage(new TypeError('Failed to fetch')));
+  }
+  return res;
 }
 
 export async function apiGet<T = unknown>(path: string): Promise<T> {
