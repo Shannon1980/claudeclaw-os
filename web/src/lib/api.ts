@@ -4,6 +4,8 @@
 // We never use localStorage: dashboardToken is sensitive, and storing it
 // across browser sessions would enlarge its blast radius.
 
+import { networkErrorMessage } from './network';
+
 const url = new URL(window.location.href);
 
 let cachedToken = url.searchParams.get('token') || '';
@@ -34,8 +36,16 @@ export class ApiError extends Error {
   }
 }
 
+async function send(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(withToken(path), init);
+  } catch (err) {
+    throw new ApiError(0, null, networkErrorMessage(err));
+  }
+}
+
 export async function apiGet<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(withToken(path), { method: 'GET' });
+  const res = await send(path, { method: 'GET' });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body, `GET ${path} failed: ${res.status}`);
@@ -44,7 +54,7 @@ export async function apiGet<T = unknown>(path: string): Promise<T> {
 }
 
 export async function apiPost<T = unknown>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(withToken(path), {
+  const res = await send(path, {
     method: 'POST',
     headers: body ? { 'content-type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
@@ -59,7 +69,7 @@ export async function apiPost<T = unknown>(path: string, body?: unknown): Promis
 /** Multipart upload. The browser sets the multipart boundary, so no
  *  explicit content-type header here. */
 export async function apiUpload<T = unknown>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(withToken(path), { method: 'POST', body: form });
+  const res = await send(path, { method: 'POST', body: form });
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
     const msg = (errBody as any)?.error || `POST ${path} failed: ${res.status}`;
@@ -69,7 +79,7 @@ export async function apiUpload<T = unknown>(path: string, form: FormData): Prom
 }
 
 export async function apiPatch<T = unknown>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(withToken(path), {
+  const res = await send(path, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -82,7 +92,7 @@ export async function apiPatch<T = unknown>(path: string, body: unknown): Promis
 }
 
 export async function apiPut<T = unknown>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(withToken(path), {
+  const res = await send(path, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -95,7 +105,7 @@ export async function apiPut<T = unknown>(path: string, body: unknown): Promise<
 }
 
 export async function apiDelete<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(withToken(path), { method: 'DELETE' });
+  const res = await send(path, { method: 'DELETE' });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body, `DELETE ${path} failed: ${res.status}`);
@@ -111,7 +121,9 @@ export function tokenizedSseUrl(path: string): string {
 // backend on :3141. The legacy voice room at /warroom?mode=voice can't
 // be proxied (it shares a path prefix with the v2 SPA route), so links
 // that go to legacy pages must point at the backend origin in dev.
-const BACKEND_ORIGIN = (import.meta as any).env?.DEV ? 'http://localhost:3141' : '';
+const BACKEND_ORIGIN = (import.meta as any).env?.DEV
+  ? ((import.meta as any).env?.VITE_BACKEND_ORIGIN || 'http://localhost:3141')
+  : '';
 
 export function legacyUrl(path: string): string {
   return BACKEND_ORIGIN + path;

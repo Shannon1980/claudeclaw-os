@@ -1,6 +1,9 @@
+import { EventEmitter } from 'events';
 import { describe, it, expect } from 'vitest';
+import { Client, Events, GatewayIntentBits, Partials } from 'discord.js';
 
 import {
+  attachDiscordClientGuards,
   classifyDiscordCommand,
   discordChatId,
   isAuthorisedDiscord,
@@ -16,6 +19,29 @@ describe('isAuthorisedDiscord', () => {
   it('fails closed when no env lock and no approved pairing', () => {
     expect(isAuthorisedDiscord('1234567890')).toBe(false);
     expect(isAuthorisedDiscord(undefined)).toBe(false);
+  });
+});
+
+describe('attachDiscordClientGuards', () => {
+  it('an unguarded emitter throws on error (the process-kill path)', () => {
+    const client = new EventEmitter();
+    expect(() => client.emit('error', new Error('ws down'))).toThrow('ws down');
+  });
+
+  it('does not throw when the client emits error after guards are attached', () => {
+    const client = new EventEmitter();
+    attachDiscordClientGuards(client);
+    expect(() => client.emit('error', new Error('ws down'))).not.toThrow();
+  });
+
+  it('keeps a real discord.js Client alive when it emits error', () => {
+    const client = new Client({
+      intents: [GatewayIntentBits.DirectMessages],
+      partials: [Partials.Channel],
+    });
+    attachDiscordClientGuards(client);
+    expect(() => client.emit(Events.Error, new Error('ws down'))).not.toThrow();
+    client.destroy();
   });
 });
 

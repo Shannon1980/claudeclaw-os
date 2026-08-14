@@ -2,6 +2,13 @@
 
 All notable changes to ClaudeClaw will be documented here.
 
+## [unreleased] - 2026-08-14
+
+### Fixed — Mission Control failed to load
+- Discord client `error` events had no listener, so a websocket drop threw and killed the Node process. The SPA stayed on screen while every `/api/*` call hit `net::ERR_CONNECTION_REFUSED` ("TypeError: Failed to fetch"). Guard the client, isolate constructor failures, and catch message-handler rejections so the dashboard stays up.
+- Chat SSE no longer tight-loops reconnects when the backend is down (thousands of console errors). Exponential backoff after close.
+- Vite's `/api` proxy honors `DASHBOARD_PORT` instead of hardcoding `:3141`, and warns if the backend is unreachable. Network failures render as "Can't reach the assistant" instead of a raw TypeError.
+
 ## [unreleased] - 2026-08-13
 
 ### Added — Discord channel

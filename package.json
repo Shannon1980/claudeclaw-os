@@ -81,7 +81,8 @@
   "vitest": {
     "environment": "node",
     "include": [
-      "src/**/*.test.ts"
+      "src/**/*.test.ts",
+      "web/src/**/*.test.ts"
     ]
   },
   "build": {
