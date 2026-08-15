@@ -172,6 +172,23 @@ export interface DiscordBot {
   stop: () => Promise<void>;
 }
 
+/**
+ * discord.js Client extends EventEmitter. An `error` event with no listener
+ * throws and takes down the whole Node process — dashboard included, which
+ * is the Mission Control "TypeError: Failed to fetch" / connection-refused
+ * storm. Attach these before login.
+ */
+export function attachDiscordClientGuards(
+  client: { on(event: string, listener: (...args: unknown[]) => void): unknown },
+): void {
+  client.on(Events.Error, (err: unknown) => {
+    logger.error({ err }, 'Discord client error');
+  });
+  client.on(Events.ShardError, (err: unknown, shardId: unknown) => {
+    logger.error({ err, shardId }, 'Discord shard error');
+  });
+}
+
 export function createDiscordBot(token: string): DiscordBot {
   if (!token) {
     throw new Error('DISCORD_BOT_TOKEN is not set.');
@@ -186,8 +203,12 @@ export function createDiscordBot(token: string): DiscordBot {
     partials: [Partials.Channel, Partials.Message],
   });
 
+  attachDiscordClientGuards(client);
+
   client.on(Events.MessageCreate, (message: Message) => {
-    void handleDiscordMessage(client, message);
+    void handleDiscordMessage(client, message).catch((err) => {
+      logger.error({ err }, 'Discord message handler failed');
+    });
   });
 
   const start = async () => {

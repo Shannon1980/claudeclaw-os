@@ -1,5 +1,6 @@
 import { signal, effect } from '@preact/signals';
 import { tokenizedSseUrl, dashboardToken } from './api';
+import { nextReconnectDelay, shouldTearDownSseOnError } from './network';
 
 // Global chat SSE state — opened once when the app mounts so the unread
 // badge keeps tracking even when /chat isn't the active page.
@@ -26,6 +27,8 @@ export function startChatStream() {
 
   let es: EventSource | null = null;
   let activeRoute = window.location.pathname;
+  let attempts = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   function reactToRoute() { activeRoute = window.location.pathname; }
   window.addEventListener('popstate', reactToRoute);
@@ -40,8 +43,25 @@ export function startChatStream() {
   function open() {
     if (es) return;
     es = new EventSource(tokenizedSseUrl('/api/chat/stream'));
-    es.onopen = () => { chatStreamConnected.value = true; };
-    es.onerror = () => { chatStreamConnected.value = false; };
+    es.onopen = () => {
+      chatStreamConnected.value = true;
+      attempts = 0;
+    };
+    // EventSource reconnects on its own, and with a down backend (or a Vite
+    // proxy pointing at a dead port) that is a tight loop of
+    // net::ERR_CONNECTION_REFUSED. Close and back off ourselves instead.
+    es.onerror = (ev: Event) => {
+      const readyState = es?.readyState ?? 2;
+      if (!shouldTearDownSseOnError(ev, readyState)) return;
+      if (!es) return;
+      chatStreamConnected.value = false;
+      es.close();
+      es = null;
+      attempts += 1;
+      const delay = nextReconnectDelay(attempts);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(open, delay);
+    };
 
     const dispatch = (eventName: string) => (ev: MessageEvent) => {
       let data: any;

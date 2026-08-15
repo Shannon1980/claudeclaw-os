@@ -234,8 +234,14 @@ async function main(): Promise<void> {
   const bot = (useSlack || useSlackSender) ? undefined : createBot();
   const slack: SlackBot | undefined = useSlack ? createSlackBot() : undefined;
   const slackSender: SlackSender | undefined = useSlackSender ? createSlackSender() : undefined;
-  const discord: DiscordBot | undefined =
-    AGENT_ID === 'main' && DISCORD_BOT_TOKEN ? createDiscordBot(DISCORD_BOT_TOKEN) : undefined;
+  let discord: DiscordBot | undefined;
+  if (AGENT_ID === 'main' && DISCORD_BOT_TOKEN) {
+    try {
+      discord = createDiscordBot(DISCORD_BOT_TOKEN);
+    } catch (err) {
+      logger.error({ err }, 'Discord bot failed to construct. Dashboard will still start.');
+    }
+  }
 
   // Unified proactive notifier — routes scheduler / OAuth-health / War Room
   // messages to whichever transport is active.

@@ -2,7 +2,7 @@
 sketch: 001
 name: daily-shell
 question: "What shell should the operator live in all day?"
-winner: null
+winner: A
 tags: [layout, nav, home, workflow]
 ---
 
