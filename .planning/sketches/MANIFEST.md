@@ -10,4 +10,4 @@ Current ClaudeClaw dashboard (graphite tokens, 12–13px type, quiet chrome). Li
 
 | # | Name | Design Question | Winner | Tags |
 |---|------|----------------|--------|------|
-| 001 | daily-shell | What shell should the operator live in all day? | | layout, nav, home, workflow |
+| 001 | daily-shell | What shell should the operator live in all day? | A: Today rail | layout, nav, home, workflow |
