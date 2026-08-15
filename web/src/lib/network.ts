@@ -1,3 +1,18 @@
+/**
+ * EventSource uses the same `error` event for a dead socket and for a
+ * named SSE frame (`event: error`). Chat delivers agent failures that way
+ * via ChatEvent. Only tear the stream down when this looks like transport
+ * failure: readyState is no longer OPEN, and the event is not a payload
+ * MessageEvent.
+ */
+export function shouldTearDownSseOnError(ev: Event, readyState: number): boolean {
+  if (readyState === 1) return false;
+  if (typeof MessageEvent !== 'undefined' && ev instanceof MessageEvent) {
+    return !(typeof ev.data === 'string' && ev.data.length > 0);
+  }
+  return true;
+}
+
 /** Backoff for EventSource / poll retries when the API is unreachable. */
 export function nextReconnectDelay(attempts: number, baseMs = 1000, maxMs = 30_000): number {
   const exp = Math.min(Math.max(0, attempts - 1), 5);

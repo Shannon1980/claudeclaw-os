@@ -1,6 +1,6 @@
 import { signal, effect } from '@preact/signals';
 import { tokenizedSseUrl, dashboardToken } from './api';
-import { nextReconnectDelay } from './network';
+import { nextReconnectDelay, shouldTearDownSseOnError } from './network';
 
 // Global chat SSE state — opened once when the app mounts so the unread
 // badge keeps tracking even when /chat isn't the active page.
@@ -50,7 +50,9 @@ export function startChatStream() {
     // EventSource reconnects on its own, and with a down backend (or a Vite
     // proxy pointing at a dead port) that is a tight loop of
     // net::ERR_CONNECTION_REFUSED. Close and back off ourselves instead.
-    es.onerror = () => {
+    es.onerror = (ev: Event) => {
+      const readyState = es?.readyState ?? 2;
+      if (!shouldTearDownSseOnError(ev, readyState)) return;
       if (!es) return;
       chatStreamConnected.value = false;
       es.close();

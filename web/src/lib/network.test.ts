@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextReconnectDelay, networkErrorMessage, isBackendUnreachable } from './network';
+import { nextReconnectDelay, networkErrorMessage, isBackendUnreachable, shouldTearDownSseOnError } from './network';
 
 describe('nextReconnectDelay', () => {
   it('starts at the base interval and doubles up to the cap', () => {
@@ -22,6 +22,21 @@ describe('networkErrorMessage', () => {
     expect(networkErrorMessage(new Error('GET /api/health failed: 500'))).toBe(
       'GET /api/health failed: 500',
     );
+  });
+});
+
+describe('shouldTearDownSseOnError', () => {
+  it('keeps a healthy stream up for application event: error', () => {
+    const ev = new MessageEvent('error', { data: JSON.stringify({ type: 'error', content: 'agent failed' }) });
+    expect(shouldTearDownSseOnError(ev, 1)).toBe(false);
+    expect(shouldTearDownSseOnError(ev, 0)).toBe(false);
+  });
+
+  it('tears down on a transport error while connecting or closed', () => {
+    const ev = new Event('error');
+    expect(shouldTearDownSseOnError(ev, 0)).toBe(true);
+    expect(shouldTearDownSseOnError(ev, 2)).toBe(true);
+    expect(shouldTearDownSseOnError(ev, 1)).toBe(false);
   });
 });
 
