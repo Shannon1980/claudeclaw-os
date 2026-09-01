@@ -68,6 +68,21 @@ function refreshConfig() {
 // ── Service lifecycle ──────────────────────────────────────────────────
 let serviceProc = null;
 let mainWindow = null;
+let serviceStopping = false;
+let serviceRespawnTimer = null;
+let serviceRespawnAttempts = 0;
+const MAX_SERVICE_RESPAWNS = 8;
+
+function clearServiceRespawn() {
+  if (serviceRespawnTimer) {
+    clearTimeout(serviceRespawnTimer);
+    serviceRespawnTimer = null;
+  }
+}
+
+function serviceRespawnDelayMs(attempt) {
+  return Math.min(30000, 500 * 2 ** Math.min(Math.max(attempt - 1, 0), 6));
+}
 
 // How to launch the Node service:
 //   - CLAUDECLAW_SERVICE_CMD: explicit override ("node dist/index.js").
@@ -118,17 +133,62 @@ function startService() {
   });
   serviceProc.stdout.on('data', (b) => process.stdout.write(`[service] ${b}`));
   serviceProc.stderr.on('data', (b) => process.stderr.write(`[service] ${b}`));
+  // `error` (ENOENT) and `exit` can both fire for one failed spawn. Only
+  // schedule one respawn so the backoff counter stays honest.
+  let gone = false;
+  const handleGone = () => {
+    if (gone) return;
+    gone = true;
+    serviceProc = null;
+    if (!serviceStopping) scheduleServiceRespawn();
+  };
   serviceProc.on('exit', (code, signal) => {
     console.log(`[shell] service exited code=${code} signal=${signal}`);
-    serviceProc = null;
+    handleGone();
   });
   serviceProc.on('error', (err) => {
     console.error('[shell] failed to spawn service:', err);
-    serviceProc = null;
+    handleGone();
   });
 }
 
+function scheduleServiceRespawn() {
+  if (serviceStopping) return;
+  clearServiceRespawn();
+  serviceRespawnAttempts += 1;
+  if (serviceRespawnAttempts > MAX_SERVICE_RESPAWNS) {
+    console.error(`[shell] service crashed ${MAX_SERVICE_RESPAWNS} times; giving up`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(
+        bootUrl('error', `The assistant stopped and could not be restarted on port ${PORT}.`),
+      );
+    }
+    return;
+  }
+  const delayMs = serviceRespawnDelayMs(serviceRespawnAttempts);
+  console.log(`[shell] respawning service in ${delayMs}ms (attempt ${serviceRespawnAttempts})`);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadURL(bootUrl('starting', 'The assistant stopped. Bringing it back…'));
+  }
+  serviceRespawnTimer = setTimeout(() => {
+    serviceRespawnTimer = null;
+    startService();
+    waitForDashboard().then((ready) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (ready) {
+        serviceRespawnAttempts = 0;
+        refreshConfig();
+        mainWindow.loadURL(DASHBOARD_URL);
+        return;
+      }
+      scheduleServiceRespawn();
+    });
+  }, delayMs);
+}
+
 function stopService() {
+  serviceStopping = true;
+  clearServiceRespawn();
   if (serviceProc) {
     try {
       serviceProc.kill();
@@ -340,6 +400,9 @@ function createWindow() {
 // Start the service and load the dashboard once it is up. Shared by the
 // configured-boot path and onboarding's finish().
 async function bootDashboard() {
+  serviceStopping = false;
+  serviceRespawnAttempts = 0;
+  clearServiceRespawn();
   refreshConfig();
 
   // Ensure the writable data dir exists before anything writes to it (migration
