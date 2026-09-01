@@ -118,9 +118,18 @@ agents/*/.no-avatar
 agents/*/CLAUDE.md.backup
 agents/*/agent.yaml.backup
 
-# Local Claude Code skills — these are user-specific workflow configs
-# (absolute paths, private repo refs). Keep them out of the shared repo.
-.claude/skills/
+# Local Claude Code skills — user-specific workflow configs (absolute
+# paths, private repo refs). Ignore the contents, then re-include the
+# shared project skills. A trailing slash on the directory itself would
+# make git skip the folder and ignore the exceptions.
+.claude/skills/*
+!.claude/skills/add-migration/
+!.claude/skills/add-migration/**
+!.claude/skills/pr-check/
+!.claude/skills/pr-check/**
+!.claude/skills/new-agent/
+!.claude/skills/new-agent/**
+
 
 # Claudex (codex review loop) state and logs. Per-machine artifacts:
 # state files reference local PIDs and absolute paths; log files stream

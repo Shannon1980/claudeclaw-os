@@ -62,6 +62,8 @@ describe('classify', () => {
     expect(classifyTier('Bash', { command: 'npm run migrate' })).toBe(4 as Tier);
     expect(classifyTier('Bash', { command: 'ditto /tmp/x/ClaudeClaw.app /Applications/ClaudeClaw.app' })).toBe(4 as Tier);
     expect(classifyTier('Bash', { command: 'launchctl bootout gui/501/com.claudeclaw.main' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'git commit --no-verify -m x' })).toBe(4 as Tier);
+    expect(classifyTier('Bash', { command: 'git config core.hooksPath /tmp/hooks' })).toBe(4 as Tier);
   });
 
   it('leaves ordinary PR-flow Bash commands below Tier 4', () => {
