@@ -28,6 +28,7 @@
 
 import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { audit } from './security.js';
+import { isShipCommand } from './claude-code-policy.js';
 import { getMode, getOverrides, type Mode, type OverrideValue } from './permissions-config.js';
 import { isEnabled } from './kill-switches.js';
 import { logger } from './logger.js';
@@ -88,22 +89,10 @@ const TIER2_PATTERNS: RegExp[] = [/label/i, /save/i, /upload/i, /drive/i, /archi
  * open a PR unattended; the PR itself is the reviewable artifact. The pre-push
  * hook (.githooks/pre-push) is what hard-blocks main, since only it can see the
  * refs a bare `git push` would actually update.
+ *
+ * The regex list lives in claude-code-policy.ts so the Claude Code
+ * PreToolUse hook and this gate stay on the same list.
  */
-const SHIP_PATTERNS: RegExp[] = [
-  // Landing on main, or rewriting shared history.
-  /\bgit\s+push\b[^|;&]*?(--force|--force-with-lease|\s-f\b)/i,
-  /\bgit\s+push\b[^|;&]*?\b(main|master)\b/i,
-  /\bgh\s+pr\s+merge\b/i,
-  // Publishing artifacts outward.
-  /\bnpm\s+publish\b/i,
-  /\bgh\s+release\s+(create|upload|edit)\b/i,
-  // Deploying locally: packaging, installing over the live app, restarting the
-  // service fleet, or migrating the live store.
-  /\bnpm\s+run\s+(electron:build|migrate)\b/i,
-  /\belectron-builder\b/i,
-  /\b(ditto|cp|rsync|mv|rm)\b[^|;&]*\/Applications\//i,
-  /\blaunchctl\s+(bootstrap|bootout|kickstart|load|unload)\b/i,
-];
 
 /**
  * Bash is special: anything but a recognized read-only command defaults to
@@ -116,7 +105,7 @@ function classifyBash(input: Record<string, unknown>): Tier {
   const DESTRUCTIVE = /\b(rm\s+-rf?\b|git\s+push\s+--force|drop\s+table|shred\b|dd\s+if=)/i;
   const READ_ONLY = /^\s*(ls|cat|grep|rg|find|head|tail|wc|pwd|echo|git\s+(status|log|diff|show))\b/i;
   if (DESTRUCTIVE.test(cmd)) return 4; // irreversible
-  if (SHIP_PATTERNS.some((r) => r.test(cmd))) return 4; // needs the operator (D-01 lock)
+  if (isShipCommand(cmd)) return 4; // needs the operator (D-01 lock)
   if (READ_ONLY.test(cmd)) return 1;
   return 3; // unknown command = ask (D-03 safe default)
 }
