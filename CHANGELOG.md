@@ -2,6 +2,11 @@
 
 All notable changes to ClaudeClaw will be documented here.
 
+## [unreleased] - 2026-09-01
+
+### Fixed — Electron leaves Mission Control dead after the service exits
+- The desktop shell logged `service exited` and cleared the child handle, then did nothing. The SPA stayed on screen and every `/api/*` call became `TypeError: Failed to fetch` / `ERR_CONNECTION_REFUSED`. Respawn the Node service with backoff, reload the dashboard when it binds, and offer Retry on the boot error screen.
+
 ## [unreleased] - 2026-08-13
 
 ### Added — Discord channel
