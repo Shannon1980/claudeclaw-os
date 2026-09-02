@@ -13,6 +13,7 @@ import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
 import { seedBootstrapPairings } from './pairing.js';
 import { initSecurity, setAuditCallback } from './security.js';
 import { logger } from './logger.js';
+import { installProcessGuards } from './process-guards.js';
 import { cleanupOldUploads } from './media.js';
 import { runConsolidation } from './memory-consolidate.js';
 import { runDecaySweep } from './memory.js';
@@ -23,6 +24,8 @@ import { initScheduler } from './scheduler.js';
 import { syncAosCronJobs } from './aos-cron.js';
 import { setTelegramConnected, setSlackConnected, setBotInfo } from './state.js';
 import { killProcess, resolveVenvPython } from './platform.js';
+
+installProcessGuards();
 
 // Parse --agent flag
 const agentFlagIndex = process.argv.indexOf('--agent');

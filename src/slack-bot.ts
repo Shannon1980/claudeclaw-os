@@ -607,6 +607,16 @@ export function createSlackBot(): SlackBot {
     socketMode: true,
   });
 
+  // Socket-mode websocket errors are EventEmitter 'error' events. Bolt's
+  // app.error() does not always receive them, and an unhandled one kills
+  // the process (Mission Control then shows Failed to fetch).
+  const receiver = (app as { receiver?: { on?: (ev: string, fn: (err: unknown) => void) => void } }).receiver;
+  if (typeof receiver?.on === 'function') {
+    receiver.on('error', (err: unknown) => {
+      logger.error({ err }, 'Slack receiver error');
+    });
+  }
+
   let botUserId = '';
   let dmChannelId = ''; // cached IM channel for the configured user
 

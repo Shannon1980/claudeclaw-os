@@ -17,8 +17,20 @@ const { app, BrowserWindow, shell, dialog, ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const net = require('net');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const cfg = require('./config.cjs');
+
+// Child stdio used to vanish in a packaged .app (no terminal). Tee it so a
+// mid-request crash leaves more than ERR_CONNECTION_RESET in DevTools.
+const SERVICE_LOG = path.join(os.tmpdir(), 'claudeclaw-service.log');
+function appendServiceLog(chunk) {
+  try {
+    fs.appendFileSync(SERVICE_LOG, chunk);
+  } catch {
+    /* ignore */
+  }
+}
 
 // ── App root resolution ───────────────────────────────────────────────
 // In dev, the repo is the parent of this electron/ directory. In a packaged
@@ -131,8 +143,14 @@ function startService() {
     env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  serviceProc.stdout.on('data', (b) => process.stdout.write(`[service] ${b}`));
-  serviceProc.stderr.on('data', (b) => process.stderr.write(`[service] ${b}`));
+  serviceProc.stdout.on('data', (b) => {
+    process.stdout.write(`[service] ${b}`);
+    appendServiceLog(b);
+  });
+  serviceProc.stderr.on('data', (b) => {
+    process.stderr.write(`[service] ${b}`);
+    appendServiceLog(b);
+  });
   // `error` (ENOENT) and `exit` can both fire for one failed spawn. Only
   // schedule one respawn so the backoff counter stays honest.
   let gone = false;

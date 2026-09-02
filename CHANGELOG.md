@@ -6,6 +6,7 @@ All notable changes to ClaudeClaw will be documented here.
 
 ### Fixed — Electron leaves Mission Control dead after the service exits
 - The desktop shell logged `service exited` and cleared the child handle, then did nothing. The SPA stayed on screen and every `/api/*` call became `TypeError: Failed to fetch` / `ERR_CONNECTION_REFUSED`. Respawn the Node service with backoff, reload the dashboard when it binds, and offer Retry on the boot error screen.
+- Unhandled promise rejections (Slack socket drops, classifier failures) no longer kill the Node process. They are written to `/tmp/claudeclaw-service-crash.log`. The Electron shell also tees child stdout/stderr to `/tmp/claudeclaw-service.log` so the next crash is not silent.
 
 ## [unreleased] - 2026-08-13
 
